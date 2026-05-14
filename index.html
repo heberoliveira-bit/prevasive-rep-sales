@@ -1,0 +1,2728 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>PreVasive Rep Sales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
+  #root{min-height:100vh}
+  #err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}
+  input,button,select,textarea{font-family:"Inter",system-ui,-apple-system,sans-serif;}
+  ::-webkit-scrollbar{width:4px;height:4px}
+  ::-webkit-scrollbar-thumb{background:#1e2d40;border-radius:2px}
+  ::-webkit-scrollbar-thumb:hover{background:#635bff}
+  @keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head><body>
+<div id="err"></div><div id="root"></div>
+<script id="c0" type="text/plain">
+/* PreVasive Rep Sales CRM — v1 */
+
+/* ─── Constants ──────────────────────────────────────────────────────────── */
+var RETURN_WINDOW_DAYS = 15;
+var TRIAL_DAYS         = 15;
+var REP_PLANS = [
+  {id:"starter", name:"Starter", price:100, ceiling:1000,  desc:"Up to $1,000/mo"},
+  {id:"pro",     name:"Pro",     price:200, ceiling:10000, desc:"Up to $10,000/mo"},
+];
+var ORDER_PIPELINE = ["Submitted","Processing","Shipped","Delivered","Paid"];
+var STATUS_COLOR = {
+  Submitted:{c:"#635bff",bg:"rgba(99,91,255,.12)"},
+  Processing:{c:"#f6ab2f",bg:"rgba(246,171,47,.12)"},
+  Shipped:{c:"#0ea5e9",bg:"rgba(14,165,233,.12)"},
+  Delivered:{c:"#1ea672",bg:"rgba(30,166,114,.12)"},
+  Paid:{c:"#1ea672",bg:"rgba(30,166,114,.22)"},
+  Cancelled:{c:"#df1b41",bg:"rgba(223,27,65,.12)"},
+  Refunded:{c:"#df1b41",bg:"rgba(223,27,65,.12)"},
+};
+
+/* ─── Supabase ───────────────────────────────────────────────────────────── */
+var SUPABASE_URL      = "https://oafmlvotrhfyffjxjkwy.supabase.co";
+var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hZm1sdm90cmhmeWZmanhqa3d5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwODU4NTQsImV4cCI6MjA5MzY2MTg1NH0.sp7W84ywF_E8kRXUdweO9E1If27Aks-Yzyx5GVQvuIk";
+var _sb = null;
+
+function getSB() {
+  if(_sb) return _sb;
+  try {
+    if(window.supabase) {
+      _sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      return _sb;
+    }
+  } catch(e){}
+  return null;
+}
+
+function dbSave(table, id, data) {
+  var sb = getSB(); if(!sb) return;
+  sb.from(table).upsert({id:id,data:data,updated_at:new Date().toISOString()})
+    .then(function(r){if(r.error) console.warn("dbSave:",r.error.message);});
+}
+
+function dbDel(table, id) {
+  var sb = getSB(); if(!sb) return;
+  sb.from(table).delete().eq("id",id)
+    .then(function(r){if(r.error) console.warn("dbDel:",r.error.message);});
+}
+
+function dbLoad(table) {
+  var sb = getSB();
+  if(!sb) return Promise.resolve([]);
+  return sb.from(table).select("data").order("updated_at",{ascending:false})
+    .then(function(r){
+      if(r.error){console.warn("dbLoad ["+table+"]:",r.error.message);return [];}
+      return (r.data||[]).map(function(row){return row.data;}).filter(Boolean);
+    })
+    .catch(function(e){console.warn("dbLoad ["+table+"] fetch error:",e.message);return [];});
+}
+
+/* ─── Theme ──────────────────────────────────────────────────────────────── */
+var THEMES = {
+  dark: {
+    bg:"#09111f", surface:"#0d1826", surface2:"#121f30", border:"#1e2d40",
+    accent:"#635bff", gold:"#f6ab2f", success:"#1ea672", warning:"#f6ab2f",
+    danger:"#df1b41", text:"#f0f4ff", muted:"#8494a8", dim:"#4a5d70",
+  },
+  light: {
+    bg:"#f6f9fc", surface:"#ffffff", surface2:"#f0f4f8", border:"#e3e8ee",
+    accent:"#635bff", gold:"#d4991a", success:"#0e7055", warning:"#d4991a",
+    danger:"#df1b41", text:"#0a1929", muted:"#4f6b8a", dim:"#97a8b7",
+  },
+};
+var C = Object.assign({}, THEMES.dark);
+
+/* ─── Hooks ──────────────────────────────────────────────────────────────── */
+function useLS(key, def) {
+  var raw = localStorage.getItem("__pv__"+key);
+  var init = raw ? JSON.parse(raw) : def;
+  var result = useState(init);
+  var v = result[0]; var setVRaw = result[1];
+  var setV = useCallback(function(x){
+    var val = typeof x === "function" ? x(v) : x;
+    localStorage.setItem("__pv__"+key, JSON.stringify(val));
+    setVRaw(val);
+  }, [v, key]);
+  return [v, setV];
+}
+
+function genId(prefix) {
+  return (prefix||"id")+"_"+Math.random().toString(36).slice(2,9);
+}
+
+function fmtMoney(n) {
+  return "$"+(parseFloat(n)||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
+}
+
+function fmtDate(d) {
+  if(!d) return "—";
+  return new Date(d).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+}
+
+/* ─── UI Primitives ──────────────────────────────────────────────────────── */
+function Btn({children,onClick,disabled,variant,small,icon,fullWidth}) {
+  var styles = {
+    primary: {background:"#635bff",color:"#fff",border:"none",boxShadow:"0 1px 8px rgba(99,91,255,.4)"},
+    danger:  {background:C.danger, color:"#fff",border:"none"},
+    ghost:   {background:"transparent",color:C.muted,border:"1px solid "+C.border},
+    success: {background:C.success,color:"#fff",border:"none"},
+    outline: {background:"transparent",color:C.accent,border:"1px solid "+C.accent},
+  };
+  var s = styles[variant||"primary"];
+  return (
+    <button onClick={onClick} disabled={disabled}
+      style={Object.assign({},s,{
+        padding:small?"5px 12px":"9px 20px",
+        borderRadius:6,cursor:disabled?"not-allowed":"pointer",
+        opacity:disabled?0.55:1,fontFamily:"inherit",fontWeight:600,
+        fontSize:small?11:13,letterSpacing:"-.01em",
+        display:"inline-flex",alignItems:"center",gap:6,
+        width:fullWidth?"100%":undefined,justifyContent:fullWidth?"center":undefined,
+        transition:"opacity .15s"
+      })}>
+      {children}
+    </button>
+  );
+}
+
+function Field({label,value,onChange,type,placeholder,readOnly,children,hint}) {
+  var inp = Object.assign({
+    width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+    padding:"9px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
+    boxSizing:"border-box",outline:"none",
+  }, readOnly ? {opacity:0.6,cursor:"default"} : {});
+  return (
+    <div style={{marginBottom:14}}>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5,letterSpacing:"-.01em"}}>{label}</div>}
+      {children||(
+        <input value={value||""} onChange={onChange?function(e){onChange(e.target.value);}:undefined}
+          type={type||"text"} placeholder={placeholder||""} readOnly={!!readOnly} style={inp}/>
+      )}
+      {hint&&<div style={{fontSize:11,color:C.dim,marginTop:4}}>{hint}</div>}
+    </div>
+  );
+}
+
+function TextArea({label,value,onChange,rows,placeholder}) {
+  return (
+    <div style={{marginBottom:14}}>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label}</div>}
+      <textarea value={value||""} onChange={onChange?function(e){onChange(e.target.value);}:undefined}
+        rows={rows||4} placeholder={placeholder||""}
+        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                padding:"9px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
+                boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.6}}/>
+    </div>
+  );
+}
+
+function Drop({label,value,onChange,opts,hint}) {
+  return (
+    <div style={{marginBottom:14}}>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label}</div>}
+      <select value={value||""} onChange={function(e){if(onChange)onChange(e.target.value);}}
+        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                padding:"9px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
+                boxSizing:"border-box",outline:"none",cursor:"pointer"}}>
+        {(opts||[]).map(function(o){
+          var v=typeof o==="object"?o.v:o; var l=typeof o==="object"?o.label:o;
+          return <option key={v} value={v}>{l}</option>;
+        })}
+      </select>
+      {hint&&<div style={{fontSize:11,color:C.dim,marginTop:4}}>{hint}</div>}
+    </div>
+  );
+}
+
+function Modal({title,onClose,children,footer,wide}) {
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.82)",backdropFilter:"blur(6px)",
+                 zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+         onClick={function(e){if(e.target===e.currentTarget&&onClose)onClose();}}>
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,
+                   width:"100%",maxWidth:wide?900:580,maxHeight:"90vh",display:"flex",
+                   flexDirection:"column",boxShadow:"0 24px 80px rgba(0,0,0,.5)"}}>
+        <div style={{padding:"18px 22px 16px",borderBottom:"1px solid "+C.border,
+                     display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div style={{fontWeight:700,fontSize:16,color:C.text,letterSpacing:"-.02em"}}>{title}</div>
+          {onClose&&<button onClick={onClose} style={{background:"none",border:"none",color:C.dim,
+                     cursor:"pointer",fontSize:20,lineHeight:1,padding:"2px 6px"}}>×</button>}
+        </div>
+        <div style={{padding:"20px 22px",overflowY:"auto",flex:1}}>{children}</div>
+        {footer&&<div style={{padding:"14px 22px",borderTop:"1px solid "+C.border,flexShrink:0}}>{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+function Badge({status}) {
+  var meta = STATUS_COLOR[status]||{c:C.muted,bg:C.surface2};
+  return (
+    <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:700,
+                  background:meta.bg,color:meta.c,textTransform:"uppercase",
+                  letterSpacing:".04em",whiteSpace:"nowrap"}}>
+      {status}
+    </span>
+  );
+}
+
+function Avatar({name,size}) {
+  var sz = size||32;
+  var initials = (name||"?").split(" ").map(function(w){return w[0];}).slice(0,2).join("").toUpperCase();
+  return (
+    <div style={{width:sz,height:sz,borderRadius:"50%",background:C.accent+"22",
+                 display:"flex",alignItems:"center",justifyContent:"center",
+                 color:C.accent,fontSize:sz*0.38,fontWeight:700,flexShrink:0}}>
+      {initials}
+    </div>
+  );
+}
+
+function EmptyState({icon,title,subtitle,action}) {
+  return (
+    <div style={{textAlign:"center",padding:"56px 24px"}}>
+      <div style={{fontSize:40,marginBottom:16}}>{icon||"📭"}</div>
+      <div style={{fontWeight:700,fontSize:16,color:C.text,marginBottom:8,letterSpacing:"-.01em"}}>{title}</div>
+      {subtitle&&<div style={{fontSize:13,color:C.muted,marginBottom:20,maxWidth:320,margin:"0 auto 20px"}}>{subtitle}</div>}
+      {action&&action}
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",padding:40}}>
+      <div style={{width:24,height:24,border:"2px solid "+C.border,borderTopColor:C.accent,
+                   borderRadius:"50%",animation:"spin .7s linear infinite"}}/>
+    </div>
+  );
+}
+
+function KpiCard({label,value,sub,color}) {
+  return (
+    <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"18px 20px"}}>
+      <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",
+                   letterSpacing:".07em",marginBottom:8}}>{label}</div>
+      <div style={{fontSize:26,fontWeight:800,color:color||C.text,fontFamily:"monospace",
+                   letterSpacing:"-.02em",marginBottom:4}}>{value}</div>
+      {sub&&<div style={{fontSize:11,color:C.dim}}>{sub}</div>}
+    </div>
+  );
+}
+
+/* ─── Toast + Result Modal ───────────────────────────────────────────────── */
+function ToastStack({toasts,setToasts}) {
+  if(!toasts||!toasts.length) return null;
+  return (
+    <div style={{position:"fixed",bottom:24,right:24,zIndex:5000,
+                 display:"flex",flexDirection:"column-reverse",gap:8,pointerEvents:"none"}}>
+      {toasts.map(function(t){
+        var col = {success:C.success,error:C.danger,warning:C.warning,info:C.accent}[t.type]||C.accent;
+        return (
+          <div key={t.id} style={{pointerEvents:"all",display:"flex",alignItems:"flex-start",gap:10,
+                                   padding:"12px 16px",borderRadius:10,minWidth:280,maxWidth:380,
+                                   background:C.surface,border:"1px solid "+col+"40",
+                                   boxShadow:"0 8px 32px rgba(0,0,0,.3)",animation:"slideIn .2s ease"}}>
+            <div style={{width:7,height:7,borderRadius:"50%",background:col,flexShrink:0,marginTop:5}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.text,lineHeight:1.4}}>{t.msg}</div>
+              {t.detail&&<div style={{fontSize:11,color:C.muted,marginTop:2}}>{t.detail}</div>}
+            </div>
+            <button onClick={function(){setToasts(function(prev){return prev.filter(function(x){return x.id!==t.id;});});}}
+              style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:16,padding:0}}>×</button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ResultModal({data,onClose}) {
+  if(!data) return null;
+  var icons = {order:"📦",email:"✉️",payment:"💳",commission:"💰",rep:"🤝",success:"✓",error:"⚠️"};
+  var col = data.type==="error"?C.danger:C.success;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.75)",backdropFilter:"blur(6px)",
+                 zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
+         onClick={function(e){if(e.target===e.currentTarget)onClose();}}>
+      <div style={{background:C.surface,border:"1px solid "+col+"30",borderRadius:14,
+                   padding:"32px 28px",maxWidth:420,width:"100%",
+                   boxShadow:"0 24px 60px rgba(0,0,0,.5)",textAlign:"center"}}>
+        <div style={{width:52,height:52,borderRadius:"50%",background:col+"15",border:"2px solid "+col+"30",
+                     display:"flex",alignItems:"center",justifyContent:"center",
+                     fontSize:22,margin:"0 auto 16px"}}>{icons[data.type]||"✓"}</div>
+        <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6,letterSpacing:"-.02em"}}>{data.title}</div>
+        {data.subtitle&&<div style={{fontSize:13,color:C.muted,marginBottom:16,lineHeight:1.6}}>{data.subtitle}</div>}
+        {data.rows&&(
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:20,textAlign:"left"}}>
+            {data.rows.map(function(row,i){return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                   padding:"4px 0",borderBottom:i<data.rows.length-1?"1px solid "+C.border:"none"}}>
+                <span style={{color:C.muted}}>{row[0]}</span>
+                <span style={{fontWeight:600,color:C.text}}>{row[1]}</span>
+              </div>
+            );})}
+          </div>
+        )}
+        {data.nextStep&&(
+          <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"20",
+                       borderRadius:8,marginBottom:20,fontSize:12,color:C.accent,fontWeight:500}}>
+            {data.nextStep}
+          </div>
+        )}
+        <Btn onClick={onClose} fullWidth={true}>{data.cta||"Done"}</Btn>
+      </div>
+    </div>
+  );
+}
+
+/* ─── AppLanding ─────────────────────────────────────────────────────────── */
+function ApplyForm({onSubmit,onCancel}) {
+  const [name,    setName]    = useState("");
+  const [company, setCompany] = useState("");
+  const [email,   setEmail]   = useState("");
+  const [err,     setErr]     = useState("");
+  var inp = {width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",
+             borderRadius:6,padding:"9px 12px",color:"#f0f4ff",fontSize:13,
+             fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
+  function submit() {
+    if(!name.trim()||!email.trim()){setErr("Name and email are required.");return;}
+    onSubmit({name:name.trim(),company:company.trim(),email:email.trim(),role:"rep"});
+  }
+  return (
+    <div>
+      {err&&<div style={{padding:"8px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:12}}>{err}</div>}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>Full Name *</div>
+          <input value={name} onChange={function(e){setName(e.target.value);}} placeholder="Jane Smith" style={inp}/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>Company</div>
+          <input value={company} onChange={function(e){setCompany(e.target.value);}} placeholder="Optional" style={inp}/>
+        </div>
+      </div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>Email *</div>
+        <input value={email} onChange={function(e){setEmail(e.target.value);}} type="email" placeholder="you@company.com" style={inp}/>
+      </div>
+      <button onClick={submit}
+        style={{width:"100%",padding:"10px",borderRadius:6,border:"none",background:"#635bff",
+                color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
+                boxShadow:"0 2px 10px rgba(99,91,255,.4)",marginBottom:10,letterSpacing:"-.01em"}}>
+        Submit Application
+      </button>
+      <button onClick={onCancel}
+        style={{width:"100%",padding:"9px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                background:"transparent",color:"rgba(240,244,255,.4)",cursor:"pointer",
+                fontFamily:"inherit",fontWeight:500,fontSize:13}}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+function AppLanding({onLogin}) {
+  const [showSignIn,  setShowSignIn]  = useState(false);
+  const [showReg,     setShowReg]     = useState(false);
+  const [siEmail,     setSiEmail]     = useState("");
+  const [siPass,      setSiPass]      = useState("");
+  const [siErr,       setSiErr]       = useState("");
+  const [regDone,     setRegDone]     = useState(false);
+  const [resetMode,   setResetMode]   = useState(false);
+  const [newPass,     setNewPass]     = useState("");
+  const [newPass2,    setNewPass2]    = useState("");
+  const [resetErr,    setResetErr]    = useState("");
+  const [resetDone,   setResetDone]   = useState(false);
+  const [resetBusy,   setResetBusy]   = useState(false);
+  const [signingIn,   setSigningIn]   = useState(false);
+
+  useEffect(function() {
+    var hash = window.location.hash||"";
+    if(hash.indexOf("type=recovery")>=0 && hash.indexOf("access_token")>=0) {
+      var sb = getSB();
+      if(sb) {
+        sb.auth.getSession().then(function(r){
+          if(r.data&&r.data.session) setResetMode(true);
+        });
+      }
+    }
+  }, []);
+
+  function handleSignIn() {
+    if(!siEmail||!siPass){setSiErr("Email and password are required.");return;}
+    var sb = getSB();
+    if(!sb){setSiErr("Connection error — check your internet connection and try again.");return;}
+    setSigningIn(true); setSiErr("");
+    sb.auth.signInWithPassword({email:siEmail,password:siPass})
+      .then(function(r){
+        setSigningIn(false);
+        if(r.error){setSiErr(r.error.message);return;}
+        var uid = r.data&&r.data.user&&r.data.user.id;
+        if(!uid){setSiErr("Login failed.");return;}
+        return sb.from("crm_users").select("*").eq("id",uid).single()
+          .then(function(ur){
+            if(!ur.data){setSiErr("Account not configured. Ask admin to add your user profile.");return;}
+            onLogin(Object.assign({},ur.data,{email:r.data.user.email}));
+          });
+      })
+      .catch(function(err){
+        setSigningIn(false);
+        if(err.message&&err.message.indexOf("fetch")>=0) {
+          setSiErr("Cannot connect to server. Make sure you are accessing this app from its hosted URL (not a local file).");
+        } else {
+          setSiErr(err.message||"Sign in error");
+        }
+      });
+  }
+
+  function handleReset() {
+    if(!newPass.trim()){setResetErr("Enter a new password.");return;}
+    if(newPass.length<8){setResetErr("Password must be at least 8 characters.");return;}
+    if(newPass!==newPass2){setResetErr("Passwords do not match.");return;}
+    var sb = getSB();
+    if(!sb){setResetErr("Service unavailable.");return;}
+    setResetBusy(true); setResetErr("");
+    sb.auth.updateUser({password:newPass})
+      .then(function(r){
+        setResetBusy(false);
+        if(r.error){setResetErr(r.error.message);return;}
+        setResetDone(true);
+        if(window.history) window.history.replaceState(null,"",window.location.pathname);
+      })
+      .catch(function(err){setResetBusy(false);setResetErr(err.message||"Error");});
+  }
+
+  var navStyle = {
+    position:"fixed",top:0,left:0,right:0,zIndex:100,
+    borderBottom:"1px solid rgba(255,255,255,.06)",
+    background:"rgba(9,17,31,.96)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)"
+  };
+
+  if(resetMode) return (
+    <div style={{minHeight:"100vh",background:"#09111f",display:"flex",alignItems:"center",
+                 justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
+      <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,
+                   padding:"40px 36px",width:"100%",maxWidth:400,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
+        {resetDone ? (
+          <div style={{textAlign:"center"}}>
+            <div style={{width:52,height:52,borderRadius:"50%",background:"rgba(30,166,114,.15)",
+                         display:"flex",alignItems:"center",justifyContent:"center",
+                         fontSize:22,margin:"0 auto 18px"}}>✓</div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:8,color:"#f0f4ff",letterSpacing:"-.02em"}}>Password Updated</div>
+            <div style={{fontSize:13,color:"rgba(240,244,255,.4)",marginBottom:24,lineHeight:1.6}}>You can now sign in with your new password.</div>
+            <button onClick={function(){setResetMode(false);setResetDone(false);setNewPass("");setNewPass2("");setShowSignIn(true);}}
+              style={{padding:"10px 28px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
+                      cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,letterSpacing:"-.01em"}}>
+              Sign In
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:6,color:"#f0f4ff",letterSpacing:"-.02em"}}>Set new password</div>
+            <div style={{fontSize:13,color:"rgba(240,244,255,.4)",marginBottom:22}}>Minimum 8 characters.</div>
+            {resetErr&&<div style={{padding:"9px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:14}}>{resetErr}</div>}
+            {["New Password","Confirm Password"].map(function(label,i){
+              var val = i===0?newPass:newPass2;
+              var set = i===0?setNewPass:setNewPass2;
+              var invalid = i===1&&newPass2&&newPass!==newPass2;
+              return (
+                <div key={label} style={{marginBottom:12}}>
+                  <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>{label}</div>
+                  <input value={val} onChange={function(e){set(e.target.value);}}
+                    type="password" placeholder="••••••••"
+                    onKeyDown={i===1?function(e){if(e.key==="Enter")handleReset();}:undefined}
+                    style={{width:"100%",background:"rgba(255,255,255,.04)",
+                            border:"1px solid "+(invalid?"rgba(223,27,65,.5)":"rgba(255,255,255,.1)"),
+                            borderRadius:6,padding:"9px 12px",color:"#f0f4ff",fontSize:13,
+                            fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  {invalid&&<div style={{fontSize:10,color:"#df1b41",marginTop:3}}>Passwords do not match</div>}
+                </div>
+              );
+            })}
+            <div style={{marginTop:18}}>
+              <button onClick={handleReset} disabled={resetBusy}
+                style={{width:"100%",padding:"10px",borderRadius:6,border:"none",
+                        background:resetBusy?"#4a4485":"#635bff",color:"#fff",
+                        cursor:resetBusy?"not-allowed":"pointer",fontFamily:"inherit",
+                        fontWeight:600,fontSize:14,letterSpacing:"-.01em",marginBottom:10}}>
+                {resetBusy?"Updating…":"Update Password"}
+              </button>
+              <button onClick={function(){setResetMode(false);window.history.replaceState(null,"",window.location.pathname);}}
+                style={{width:"100%",padding:"9px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                        background:"transparent",color:"rgba(240,244,255,.4)",cursor:"pointer",
+                        fontFamily:"inherit",fontWeight:500,fontSize:12}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:"#09111f",fontFamily:"'Inter',system-ui,sans-serif",color:"#f0f4ff",overflowX:"hidden"}}>
+      <nav style={navStyle}>
+        <div style={{maxWidth:1080,margin:"0 auto",padding:"0 28px",height:58,
+                     display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:26,height:26,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>P</div>
+            <span style={{fontWeight:700,fontSize:15,letterSpacing:"-.02em"}}>PreVasive</span>
+            <span style={{fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:4,background:"rgba(99,91,255,.15)",color:"#a49dff",letterSpacing:".04em"}}>REP SALES</span>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={function(){setSiErr("");setShowSignIn(true);}}
+              style={{padding:"6px 16px",borderRadius:6,border:"1px solid rgba(255,255,255,.15)",
+                      background:"transparent",color:"rgba(255,255,255,.85)",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:500,fontSize:13}}>
+              Sign in
+            </button>
+            <button onClick={function(){setRegDone(false);setShowReg(true);}}
+              style={{padding:"6px 16px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
+                      cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13,
+                      boxShadow:"0 2px 8px rgba(99,91,255,.4)"}}>
+              Apply to Join
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* Hero */}
+      <div style={{position:"relative",minHeight:"100vh",display:"flex",alignItems:"center",
+                   justifyContent:"center",textAlign:"center",paddingTop:58,overflow:"hidden"}}>
+        <div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
+          <div style={{position:"absolute",top:"-5%",left:"50%",transform:"translateX(-50%)",
+                       width:700,height:500,background:"radial-gradient(ellipse,rgba(99,91,255,.18) 0%,transparent 70%)",borderRadius:"50%"}}/>
+          <div style={{position:"absolute",top:"20%",right:"-5%",width:350,height:350,
+                       background:"radial-gradient(ellipse,rgba(0,180,255,.09) 0%,transparent 70%)",borderRadius:"50%"}}/>
+        </div>
+        <div style={{maxWidth:680,padding:"0 28px",position:"relative",zIndex:1}}>
+          <div style={{display:"inline-flex",alignItems:"center",gap:7,padding:"4px 12px",
+                       borderRadius:20,marginBottom:24,background:"rgba(99,91,255,.1)",
+                       border:"1px solid rgba(99,91,255,.25)"}}>
+            <div style={{width:5,height:5,borderRadius:"50%",background:"#635bff"}}/>
+            <span style={{fontSize:11,fontWeight:500,color:"#a49dff"}}>Sales rep platform · PreVasive USA</span>
+          </div>
+          <h1 style={{fontSize:"clamp(34px,5vw,60px)",fontWeight:700,lineHeight:1.1,
+                       letterSpacing:"-.03em",margin:"0 0 20px",
+                       background:"linear-gradient(135deg,#fff 35%,rgba(255,255,255,.55) 100%)",
+                       WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
+            Your sales.<br/>Fully managed.
+          </h1>
+          <p style={{fontSize:"clamp(14px,2vw,17px)",color:"rgba(240,244,255,.5)",lineHeight:1.7,
+                     margin:"0 auto 32px",maxWidth:460,fontWeight:400}}>
+            Place orders, track commissions, manage your customers — all in one clean platform built for PreVasive sales reps.
+          </p>
+          <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap",marginBottom:48}}>
+            <button onClick={function(){setRegDone(false);setShowReg(true);}}
+              style={{padding:"12px 28px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
+                      cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
+                      boxShadow:"0 4px 20px rgba(99,91,255,.45)",letterSpacing:"-.01em"}}>
+              Apply to Join →
+            </button>
+            <button onClick={function(){setSiErr("");setShowSignIn(true);}}
+              style={{padding:"12px 24px",borderRadius:6,border:"1px solid rgba(255,255,255,.18)",
+                      background:"rgba(255,255,255,.04)",color:"rgba(255,255,255,.85)",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:500,fontSize:14}}>
+              Sign In
+            </button>
+          </div>
+          <div style={{display:"flex",justifyContent:"center",borderTop:"1px solid rgba(255,255,255,.07)",paddingTop:28}}>
+            {["Orders tracked end-to-end","Commissions automated","15-day trial free"].map(function(item,i){return (
+              <div key={i} style={{flex:1,maxWidth:200,borderRight:i<2?"1px solid rgba(255,255,255,.07)":"none",
+                                   padding:"0 20px",textAlign:"center"}}>
+                <div style={{fontSize:11,color:"rgba(240,244,255,.35)",lineHeight:1.5}}>{item}</div>
+              </div>
+            );})}
+          </div>
+        </div>
+      </div>
+
+      {/* Features */}
+      <div style={{borderTop:"1px solid rgba(255,255,255,.06)",background:"rgba(255,255,255,.015)",padding:"56px 28px"}}>
+        <div style={{maxWidth:960,margin:"0 auto"}}>
+          <div style={{textAlign:"center",marginBottom:40}}>
+            <div style={{fontSize:10,fontWeight:600,color:"#635bff",textTransform:"uppercase",letterSpacing:".1em",marginBottom:8}}>Platform</div>
+            <h2 style={{fontSize:"clamp(20px,3vw,30px)",fontWeight:700,letterSpacing:"-.025em",margin:0,color:"#f0f4ff"}}>Built for PreVasive reps</h2>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:1,background:"rgba(255,255,255,.06)",borderRadius:12,overflow:"hidden"}}>
+            {[
+              ["📦","Order Management","Place and track orders from quote to delivery with full status visibility."],
+              ["💸","Commission Tracking","Real-time commission calculation with 15-day return window protection."],
+              ["👥","Customer Management","Manage your entire customer book in one place with full order history."],
+              ["📋","Compliance Built-in","W-9 collection, rep agreement, and 1099-NEC download included."],
+              ["🔔","Subscription Plans","Starter and Pro plans with commission ceilings. 15-day free trial."],
+              ["📊","Your Dashboard","At-a-glance view of your pipeline, earnings, and customer activity."],
+            ].map(function(f,i){return (
+              <div key={i} style={{padding:"24px",background:"#09111f"}}>
+                <div style={{fontSize:20,marginBottom:12}}>{f[0]}</div>
+                <div style={{fontWeight:600,fontSize:13,color:"#f0f4ff",marginBottom:6,letterSpacing:"-.01em"}}>{f[1]}</div>
+                <div style={{fontSize:12,color:"rgba(240,244,255,.38)",lineHeight:1.6}}>{f[2]}</div>
+              </div>
+            );})}
+          </div>
+        </div>
+      </div>
+
+      {/* CTA */}
+      <div style={{padding:"60px 28px",textAlign:"center",
+                   background:"linear-gradient(135deg,rgba(99,91,255,.1) 0%,rgba(0,119,255,.04) 100%)",
+                   borderTop:"1px solid rgba(99,91,255,.12)"}}>
+        <h2 style={{fontSize:"clamp(20px,3vw,32px)",fontWeight:700,letterSpacing:"-.025em",margin:"0 0 12px",color:"#f0f4ff"}}>Ready to start selling?</h2>
+        <p style={{fontSize:14,color:"rgba(240,244,255,.4)",margin:"0 0 24px"}}>Apply to become a PreVasive authorized sales rep.</p>
+        <button onClick={function(){setRegDone(false);setShowReg(true);}}
+          style={{padding:"12px 32px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
+                  cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
+                  boxShadow:"0 4px 20px rgba(99,91,255,.4)"}}>
+          Apply to Join
+        </button>
+      </div>
+
+      {/* Footer */}
+      <div style={{padding:"20px 28px",borderTop:"1px solid rgba(255,255,255,.06)",
+                   display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div style={{display:"flex",alignItems:"center",gap:7}}>
+          <div style={{width:18,height:18,borderRadius:4,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900,color:"#fff"}}>P</div>
+          <span style={{fontSize:11,color:"rgba(240,244,255,.25)",fontWeight:500}}>PreVasive Rep Sales · All rights reserved</span>
+        </div>
+        <span style={{fontSize:11,color:"rgba(240,244,255,.25)"}}>Powered by PreVasive</span>
+      </div>
+
+      {/* Sign In Modal */}
+      {showSignIn&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.88)",backdropFilter:"blur(8px)",
+                     zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,
+                       padding:"36px",width:"100%",maxWidth:380,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:22}}>
+              <div style={{width:24,height:24,borderRadius:5,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:"#fff"}}>P</div>
+              <span style={{fontWeight:700,fontSize:15,letterSpacing:"-.02em",color:"#f0f4ff"}}>PreVasive Rep Sales</span>
+            </div>
+            <div style={{fontSize:19,fontWeight:700,marginBottom:5,letterSpacing:"-.02em",color:"#f0f4ff"}}>Sign in</div>
+            <div style={{fontSize:12,color:"rgba(240,244,255,.35)",marginBottom:20}}>Enter your credentials to continue</div>
+            {siErr&&<div style={{padding:"9px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:14}}>{siErr}</div>}
+            <div style={{marginBottom:11}}>
+              <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.5)",marginBottom:4}}>Email</div>
+              <input value={siEmail} onChange={function(e){setSiEmail(e.target.value);}} type="email" placeholder="you@company.com"
+                style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",
+                        borderRadius:6,padding:"9px 11px",color:"#f0f4ff",fontSize:13,
+                        fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+            <div style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.5)",marginBottom:4}}>Password</div>
+              <input value={siPass} onChange={function(e){setSiPass(e.target.value);}} type="password" placeholder="••••••••"
+                onKeyDown={function(e){if(e.key==="Enter")handleSignIn();}}
+                style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",
+                        borderRadius:6,padding:"9px 11px",color:"#f0f4ff",fontSize:13,
+                        fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+            <button onClick={handleSignIn} disabled={signingIn}
+              style={{width:"100%",padding:"10px",borderRadius:6,border:"none",
+                      background:signingIn?"#4a4485":"#635bff",color:"#fff",cursor:signingIn?"not-allowed":"pointer",
+                      fontFamily:"inherit",fontWeight:600,fontSize:14,letterSpacing:"-.01em",marginBottom:10}}>
+              {signingIn?"Signing in…":"Sign in →"}
+            </button>
+            <button onClick={function(){setShowSignIn(false);}}
+              style={{width:"100%",padding:"9px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
+                      background:"transparent",color:"rgba(240,244,255,.4)",cursor:"pointer",
+                      fontFamily:"inherit",fontWeight:500,fontSize:12}}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Apply Modal */}
+      {showReg&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.88)",backdropFilter:"blur(8px)",
+                     zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,
+                       padding:"36px",width:"100%",maxWidth:400,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
+            {regDone ? (
+              <div style={{textAlign:"center",padding:"8px 0"}}>
+                <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(30,166,114,.15)",
+                             display:"flex",alignItems:"center",justifyContent:"center",
+                             fontSize:20,margin:"0 auto 14px"}}>✓</div>
+                <div style={{fontSize:18,fontWeight:700,marginBottom:8,color:"#f0f4ff",letterSpacing:"-.02em"}}>Application received</div>
+                <div style={{fontSize:12,color:"rgba(240,244,255,.38)",marginBottom:22,lineHeight:1.6}}>
+                  Under review. You will receive an invite email once approved.
+                </div>
+                <button onClick={function(){setShowReg(false);}}
+                  style={{padding:"9px 24px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
+                          cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13}}>Done</button>
+              </div>
+            ) : (
+              <div>
+                <div style={{fontSize:18,fontWeight:700,marginBottom:5,color:"#f0f4ff",letterSpacing:"-.02em"}}>Apply to join</div>
+                <div style={{fontSize:12,color:"rgba(240,244,255,.35)",marginBottom:20}}>Submit your information to apply as a sales rep.</div>
+                <ApplyForm onSubmit={function(data){
+                  var sb = getSB();
+                  if(sb) {
+                    sb.from("crm_applications").upsert({
+                      id:"app_"+Date.now(), data:Object.assign({},data,{submittedAt:new Date().toISOString(),status:"pending"}),
+                      updated_at:new Date().toISOString()
+                    });
+                  }
+                  setRegDone(true);
+                }} onCancel={function(){setShowReg(false);}}/>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Sidebar Shell ──────────────────────────────────────────────────────── */
+
+</script>
+<script id="c1" type="text/plain">
+function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme}) {
+  var isAdmin = user&&user.role==="admin";
+  return (
+    <div style={{width:220,flexShrink:0,background:"linear-gradient(180deg,#0a1525 0%,#09111f 100%)",
+                 borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",
+                 height:"100vh",position:"sticky",top:0,overflowY:"auto"}}>
+      {/* Logo */}
+      <div style={{padding:"18px 16px 14px",borderBottom:"1px solid "+C.border}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:26,height:26,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>P</div>
+          <div>
+            <div style={{fontWeight:700,fontSize:13,letterSpacing:"-.02em",color:C.text}}>PreVasive</div>
+            <div style={{fontSize:9,color:"#a49dff",fontWeight:600,letterSpacing:".03em"}}>REP SALES</div>
+          </div>
+        </div>
+      </div>
+      {/* User */}
+      <div style={{padding:"12px 14px",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10}}>
+        <Avatar name={user&&user.name} size={30}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user&&user.name}</div>
+          <div style={{fontSize:10,color:C.dim,textTransform:"capitalize"}}>{user&&user.role}</div>
+        </div>
+        <div style={{width:7,height:7,borderRadius:"50%",background:C.success,flexShrink:0}}/>
+      </div>
+      {/* Nav */}
+      <nav style={{flex:1,padding:"10px 8px"}}>
+        {modules.map(function(m){
+          if(m.divider) return <div key={m.id} style={{height:1,background:C.border,margin:"8px 6px"}} />;
+          if(m.label&&!m.id) return <div key={m.label} style={{fontSize:9,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:".08em",padding:"8px 8px 4px"}}>{m.label}</div>;
+          var isActive = active===m.id;
+          return (
+            <button key={m.id} onClick={function(){onNav(m.id);}}
+              style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"none",
+                      background:isActive?"rgba(99,91,255,.12)":"transparent",
+                      color:isActive?C.accent:C.muted,cursor:"pointer",fontFamily:"inherit",
+                      fontWeight:isActive?600:400,fontSize:13,
+                      display:"flex",alignItems:"center",gap:9,textAlign:"left",
+                      borderLeft:isActive?"2px solid "+C.accent:"2px solid transparent",
+                      marginBottom:2,letterSpacing:"-.01em",transition:"all .12s"}}>
+              <span style={{fontSize:15,opacity:isActive?1:.7}}>{m.icon}</span>
+              {m.name}
+            </button>
+          );
+        })}
+      </nav>
+      {/* Bottom */}
+      <div style={{padding:"10px 8px",borderTop:"1px solid "+C.border}}>
+        <button onClick={onToggleTheme}
+          style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"none",
+                  background:"transparent",color:C.dim,cursor:"pointer",fontFamily:"inherit",
+                  fontSize:12,display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+          <span>{theme==="dark"?"☀️":"🌙"}</span>
+          {theme==="dark"?"Light Mode":"Dark Mode"}
+        </button>
+        <button onClick={onLogout}
+          style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"none",
+                  background:"transparent",color:C.dim,cursor:"pointer",fontFamily:"inherit",
+                  fontSize:12,display:"flex",alignItems:"center",gap:8}}>
+          <span>↩</span> Sign Out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PageHeader({title,subtitle,action}) {
+  return (
+    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",
+                 marginBottom:24,flexWrap:"wrap",gap:12}}>
+      <div>
+        <h1 style={{fontSize:22,fontWeight:700,color:C.text,letterSpacing:"-.025em",margin:0}}>{title}</h1>
+        {subtitle&&<div style={{fontSize:13,color:C.muted,marginTop:4}}>{subtitle}</div>}
+      </div>
+      {action&&<div>{action}</div>}
+    </div>
+  );
+}
+
+/* ─── Admin Dashboard ────────────────────────────────────────────────────── */
+function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
+  var now = Date.now();
+  var totalRevenue = orders.filter(function(o){return o.status==="Paid";})
+    .reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+  var pendingComm = orders.filter(function(o){
+    if(!o.deliveredAt) return false;
+    if(o.status==="Cancelled"||o.status==="Refunded") return false;
+    return (now-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var releasedComm = orders.filter(function(o){
+    if(!o.deliveredAt) return false;
+    if(o.status==="Cancelled"||o.status==="Refunded") return false;
+    return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var activeReps = reps.filter(function(r){return r.status==="active";}).length;
+  var recentOrders = orders.slice(0,5);
+
+  return (
+    <div>
+      <PageHeader title="Dashboard" subtitle="Overview of your rep sales platform"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14,marginBottom:28}}>
+        <KpiCard label="Total Revenue" value={fmtMoney(totalRevenue)} sub="All paid orders" color={C.success}/>
+        <KpiCard label="Active Reps" value={activeReps} sub={reps.length+" total"} color={C.accent}/>
+        <KpiCard label="Total Orders" value={orders.length} sub={orders.filter(function(o){return o.status==="Submitted";}).length+" pending"} color={C.text}/>
+        <KpiCard label="Commission Due" value={fmtMoney(releasedComm)} sub={fmtMoney(pendingComm)+" held"} color={C.gold}/>
+      </div>
+
+      {/* Recent Orders */}
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:20}}>
+        <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontWeight:700,fontSize:14,color:C.text}}>Recent Orders</div>
+          <button onClick={function(){onNav("orders");}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>View all →</button>
+        </div>
+        {recentOrders.length===0 ? (
+          <div style={{padding:"32px",textAlign:"center",color:C.dim,fontSize:13}}>No orders yet</div>
+        ) : (
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:C.surface2}}>
+              {["Order","Rep","Customer","Total","Status"].map(function(h){return (
+                <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+              );})}
+            </tr></thead>
+            <tbody>
+              {recentOrders.map(function(o){return (
+                <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                  <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",color:C.accent,fontWeight:600}}>{o.id}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,color:C.muted}}>{o.repName||"—"}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.text}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                  <td style={{padding:"10px 16px"}}><Badge status={o.status}/></td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Quick stats row */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"18px 20px"}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:14}}>Rep Subscription MRR</div>
+          {(function(){
+            var mrr = reps.filter(function(r){return r.subscriptionStatus==="active";})
+              .reduce(function(s,r){var p=REP_PLANS.find(function(x){return x.id===r.planId;});return s+(p?p.price:0);},0);
+            var starters = reps.filter(function(r){return r.planId==="starter"&&r.subscriptionStatus==="active";}).length;
+            var pros = reps.filter(function(r){return r.planId==="pro"&&r.subscriptionStatus==="active";}).length;
+            var trials = reps.filter(function(r){return r.subscriptionStatus==="trial";}).length;
+            return (
+              <div>
+                <div style={{fontSize:28,fontWeight:800,fontFamily:"monospace",color:C.success,marginBottom:8}}>{fmtMoney(mrr)}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>
+                <div style={{display:"flex",gap:12,fontSize:11,color:C.muted}}>
+                  <span>{starters} Starter</span><span>{pros} Pro</span><span>{trials} Trial</span>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"18px 20px"}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:14}}>Products</div>
+          <div style={{fontSize:28,fontWeight:800,fontFamily:"monospace",color:C.text,marginBottom:8}}>{products.length}</div>
+          <div style={{fontSize:11,color:C.muted}}>{products.filter(function(p){return p.active!==false;}).length} active · {customers.length} customers</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Admin Orders ───────────────────────────────────────────────────────── */
+function AdminOrders({orders,reps,customers,products,onUpdate,addToast}) {
+  const [search,    setSearch]    = useState("");
+  const [filter,    setFilter]    = useState("all");
+  const [viewOrder, setViewOrder] = useState(null);
+
+  var filtered = orders.filter(function(o){
+    if(filter!=="all" && o.status!==filter) return false;
+    if(search) {
+      var s = search.toLowerCase();
+      return (o.id||"").toLowerCase().indexOf(s)>=0 ||
+             (o.repName||"").toLowerCase().indexOf(s)>=0 ||
+             (o.custName||"").toLowerCase().indexOf(s)>=0;
+    }
+    return true;
+  });
+
+  function advance(order) {
+    var idx = ORDER_PIPELINE.indexOf(order.status);
+    if(idx<0||idx>=ORDER_PIPELINE.length-1) return;
+    var next = ORDER_PIPELINE[idx+1];
+    var patch = {status:next};
+    if(next==="Delivered") patch.deliveredAt = new Date().toISOString();
+    var updated = Object.assign({},order,patch);
+    onUpdate(updated);
+    setViewOrder(updated);
+    dbSave("crm_orders",order.id,updated);
+    addToast("Order "+order.id+" → "+next,"info");
+  }
+
+  function cancel(order) {
+    var updated = Object.assign({},order,{status:"Cancelled"});
+    onUpdate(updated);
+    setViewOrder(updated);
+    dbSave("crm_orders",order.id,updated);
+    addToast("Order "+order.id+" cancelled","warning");
+  }
+
+  return (
+    <div>
+      <PageHeader title="Orders" subtitle={orders.length+" total orders"}/>
+      {/* Filters */}
+      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+        <input value={search} onChange={function(e){setSearch(e.target.value);}}
+          placeholder="Search orders, reps, customers…"
+          style={{flex:1,minWidth:200,background:C.surface,border:"1px solid "+C.border,
+                  borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,
+                  fontFamily:"inherit",outline:"none"}}/>
+        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+          {["all"].concat(ORDER_PIPELINE).concat(["Cancelled"]).map(function(s){
+            var active = filter===s;
+            return (
+              <button key={s} onClick={function(){setFilter(s);}}
+                style={{padding:"7px 12px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",
+                        fontSize:11,fontWeight:active?600:400,letterSpacing:"-.01em",
+                        background:active?C.accent+"18":"transparent",
+                        color:active?C.accent:C.muted}}>
+                {s==="all"?"All Orders":s}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {filtered.length===0 ? (
+        <EmptyState icon="📦" title="No orders" subtitle="Orders placed by sales reps will appear here."/>
+      ) : (
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:C.surface2}}>
+              {["Order","Date","Rep","Customer","Items","Total","Commission","Status",""].map(function(h){return (
+                <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,
+                                   textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+              );})}
+            </tr></thead>
+            <tbody>
+              {filtered.map(function(o){return (
+                <tr key={o.id} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}}
+                  onClick={function(){setViewOrder(o);}}>
+                  <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                  <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
+                  <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.repName||"—"}</td>
+                  <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                  <td style={{padding:"10px 14px",fontSize:12,color:C.muted,fontFamily:"monospace"}}>{(o.items||[]).length}</td>
+                  <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.text}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                  <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.gold}}>{fmtMoney(o.totals&&o.totals.commission||0)}</td>
+                  <td style={{padding:"10px 14px"}}><Badge status={o.status}/></td>
+                  <td style={{padding:"10px 14px"}} onClick={function(e){e.stopPropagation();}}>
+                    {ORDER_PIPELINE.indexOf(o.status)>=0&&ORDER_PIPELINE.indexOf(o.status)<ORDER_PIPELINE.length-1&&(
+                      <Btn small onClick={function(){advance(o);}}>
+                        → {ORDER_PIPELINE[ORDER_PIPELINE.indexOf(o.status)+1]}
+                      </Btn>
+                    )}
+                  </td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Order Detail Modal */}
+      {viewOrder&&(
+        <Modal title={"Order "+viewOrder.id} wide={true} onClose={function(){setViewOrder(null);}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>Order Details</div>
+              <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                {[
+                  ["Status", <Badge status={viewOrder.status}/>],
+                  ["Rep", viewOrder.repName||"—"],
+                  ["Customer", viewOrder.custName||"—"],
+                  ["Date", fmtDate(viewOrder.createdAt)],
+                  ["Commission Rate", (viewOrder.commissionRate||0)+"%"],
+                ].map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                                       padding:"6px 0",borderBottom:i<4?"1px solid "+C.border:"none"}}>
+                    <span style={{fontSize:12,color:C.muted}}>{row[0]}</span>
+                    <span style={{fontSize:12,fontWeight:600,color:C.text}}>{row[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* Items */}
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Items</div>
+              <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                {(viewOrder.items||[]).map(function(it,i){
+                  var p = products.find(function(x){return x.id===it.prodId;})||{name:"Unknown"};
+                  return (
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                         padding:"4px 0",borderBottom:i<(viewOrder.items||[]).length-1?"1px solid "+C.border:"none"}}>
+                      <span style={{color:C.muted}}>{it.qty}× {p.name}</span>
+                      <span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney((it.unitPrice||0)*it.qty)}</span>
+                    </div>
+                  );
+                })}
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,color:C.accent,
+                             fontSize:15,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}>
+                  <span>Total</span>
+                  <span style={{fontFamily:"monospace"}}>{fmtMoney(viewOrder.totals&&viewOrder.totals.grand||0)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              {/* Commission hold */}
+              {viewOrder.repId&&(function(){
+                var now2 = Date.now();
+                var delMs = viewOrder.deliveredAt ? new Date(viewOrder.deliveredAt).getTime() : null;
+                var expired = delMs ? (now2-delMs) >= RETURN_WINDOW_DAYS*24*60*60*1000 : false;
+                var held = delMs && !expired && viewOrder.status!=="Cancelled" && viewOrder.status!=="Refunded";
+                var blocked = viewOrder.status==="Cancelled"||viewOrder.status==="Refunded";
+                if(!delMs) return null;
+                var col2 = blocked?C.danger:held?C.warning:C.success;
+                var msg = blocked?"🚫 Commission blocked — order cancelled/refunded"
+                        : held?"🔒 Held — return window expires "+fmtDate(new Date(delMs+RETURN_WINDOW_DAYS*24*60*60*1000).toISOString())
+                        : "✅ Commission released — return window closed";
+                return (
+                  <div style={{padding:"10px 14px",background:col2+"10",border:"1px solid "+col2+"30",
+                               borderRadius:10,marginBottom:14,fontSize:12,color:col2,fontWeight:600}}>
+                    {msg}
+                  </div>
+                );
+              })()}
+
+              {/* Totals */}
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Financials</div>
+              <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                {[
+                  ["Subtotal", fmtMoney(viewOrder.totals&&viewOrder.totals.subtotal||0)],
+                  ["Shipping", fmtMoney(viewOrder.totals&&viewOrder.totals.shipping||0)],
+                  ["Tax", fmtMoney(viewOrder.totals&&viewOrder.totals.tax||0)],
+                  ["Grand Total", fmtMoney(viewOrder.totals&&viewOrder.totals.grand||0)],
+                  ["Commission ("+( viewOrder.commissionRate||0)+"%)", fmtMoney(viewOrder.totals&&viewOrder.totals.commission||0)],
+                ].map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                       padding:"5px 0",borderBottom:i<4?"1px solid "+C.border:"none",
+                                       fontWeight:i===3||i===4?700:400,
+                                       color:i===3?C.accent:i===4?C.gold:C.text}}>
+                    <span style={{color:i<3?C.muted:undefined}}>{row[0]}</span>
+                    <span style={{fontFamily:"monospace"}}>{row[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* Notes */}
+              {viewOrder.notes&&(
+                <div style={{background:C.surface2,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+                  <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:6}}>NOTES</div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>{viewOrder.notes}</div>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                {ORDER_PIPELINE.indexOf(viewOrder.status)>=0&&ORDER_PIPELINE.indexOf(viewOrder.status)<ORDER_PIPELINE.length-1&&(
+                  <Btn onClick={function(){advance(viewOrder);}}>
+                    Advance → {ORDER_PIPELINE[ORDER_PIPELINE.indexOf(viewOrder.status)+1]}
+                  </Btn>
+                )}
+                {viewOrder.status!=="Cancelled"&&viewOrder.status!=="Refunded"&&viewOrder.status!=="Paid"&&(
+                  <Btn variant="danger" onClick={function(){cancel(viewOrder);}}>Cancel</Btn>
+                )}
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ─── Admin Products ─────────────────────────────────────────────────────── */
+
+</script>
+<script id="c2" type="text/plain">
+function AdminProducts({products,setProducts,addToast}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editing,  setEditing]  = useState(null);
+  const [name,     setName]     = useState("");
+  const [sku,      setSku]      = useState("");
+  const [price,    setPrice]    = useState("");
+  const [category, setCategory] = useState("");
+  const [desc,     setDesc]     = useState("");
+  const [active,   setActive]   = useState(true);
+
+  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setShowForm(true); }
+  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setShowForm(true); }
+
+  function save() {
+    if(!name.trim()||!price){return;}
+    var data = {id:editing?editing.id:genId("prod"),name:name.trim(),sku:sku.trim(),
+                price:parseFloat(price)||0,category:category.trim(),
+                description:desc.trim(),active:active,updatedAt:new Date().toISOString()};
+    if(!editing) data.createdAt = new Date().toISOString();
+    setProducts(function(prev){
+      return editing ? prev.map(function(p){return p.id===editing.id?data:p;}) : [data].concat(prev);
+    });
+    dbSave("crm_products",data.id,data);
+    addToast(editing?"Product updated":"Product added","success");
+    setShowForm(false);
+  }
+
+  function toggle(p) {
+    var updated = Object.assign({},p,{active:!p.active});
+    setProducts(function(prev){return prev.map(function(x){return x.id===p.id?updated:x;});});
+    dbSave("crm_products",p.id,updated);
+    addToast(p.name+(updated.active?" activated":" deactivated"),"info");
+  }
+
+  return (
+    <div>
+      <PageHeader title="Products" subtitle={products.length+" products in catalog"}
+        action={<Btn onClick={openNew}>+ Add Product</Btn>}/>
+      {products.length===0 ? (
+        <EmptyState icon="📦" title="No products" subtitle="Add your PreVasive product catalog." action={<Btn onClick={openNew}>Add First Product</Btn>}/>
+      ) : (
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:C.surface2}}>
+              {["Product","SKU","Category","Price","Status",""].map(function(h){return (
+                <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+              );})}
+            </tr></thead>
+            <tbody>
+              {products.map(function(p){return (
+                <tr key={p.id} style={{borderTop:"1px solid "+C.border}}>
+                  <td style={{padding:"10px 16px"}}>
+                    <div style={{fontWeight:600,fontSize:13,color:C.text}}>{p.name}</div>
+                    {p.description&&<div style={{fontSize:11,color:C.dim,marginTop:1}}>{p.description.slice(0,60)}{p.description.length>60?"…":""}</div>}
+                  </td>
+                  <td style={{padding:"10px 16px",fontSize:11,fontFamily:"monospace",color:C.muted}}>{p.sku||"—"}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,color:C.muted}}>{p.category||"—"}</td>
+                  <td style={{padding:"10px 16px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{fmtMoney(p.price||0)}</td>
+                  <td style={{padding:"10px 16px"}}>
+                    <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:700,
+                                  background:p.active!==false?C.success+"18":C.danger+"18",
+                                  color:p.active!==false?C.success:C.danger}}>
+                      {p.active!==false?"Active":"Inactive"}
+                    </span>
+                  </td>
+                  <td style={{padding:"10px 16px"}}>
+                    <div style={{display:"flex",gap:6}}>
+                      <Btn small variant="ghost" onClick={function(){openEdit(p);}}>Edit</Btn>
+                      <Btn small variant="ghost" onClick={function(){toggle(p);}}>{p.active!==false?"Deactivate":"Activate"}</Btn>
+                    </div>
+                  </td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showForm&&(
+        <Modal title={editing?"Edit Product":"New Product"} onClose={function(){setShowForm(false);}}
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn><Btn onClick={save}>{editing?"Save Changes":"Add Product"}</Btn></div>}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+            <div style={{gridColumn:"1/-1"}}><Field label="Product Name *" value={name} onChange={setName} placeholder="PreVasive X100"/></div>
+            <Field label="SKU" value={sku} onChange={setSku} placeholder="PV-X100"/>
+            <Field label="Price *" value={price} onChange={setPrice} type="number" placeholder="299.00"/>
+            <Field label="Category" value={category} onChange={setCategory} placeholder="Device, Supply…"/>
+            <div/>
+            <div style={{gridColumn:"1/-1"}}><TextArea label="Description" value={desc} onChange={setDesc} rows={3}/></div>
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginTop:4}}>
+            <input type="checkbox" checked={active} onChange={function(e){setActive(e.target.checked);}} style={{accentColor:C.accent}}/>
+            <span style={{fontSize:13,color:C.text}}>Active — visible to reps when placing orders</span>
+          </label>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ─── Admin Customers ────────────────────────────────────────────────────── */
+function AdminCustomers({customers,reps,orders,addToast}) {
+  const [search, setSearch] = useState("");
+  var filtered = customers.filter(function(c){
+    if(!search) return true;
+    var s = search.toLowerCase();
+    return (c.name||"").toLowerCase().indexOf(s)>=0 ||
+           (c.company||"").toLowerCase().indexOf(s)>=0 ||
+           (c.email||"").toLowerCase().indexOf(s)>=0;
+  });
+
+  return (
+    <div>
+      <PageHeader title="Customers" subtitle={customers.length+" total customers"}/>
+      <div style={{marginBottom:16}}>
+        <input value={search} onChange={function(e){setSearch(e.target.value);}}
+          placeholder="Search customers…"
+          style={{width:"100%",maxWidth:400,background:C.surface,border:"1px solid "+C.border,
+                  borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+      </div>
+      {filtered.length===0 ? (
+        <EmptyState icon="👥" title="No customers" subtitle="Customers added by reps will appear here."/>
+      ) : (
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:C.surface2}}>
+              {["Customer","Company","Contact","Rep","Orders","Lifetime Spend"].map(function(h){return (
+                <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+              );})}
+            </tr></thead>
+            <tbody>
+              {filtered.map(function(c){
+                var rep = reps.find(function(r){return r.id===c.repId;})||null;
+                var custOrds = orders.filter(function(o){return o.custId===c.id;});
+                var spend = custOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+                return (
+                  <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
+                    <td style={{padding:"10px 16px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <Avatar name={c.name} size={28}/>
+                        <span style={{fontSize:13,fontWeight:600,color:C.text}}>{c.name}</span>
+                      </div>
+                    </td>
+                    <td style={{padding:"10px 16px",fontSize:12,color:C.muted}}>{c.company||"—"}</td>
+                    <td style={{padding:"10px 16px",fontSize:11,color:C.muted}}>{c.email||"—"}</td>
+                    <td style={{padding:"10px 16px",fontSize:12,color:C.text}}>{rep?rep.name:"—"}</td>
+                    <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{custOrds.length}</td>
+                    <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(spend)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Admin Reps ─────────────────────────────────────────────────────────── */
+function AdminReps({reps,setReps,orders,addToast,showResult}) {
+  const [tab,      setTab]      = useState("reps");
+  const [showForm, setShowForm] = useState(false);
+  const [name,     setName]     = useState("");
+  const [email,    setEmail]    = useState("");
+  const [formErr,  setFormErr]  = useState("");
+
+  function saveRep() {
+    if(!name.trim()||!email.trim()){setFormErr("Name and email are required.");return;}
+    var existing = reps.find(function(r){return r.email===email.trim();});
+    if(existing){setFormErr("A rep with this email already exists.");return;}
+    var id = genId("rep");
+    var newRep = {
+      id:id, name:name.trim(), email:email.trim(),
+      status:"pending", subscriptionStatus:"trial",
+      trialStartedAt:new Date().toISOString(),
+      planId:"starter", createdAt:new Date().toISOString(),
+    };
+    setReps(function(prev){return [newRep].concat(prev);});
+    dbSave("crm_reps",id,newRep);
+    addToast(name+" added as rep","success");
+    setShowForm(false); setName(""); setEmail(""); setFormErr("");
+  }
+
+  function approve(rep) {
+    var updated = Object.assign({},rep,{status:"active",approvedAt:new Date().toISOString()});
+    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    addToast(rep.name+" approved","success");
+    showResult({type:"rep",title:"Rep Approved",subtitle:rep.name+" can now log in and place orders.",rows:[["Name",rep.name],["Email",rep.email],["Status","Active ✓"]],cta:"Done"});
+  }
+
+  function suspend(rep) {
+    var updated = Object.assign({},rep,{status:"suspended"});
+    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    addToast(rep.name+" suspended","warning");
+  }
+
+  function changePlan(rep, planId) {
+    var updated = Object.assign({},rep,{planId:planId,subscriptionStatus:planId?"active":"trial"});
+    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    addToast("Plan updated for "+rep.name,"info");
+  }
+
+  var TABS = [{id:"reps",label:"Sales Reps"},{id:"subscriptions",label:"Subscriptions"}];
+
+  return (
+    <div>
+      <PageHeader title="Sales Reps" subtitle={reps.length+" reps total"}
+        action={<Btn onClick={function(){setName("");setEmail("");setFormErr("");setShowForm(true);}}>+ Add Rep</Btn>}/>
+
+      <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:24}}>
+        {TABS.map(function(t){
+          var active = tab===t.id;
+          return (
+            <button key={t.id} onClick={function(){setTab(t.id);}}
+              style={{padding:"8px 16px",background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",
+                      fontSize:13,fontWeight:active?600:400,color:active?C.text:C.dim,letterSpacing:"-.01em",
+                      borderBottom:"2px solid "+(active?C.accent:"transparent"),marginBottom:-1}}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab==="reps"&&(
+        reps.length===0 ? <EmptyState icon="🤝" title="No reps yet" subtitle="Add your first sales rep." action={<Btn onClick={function(){setShowForm(true);}}>Add Rep</Btn>}/> : (
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Rep","Email","Status","Orders","Commission","Actions"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {reps.map(function(rep){
+                  var repOrds = orders.filter(function(o){return o.repId===rep.id;});
+                  var totalComm = repOrds.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+                  var sc = {active:C.success,pending:C.warning,suspended:C.danger,trial:C.accent}[rep.status]||C.muted;
+                  return (
+                    <tr key={rep.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 16px"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <Avatar name={rep.name} size={28}/>
+                          <span style={{fontSize:13,fontWeight:600,color:C.text}}>{rep.name}</span>
+                        </div>
+                      </td>
+                      <td style={{padding:"10px 16px",fontSize:12,color:C.muted}}>{rep.email}</td>
+                      <td style={{padding:"10px 16px"}}>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"18",color:sc,textTransform:"capitalize"}}>{rep.status}</span>
+                      </td>
+                      <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{repOrds.length}</td>
+                      <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(totalComm)}</td>
+                      <td style={{padding:"10px 16px"}}>
+                        <div style={{display:"flex",gap:6}}>
+                          {rep.status==="pending"&&<Btn small onClick={function(){approve(rep);}}>Approve</Btn>}
+                          {rep.status==="active"&&<Btn small variant="ghost" onClick={function(){suspend(rep);}}>Suspend</Btn>}
+                          {rep.status==="suspended"&&<Btn small variant="success" onClick={function(){approve(rep);}}>Reactivate</Btn>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+
+      {tab==="subscriptions"&&(
+        <div>
+          {/* KPIs */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+            {(function(){
+              var active=reps.filter(function(r){return r.subscriptionStatus==="active";});
+              var trial=reps.filter(function(r){return r.subscriptionStatus==="trial";});
+              var mrr=active.reduce(function(s,r){var p=REP_PLANS.find(function(x){return x.id===r.planId;});return s+(p?p.price:0);},0);
+              return [
+                ["MRR",fmtMoney(mrr)+"/mo",C.success],
+                ["Active",active.length,C.accent],
+                ["On Trial",trial.length,C.warning],
+                ["Suspended",reps.filter(function(r){return r.status==="suspended";}).length,C.danger],
+              ].map(function(item){return (
+                <KpiCard key={item[0]} label={item[0]} value={item[1]} color={item[2]}/>
+              );});
+            })()}
+          </div>
+
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Rep","Plan","Commission Cap","Status","Change Plan"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {reps.map(function(rep){
+                  var plan = REP_PLANS.find(function(p){return p.id===rep.planId;})||REP_PLANS[0];
+                  var sc = {active:C.success,trial:C.accent,suspended:C.danger}[rep.subscriptionStatus]||C.muted;
+                  return (
+                    <tr key={rep.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 16px",fontSize:13,fontWeight:600,color:C.text}}>{rep.name}</td>
+                      <td style={{padding:"10px 16px",fontSize:12,color:C.text}}>{plan?plan.name:"—"}</td>
+                      <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",color:C.muted}}>{plan?fmtMoney(plan.ceiling)+"/mo":"—"}</td>
+                      <td style={{padding:"10px 16px"}}>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"18",color:sc,textTransform:"capitalize"}}>{rep.subscriptionStatus}</span>
+                      </td>
+                      <td style={{padding:"10px 16px"}}>
+                        <select value={rep.planId||""} onChange={function(e){changePlan(rep,e.target.value);}}
+                          style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:6,
+                                  padding:"4px 8px",color:C.text,fontSize:11,fontFamily:"inherit",cursor:"pointer"}}>
+                          {REP_PLANS.map(function(p){return <option key={p.id} value={p.id}>{p.name} — ${p.price}/mo</option>;})}
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showForm&&(
+        <Modal title="Add Sales Rep" onClose={function(){setShowForm(false);}}
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn><Btn onClick={saveRep}>Add Rep</Btn></div>}>
+          {formErr&&<div style={{padding:"9px 12px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:6,color:C.danger,fontSize:12,marginBottom:14}}>{formErr}</div>}
+          <Field label="Full Name *" value={name} onChange={setName} placeholder="Jordan Hayes"/>
+          <Field label="Email *" value={email} onChange={setEmail} type="email" placeholder="jordan@company.com"
+            hint="An account will need to be created for this rep in Supabase Authentication."/>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ─── Admin Commissions ──────────────────────────────────────────────────── */
+function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult}) {
+  var now = Date.now();
+  var releasedOrds = orders.filter(function(o){
+    if(!o.deliveredAt||!o.repId) return false;
+    if(o.status==="Cancelled"||o.status==="Refunded") return false;
+    return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
+  });
+  var paidIds = (commissions||[]).map(function(c){return c.orderId;});
+  var unpaid = releasedOrds.filter(function(o){return paidIds.indexOf(o.id)<0;});
+
+  function payCommission(order) {
+    var rep = reps.find(function(r){return r.id===order.repId;})||{name:"Unknown"};
+    var rec = {id:genId("pay"),orderId:order.id,repId:order.repId,repName:rep.name,
+               amount:order.totals&&order.totals.commission||0,paidAt:new Date().toISOString(),note:"Manual payout"};
+    setCommissions(function(prev){return [rec].concat(prev||[]);});
+    dbSave("crm_commission_payouts",rec.id,rec);
+    addToast("Commission of "+fmtMoney(rec.amount)+" paid to "+rep.name,"success");
+    showResult({type:"commission",title:"Commission Released",subtitle:"Payment recorded successfully.",
+      rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(rec.amount)],["Date",fmtDate(new Date().toISOString())]],
+      nextStep:"Rep will see this in their Commissions tab.",cta:"Done"});
+  }
+
+  var totalUnpaid = unpaid.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var totalPaid = (commissions||[]).reduce(function(s,c){return s+(c.amount||0);},0);
+
+  return (
+    <div>
+      <PageHeader title="Commissions" subtitle="Track and release rep commission payments"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
+        <KpiCard label="Ready to Pay" value={fmtMoney(totalUnpaid)} sub={unpaid.length+" orders"} color={C.gold}/>
+        <KpiCard label="Total Paid Out" value={fmtMoney(totalPaid)} sub={(commissions||[]).length+" payments"} color={C.success}/>
+        <KpiCard label="In Return Window" value={fmtMoney(orders.filter(function(o){
+          if(!o.deliveredAt||!o.repId) return false;
+          return (now-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+        }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0))} sub="Held — 15-day window" color={C.warning}/>
+      </div>
+
+      {unpaid.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:12}}>Ready to Release</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Order","Rep","Delivered","Commission",""].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {unpaid.map(function(o){
+                  var rep = reps.find(function(r){return r.id===o.repId;})||{name:"Unknown"};
+                  return (
+                    <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{o.id}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{rep.name}</td>
+                      <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
+                      <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(o.totals&&o.totals.commission||0)}</td>
+                      <td style={{padding:"10px 14px"}}>
+                        <Btn small onClick={function(){payCommission(o);}}>Pay Commission</Btn>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {(commissions||[]).length>0&&(
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:12}}>Payment History</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Date","Rep","Order","Amount"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {(commissions||[]).map(function(c){return (
+                  <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(c.paidAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{c.repName}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.dim}}>{c.orderId}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(c.amount)}</td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {unpaid.length===0&&(commissions||[]).length===0&&(
+        <EmptyState icon="💰" title="No commissions yet" subtitle="Commissions appear here 15 days after orders are delivered."/>
+      )}
+    </div>
+  );
+}
+
+/* ─── Admin Settings ─────────────────────────────────────────────────────── */
+
+</script>
+<script id="c3" type="text/plain">
+function AdminSettings({supabaseCfg,onSaveSupabase,addToast}) {
+  const [url,     setUrl]     = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
+  const [anonKey, setAnonKey] = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
+  const [enabled, setEnabled] = useState(true);
+  const [msg,     setMsg]     = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+
+  function handleSave() {
+    var trimUrl = url.trim().replace(/\/$/,"");
+    var trimKey = anonKey.trim();
+    if(trimUrl) localStorage.setItem("__sb_url__",trimUrl);
+    if(trimKey) localStorage.setItem("__sb_key__",trimKey);
+    if(onSaveSupabase) onSaveSupabase({url:trimUrl,anonKey:trimKey,enabled:enabled,savedAt:new Date().toISOString()});
+    addToast("Settings saved","success");
+    setMsg("Saved!");
+    setTimeout(function(){setMsg("");},3000);
+  }
+
+  function test() {
+    var trimUrl = url.trim().replace(/\/$/,"");
+    var trimKey = anonKey.trim()||SUPABASE_ANON_KEY;
+    if(!trimUrl||!trimKey){setTestResult({ok:false,msg:"Enter URL and key first."});return;}
+    setTesting(true); setTestResult(null);
+    fetch(trimUrl+"/rest/v1/crm_orders?select=id&limit=1",{
+      headers:{"apikey":trimKey,"Authorization":"Bearer "+trimKey}
+    }).then(function(r){
+      setTesting(false);
+      setTestResult(r.ok||r.status===406 ? {ok:true,msg:"Connection successful! Supabase is reachable."} : {ok:false,msg:"HTTP "+r.status+" — check your credentials."});
+    }).catch(function(e){setTesting(false);setTestResult({ok:false,msg:"Error: "+e.message});});
+  }
+
+  return (
+    <div>
+      <PageHeader title="Settings"/>
+      <div style={{maxWidth:520}}>
+        <div style={{padding:"14px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:20}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.accent,marginBottom:4}}>Supabase Integration</div>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>Your database credentials. Find them at <strong style={{color:C.text}}>supabase.com → Settings → API</strong>.</div>
+        </div>
+        <Field label="Project URL" value={url} onChange={setUrl} placeholder="https://xxx.supabase.co"/>
+        <Field label="Anon Public Key" value={anonKey} onChange={setAnonKey} type="password" placeholder="eyJ…"/>
+        {testResult&&(
+          <div style={{padding:"9px 12px",borderRadius:8,fontSize:12,fontWeight:600,marginBottom:14,
+                       background:testResult.ok?C.success+"12":C.danger+"12",
+                       border:"1px solid "+(testResult.ok?C.success:C.danger)+"30",
+                       color:testResult.ok?C.success:C.danger}}>
+            {testResult.ok?"✓ ":"✗ "}{testResult.msg}
+          </div>
+        )}
+        {msg&&<div style={{padding:"9px 12px",borderRadius:8,fontSize:12,fontWeight:600,marginBottom:14,background:C.success+"12",border:"1px solid "+C.success+"30",color:C.success}}>{msg}</div>}
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={test} disabled={testing}
+            style={{padding:"8px 16px",borderRadius:6,border:"1px solid "+C.border,background:C.surface2,
+                    color:C.muted,cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13}}>
+            {testing?"Testing…":"Test Connection"}
+          </button>
+          <Btn onClick={handleSave}>Save Settings</Btn>
+        </div>
+        {supabaseCfg&&supabaseCfg.savedAt&&(
+          <div style={{marginTop:14,fontSize:11,color:C.dim}}>Last saved {fmtDate(supabaseCfg.savedAt)} · {supabaseCfg.url}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Order Form (3-Step) ────────────────────────────────────────────────── */
+function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
+                    editOrder,onClose,addToast,showResult}) {
+  const [step,       setStep]       = useState(1);
+  const [custId,     setCustId]     = useState((editOrder&&editOrder.custId)||"");
+  const [custSearch, setCustSearch] = useState("");
+  const [custOpen,   setCustOpen]   = useState(false);
+  const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1,unitPrice:0}]);
+  const [commRate,   setCommRate]   = useState((editOrder&&editOrder.commissionRate)||10);
+  const [notes,      setNotes]      = useState((editOrder&&editOrder.notes)||"");
+  const [shipAddr,   setShipAddr]   = useState((editOrder&&editOrder.shipAddress)||{name:"",address:"",city:"",state:"",zip:""});
+  const [cardNum,    setCardNum]    = useState("");
+  const [cardExp,    setCardExp]    = useState("");
+  const [cardCvv,    setCardCvv]    = useState("");
+  const [cardName2,  setCardName2]  = useState("");
+  const [payMethod,  setPayMethod]  = useState("pay_now");
+  const [agreed,     setAgreed]     = useState(false);
+  const [placing,    setPlacing]    = useState(false);
+  const [newCustName, setNewCustName] = useState("");
+  const [newCustEmail,setNewCustEmail] = useState("");
+  const [newCustComp, setNewCustComp]  = useState("");
+  const [showNewCust, setShowNewCust]  = useState(false);
+
+  var isEdit = !!(editOrder&&editOrder.id);
+  var selCust = customers.find(function(c){return c.id===custId;})||null;
+  var filtCusts = custSearch ? customers.filter(function(c){
+    var s = custSearch.toLowerCase();
+    return (c.name||"").toLowerCase().indexOf(s)>=0||(c.email||"").toLowerCase().indexOf(s)>=0;
+  }) : customers;
+
+  var activeProds = products.filter(function(p){return p.active!==false;});
+
+  function calcTotals() {
+    var subtotal = items.reduce(function(s,it){
+      var p = products.find(function(x){return x.id===it.prodId;});
+      return s + (p?p.price:it.unitPrice||0)*it.qty;
+    },0);
+    var commission = subtotal*(parseFloat(commRate)||0)/100;
+    return {subtotal:subtotal,shipping:0,tax:0,grand:subtotal,commission:commission};
+  }
+
+  var totals = calcTotals();
+  var validItems = items.filter(function(it){return it.prodId&&it.qty>0;});
+  var cardFilled = cardNum.replace(/\s/g,"").length>=15 && cardExp.length>=4 && cardCvv.length>=3;
+  var step1Valid = custId && validItems.length>0;
+  var step2Valid = payMethod==="pay_later" || cardFilled;
+
+  function addItem() { setItems(function(prev){return prev.concat([{prodId:"",qty:1,unitPrice:0}]);}); }
+  function removeItem(i) { setItems(function(prev){return prev.filter(function(_,j){return j!==i;});}); }
+  function updateItem(i,field,val) {
+    setItems(function(prev){
+      return prev.map(function(it,j){
+        if(j!==i) return it;
+        var updated = Object.assign({},it);
+        updated[field] = val;
+        if(field==="prodId") {
+          var p = products.find(function(x){return x.id===val;});
+          if(p) updated.unitPrice = p.price;
+        }
+        return updated;
+      });
+    });
+  }
+
+  function createCustomer() {
+    if(!newCustName.trim()) return;
+    var id = genId("cust");
+    var cust = {id:id,name:newCustName.trim(),email:newCustEmail.trim(),
+                company:newCustComp.trim(),repId:repId,
+                createdAt:new Date().toISOString()};
+    setCustomers(function(prev){return [cust].concat(prev);});
+    dbSave("crm_customers",id,cust);
+    setCustId(id);
+    setShowNewCust(false);
+    setNewCustName(""); setNewCustEmail(""); setNewCustComp("");
+  }
+
+  function placeOrder() {
+    if(!agreed||placing) return;
+    setPlacing(true);
+    var ordId = "ORD-"+String(Date.now()).slice(-6);
+    var order = {
+      id:ordId, repId:repId, repName:repName,
+      custId:custId, custName:selCust?selCust.name:"",
+      items:validItems, commissionRate:parseFloat(commRate)||0,
+      totals:totals, notes:notes,
+      shipAddress:shipAddr, payMethod:payMethod,
+      status:"Submitted", createdAt:new Date().toISOString(),
+      payment:{method:payMethod,cardLast4:payMethod==="pay_now"?cardNum.replace(/\s/g,"").slice(-4):null}
+    };
+    setOrders(function(prev){return [order].concat(prev);});
+    dbSave("crm_orders",ordId,order);
+    setPlacing(false);
+    addToast("Order "+ordId+" placed","success");
+    showResult({type:"order",title:"Order Placed!",subtitle:"Your order has been submitted for processing.",
+      rows:[["Order #",ordId],["Customer",selCust?selCust.name:""],["Total",fmtMoney(totals.grand)],["Status","Submitted"]],
+      nextStep:"You'll be notified as your order progresses.",cta:"Done"});
+    onClose();
+  }
+
+  var STEPS = ["Details","Payment","Confirm"];
+
+  function StepDots() {
+    return (
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:0,marginBottom:4}}>
+        {STEPS.map(function(s,i){
+          var done = i+1<step; var active = i+1===step;
+          return (
+            <div key={s} style={{display:"flex",alignItems:"center"}}>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                <div style={{width:26,height:26,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
+                             fontWeight:700,fontSize:11,
+                             background:done?C.success:active?C.accent:C.surface2,
+                             color:done||active?"#fff":C.dim,
+                             border:"2px solid "+(done?C.success:active?C.accent:C.border)}}>
+                  {done?"✓":i+1}
+                </div>
+                <div style={{fontSize:9,fontWeight:active?700:400,color:active?C.accent:done?C.success:C.dim,
+                             textTransform:"uppercase",letterSpacing:".05em"}}>{s}</div>
+              </div>
+              {i<STEPS.length-1&&<div style={{width:36,height:2,background:done?C.success:C.border,margin:"0 4px 14px"}}/>}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  /* Step 1: Details */
+  if(step===1) return (
+    <Modal title={<StepDots/>} wide={true} onClose={onClose}
+      footer={<div style={{display:"flex",justifyContent:"space-between"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={function(){setStep(2);}} disabled={!step1Valid}>Continue to Payment →</Btn>
+      </div>}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        <div>
+          {/* Customer picker */}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Customer *</div>
+            <div style={{position:"relative"}}>
+              <div onClick={function(){setCustOpen(!custOpen);}}
+                style={{padding:"9px 12px",background:C.bg,border:"1px solid "+(custOpen?C.accent:C.border),
+                        borderRadius:7,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                {selCust
+                  ? <span style={{fontSize:13,fontWeight:600,color:C.text}}>{selCust.name}</span>
+                  : <span style={{fontSize:13,color:C.dim}}>Select customer…</span>}
+                <span style={{fontSize:10,color:C.dim}}>{custOpen?"▲":"▼"}</span>
+              </div>
+              {custOpen&&(
+                <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:200,
+                             background:C.surface,border:"1px solid "+C.border,borderRadius:8,
+                             boxShadow:"0 8px 32px rgba(0,0,0,.3)",marginTop:4}}>
+                  <div style={{padding:8,borderBottom:"1px solid "+C.border}}>
+                    <input autoFocus value={custSearch} onChange={function(e){setCustSearch(e.target.value);}}
+                      placeholder="Search…"
+                      style={{width:"100%",background:C.surface2,border:"1px solid "+C.border,borderRadius:6,
+                              padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  </div>
+                  <div style={{maxHeight:200,overflowY:"auto"}}>
+                    <div onClick={function(){setShowNewCust(true);setCustOpen(false);}}
+                      style={{padding:"9px 12px",cursor:"pointer",fontSize:12,color:C.accent,fontWeight:600,
+                              borderBottom:"1px solid "+C.border}}>+ New Customer</div>
+                    {filtCusts.length===0&&<div style={{padding:"12px",fontSize:12,color:C.dim,textAlign:"center"}}>No customers found</div>}
+                    {filtCusts.map(function(cu){return (
+                      <div key={cu.id} onClick={function(){setCustId(cu.id);setCustOpen(false);setCustSearch("");}}
+                        style={{padding:"9px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,
+                                background:cu.id===custId?C.accent+"10":"none",borderBottom:"1px solid "+C.border}}>
+                        <Avatar name={cu.name} size={26}/>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:600,color:C.text}}>{cu.name}</div>
+                          <div style={{fontSize:10,color:C.dim}}>{cu.email||cu.company||""}</div>
+                        </div>
+                      </div>
+                    );})}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* New Customer inline */}
+          {showNewCust&&(
+            <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14,border:"1px solid "+C.border}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>New Customer</div>
+              <Field label="Name *" value={newCustName} onChange={setNewCustName} placeholder="Dr. Jane Smith"/>
+              <Field label="Email" value={newCustEmail} onChange={setNewCustEmail} type="email" placeholder="jane@practice.com"/>
+              <Field label="Company" value={newCustComp} onChange={setNewCustComp} placeholder="Smith Medical"/>
+              <div style={{display:"flex",gap:8}}>
+                <Btn small onClick={createCustomer} disabled={!newCustName.trim()}>Add Customer</Btn>
+                <Btn small variant="ghost" onClick={function(){setShowNewCust(false);}}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+
+          {/* Shipping address */}
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Ship To</div>
+          <div style={{background:C.surface2,borderRadius:10,padding:"12px",marginBottom:14}}>
+            <Field label="Contact Name" value={shipAddr.name} onChange={function(v){setShipAddr(Object.assign({},shipAddr,{name:v}));}} placeholder="Dr. Jane Smith"/>
+            <Field label="Address" value={shipAddr.address} onChange={function(v){setShipAddr(Object.assign({},shipAddr,{address:v}));}} placeholder="123 Medical Dr"/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              <Field label="City" value={shipAddr.city} onChange={function(v){setShipAddr(Object.assign({},shipAddr,{city:v}));}}/>
+              <Field label="State" value={shipAddr.state} onChange={function(v){setShipAddr(Object.assign({},shipAddr,{state:v}));}} placeholder="CA"/>
+              <Field label="ZIP" value={shipAddr.zip} onChange={function(v){setShipAddr(Object.assign({},shipAddr,{zip:v}));}}/>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          {/* Items */}
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Order Items *</div>
+          {items.map(function(it,i){return (
+            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 80px auto",gap:8,marginBottom:8,alignItems:"flex-end"}}>
+              <div>
+                {i===0&&<div style={{fontSize:10,color:C.dim,marginBottom:4}}>Product</div>}
+                <select value={it.prodId} onChange={function(e){updateItem(i,"prodId",e.target.value);}}
+                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                          padding:"9px 12px",color:it.prodId?C.text:C.dim,fontSize:13,fontFamily:"inherit",outline:"none"}}>
+                  <option value="">Select product…</option>
+                  {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}</option>;})}
+                </select>
+              </div>
+              <div>
+                {i===0&&<div style={{fontSize:10,color:C.dim,marginBottom:4}}>Qty</div>}
+                <input type="number" min="1" value={it.qty}
+                  onChange={function(e){updateItem(i,"qty",parseInt(e.target.value)||1);}}
+                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                          padding:"9px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+              </div>
+              {items.length>1&&(
+                <button onClick={function(){removeItem(i);}}
+                  style={{background:"none",border:"none",color:C.danger,cursor:"pointer",
+                          fontSize:16,padding:"8px 4px",marginTop:i===0?16:0}}>×</button>
+              )}
+            </div>
+          );})}
+          <button onClick={addItem}
+            style={{background:"none",border:"1px dashed "+C.border,borderRadius:7,
+                    color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600,
+                    padding:"8px 14px",width:"100%",marginBottom:14}}>
+            + Add Item
+          </button>
+
+          {/* Totals */}
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:10}}>TOTALS</div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,fontWeight:800,color:C.accent,marginBottom:10}}>
+              <span>Grand Total</span>
+              <span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand)}</span>
+            </div>
+            <div>
+              <div style={{fontSize:10,color:C.muted,marginBottom:5}}>Commission Rate</div>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <input type="range" min="0" max="25" step="0.5" value={commRate}
+                  onChange={function(e){setCommRate(e.target.value);}}
+                  style={{flex:1,accentColor:C.accent}}/>
+                <span style={{fontSize:13,fontWeight:700,color:C.gold,fontFamily:"monospace",minWidth:45,textAlign:"right"}}>
+                  {commRate}% = {fmtMoney(totals.commission)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <TextArea label="Notes (optional)" value={notes} onChange={setNotes} rows={2} placeholder="Special instructions…"/>
+        </div>
+      </div>
+    </Modal>
+  );
+
+  /* Step 2: Payment */
+  if(step===2) return (
+    <Modal title={<StepDots/>} onClose={onClose}
+      footer={<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+        <Btn variant="ghost" onClick={function(){setStep(1);}}>← Back</Btn>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {!step2Valid&&payMethod==="pay_now"&&<span style={{fontSize:11,color:C.danger}}>Complete card details</span>}
+          <Btn onClick={function(){setStep(3);}} disabled={!step2Valid}>Review & Confirm →</Btn>
+        </div>
+      </div>}>
+      <div style={{maxWidth:480,margin:"0 auto"}}>
+        {/* Pay method toggle */}
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:10}}>Payment Method</div>
+        <div style={{display:"flex",gap:8,marginBottom:16}}>
+          {[["pay_now","💳 Pay Now","Charge card immediately"],["pay_later","📄 Pay Later","Invoice on delivery"]].map(function(opt){
+            var sel = payMethod===opt[0];
+            return (
+              <button key={opt[0]} onClick={function(){setPayMethod(opt[0]);}}
+                style={{flex:1,padding:"12px 10px",borderRadius:10,textAlign:"left",fontFamily:"inherit",cursor:"pointer",
+                        border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent+"10":C.surface2}}>
+                <div style={{fontSize:13,fontWeight:700,color:sel?C.accent:C.text,marginBottom:2}}>{opt[1]}</div>
+                <div style={{fontSize:10,color:C.dim}}>{opt[2]}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {payMethod==="pay_now"&&(
+          <div style={{background:C.surface2,borderRadius:12,padding:"16px 18px"}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:14}}>Card Details</div>
+            <Field label="Card Number *" value={cardNum} onChange={function(v){
+              var n=v.replace(/\D/g,"").slice(0,16);
+              setCardNum(n.replace(/(.{4})/g,"$1 ").trim());
+            }} placeholder="1234 5678 9012 3456"/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+              <Field label="Expiry *" value={cardExp} onChange={function(v){
+                var n=v.replace(/\D/g,"");
+                if(n.length>=2) n=n.slice(0,2)+"/"+n.slice(2,4);
+                setCardExp(n);
+              }} placeholder="09/27"/>
+              <Field label="CVV *" value={cardCvv} onChange={function(v){setCardCvv(v.replace(/\D/g,"").slice(0,4));}} type="password" placeholder="123"/>
+            </div>
+            <Field label="Name on Card" value={cardName2} onChange={setCardName2} placeholder="Jane Smith"/>
+            {cardFilled&&<div style={{padding:"8px 12px",background:C.success+"12",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>✓ Card details complete</div>}
+            <div style={{marginTop:12,padding:"8px 12px",background:C.gold+"10",borderRadius:8,
+                         fontSize:12,fontWeight:700,color:C.gold,display:"flex",justifyContent:"space-between"}}>
+              <span>Total to charge</span>
+              <span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand)}</span>
+            </div>
+          </div>
+        )}
+
+        {payMethod==="pay_later"&&(
+          <div style={{background:C.accent+"10",border:"2px solid "+C.accent+"30",borderRadius:12,padding:"18px"}}>
+            <div style={{fontSize:15,fontWeight:800,color:C.accent,marginBottom:8}}>📄 Pay Later</div>
+            <div style={{fontSize:13,color:C.text,lineHeight:1.6}}>
+              Invoice will be sent upon delivery. Total due: <strong style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand)}</strong>
+            </div>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+
+  /* Step 3: Confirm */
+  return (
+    <Modal title={<StepDots/>} wide={true} onClose={onClose}
+      footer={<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+        <Btn variant="ghost" onClick={function(){setStep(2);}}>← Back</Btn>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+            <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{accentColor:C.accent}}/>
+            I confirm this order and payment terms
+          </label>
+          <Btn onClick={placeOrder} disabled={!agreed||placing}>
+            {placing?"Placing…":"Place Order"}
+          </Btn>
+        </div>
+      </div>}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>Order Summary</div>
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+            {validItems.map(function(it,i){
+              var p = products.find(function(x){return x.id===it.prodId;})||{name:"Unknown",price:0};
+              return (
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",
+                                     borderBottom:i<validItems.length-1?"1px solid "+C.border:"none"}}>
+                  <span style={{color:C.muted}}>{it.qty}× {p.name}</span>
+                  <span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(p.price*it.qty)}</span>
+                </div>
+              );
+            })}
+            <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,color:C.accent,fontSize:16,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}>
+              <span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand)}</span>
+            </div>
+          </div>
+          {selCust&&(
+            <div style={{background:C.surface2,borderRadius:10,padding:"12px 14px"}}>
+              <div style={{fontSize:10,fontWeight:600,color:C.dim,marginBottom:6}}>SHIP TO</div>
+              <div style={{fontSize:12,fontWeight:600,color:C.text}}>{shipAddr.name||selCust.name}</div>
+              {shipAddr.address&&<div style={{fontSize:11,color:C.muted,marginTop:2,lineHeight:1.5}}>{shipAddr.address}<br/>{[shipAddr.city,shipAddr.state,shipAddr.zip].filter(Boolean).join(", ")}</div>}
+            </div>
+          )}
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>Payment</div>
+          {payMethod==="pay_now"?(
+            <div style={{background:C.gold+"10",border:"2px solid "+C.gold+"30",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.gold,marginBottom:6}}>💳 Charging Card</div>
+              <div style={{fontSize:12,color:C.muted}}>···· {cardNum.replace(/\s/g,"").slice(-4)} · exp {cardExp}</div>
+              <div style={{fontSize:18,fontWeight:900,color:C.gold,fontFamily:"monospace",marginTop:8}}>{fmtMoney(totals.grand)}</div>
+            </div>
+          ):(
+            <div style={{background:C.accent+"10",border:"2px solid "+C.accent+"30",borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+              <div style={{fontSize:14,fontWeight:800,color:C.accent,marginBottom:6}}>📄 Invoice on Delivery</div>
+              <div style={{fontSize:18,fontWeight:900,color:C.accent,fontFamily:"monospace",marginTop:4}}>{fmtMoney(totals.grand)}</div>
+            </div>
+          )}
+          <div style={{background:C.gold+"10",border:"1px solid "+C.gold+"20",borderRadius:8,padding:"10px 12px",fontSize:12,color:C.gold,fontWeight:600,marginBottom:14}}>
+            Commission: {fmtMoney(totals.commission)} ({commRate}%)
+          </div>
+          <div style={{padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:11,color:C.warning,lineHeight:1.5}}>
+            ⚠ Once placed, this order will be submitted for processing.
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
+
+</script>
+<script id="c4" type="text/plain">
+function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
+  var now = Date.now();
+  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var myComm = (commissions||[]).filter(function(c){return c.repId===repId;});
+  var totalEarned = myComm.reduce(function(s,c){return s+(c.amount||0);},0);
+  var heldComm = myOrds.filter(function(o){
+    if(!o.deliveredAt) return false;
+    if(o.status==="Cancelled"||o.status==="Refunded") return false;
+    return (now-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var releasedComm = myOrds.filter(function(o){
+    if(!o.deliveredAt) return false;
+    if(o.status==="Cancelled"||o.status==="Refunded") return false;
+    var paidIds = myComm.map(function(c){return c.orderId;});
+    return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000 && paidIds.indexOf(o.id)<0;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var myCusts = customers.filter(function(c){return c.repId===repId;});
+
+  return (
+    <div>
+      <PageHeader title={"Welcome back, "+repName.split(" ")[0]+"!"} subtitle="Your sales dashboard"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:24}}>
+        <KpiCard label="My Orders" value={myOrds.length} sub={myOrds.filter(function(o){return o.status==="Submitted";}).length+" pending"} color={C.accent}/>
+        <KpiCard label="Total Earned" value={fmtMoney(totalEarned)} sub="Paid out" color={C.success}/>
+        <KpiCard label="Commission Due" value={fmtMoney(releasedComm)} sub="Ready for payout" color={C.gold}/>
+        <KpiCard label="My Customers" value={myCusts.length} sub="Active accounts" color={C.text}/>
+      </div>
+
+      {heldComm>0&&(
+        <div style={{padding:"12px 16px",background:C.warning+"10",border:"1px solid "+C.warning+"25",
+                     borderRadius:10,marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:13,color:C.warning}}>🔒 {fmtMoney(heldComm)} held — return window open</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:2}}>Commission releases {RETURN_WINDOW_DAYS} days after delivery</div>
+          </div>
+        </div>
+      )}
+
+      {/* Recent Orders */}
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+        <div style={{padding:"14px 18px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text}}>Recent Orders</div>
+          <button onClick={function(){onNav("orders");}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>View all →</button>
+        </div>
+        {myOrds.length===0 ? (
+          <div style={{padding:"28px",textAlign:"center"}}>
+            <div style={{fontSize:13,color:C.dim,marginBottom:10}}>No orders yet</div>
+            <Btn small onClick={function(){onNav("new_order");}}>Place First Order</Btn>
+          </div>
+        ) : (
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <tbody>
+              {myOrds.slice(0,5).map(function(o){return (
+                <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                  <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                  <td style={{padding:"10px 16px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                  <td style={{padding:"10px 16px"}}><Badge status={o.status}/></td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Rep Orders ─────────────────────────────────────────────────────────── */
+function RepOrders({repId,repName,orders,customers,products,setOrders,setCustomers,addToast,showResult}) {
+  const [showForm, setShowForm] = useState(false);
+  const [filter,   setFilter]   = useState("all");
+  const [viewOrd,  setViewOrd]  = useState(null);
+
+  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
+
+  return (
+    <div>
+      <PageHeader title="My Orders" subtitle={myOrds.length+" orders"}
+        action={<Btn onClick={function(){setShowForm(true);}}>+ New Order</Btn>}/>
+
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18,borderBottom:"1px solid "+C.border,paddingBottom:12}}>
+        {["all"].concat(ORDER_PIPELINE).concat(["Cancelled"]).map(function(s){
+          var active = filter===s;
+          return (
+            <button key={s} onClick={function(){setFilter(s);}}
+              style={{padding:"6px 12px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",
+                      fontSize:11,fontWeight:active?600:400,
+                      background:active?C.accent+"18":"transparent",color:active?C.accent:C.muted}}>
+              {s==="all"?"All":s}
+            </button>
+          );
+        })}
+      </div>
+
+      {filtered.length===0 ? (
+        <EmptyState icon="📦" title={filter==="all"?"No orders yet":"No "+filter+" orders"}
+          subtitle="Start by placing your first order."
+          action={filter==="all"?<Btn onClick={function(){setShowForm(true);}}>Place Order</Btn>:null}/>
+      ) : (
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:C.surface2}}>
+              {["Order","Customer","Date","Total","Commission","Status"].map(function(h){return (
+                <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+              );})}
+            </tr></thead>
+            <tbody>
+              {filtered.map(function(o){
+                var now2 = Date.now();
+                var delMs = o.deliveredAt ? new Date(o.deliveredAt).getTime() : null;
+                var held = delMs && (now2-delMs) < RETURN_WINDOW_DAYS*24*60*60*1000;
+                return (
+                  <tr key={o.id} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}}
+                    onClick={function(){setViewOrd(o);}}>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      <span style={{fontSize:12,fontFamily:"monospace",fontWeight:700,color:held?C.warning:C.gold}}>
+                        {held?"🔒 ":""}{fmtMoney(o.totals&&o.totals.commission||0)}
+                      </span>
+                    </td>
+                    <td style={{padding:"10px 14px"}}><Badge status={o.status}/></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showForm&&React.createElement(OrderForm,{
+        repId:repId,repName:repName,products:products,customers:customers,
+        setCustomers:setCustomers,setOrders:setOrders,
+        editOrder:null,onClose:function(){setShowForm(false);},
+        addToast:addToast,showResult:showResult,
+      })}
+    </div>
+  );
+}
+
+/* ─── Rep Customers ──────────────────────────────────────────────────────── */
+function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editCust, setEditCust] = useState(null);
+  const [name,     setName]     = useState("");
+  const [email,    setEmail]    = useState("");
+  const [company,  setCompany]  = useState("");
+  const [phone,    setPhone]    = useState("");
+  const [addr,     setAddr]     = useState("");
+  const [city,     setCity]     = useState("");
+  const [state,    setState2]   = useState("");
+  const [zip,      setZip]      = useState("");
+  const [search,   setSearch]   = useState("");
+
+  var myCusts = customers.filter(function(c){return c.repId===repId;});
+  var filtered = myCusts.filter(function(c){
+    if(!search) return true;
+    var s = search.toLowerCase();
+    return (c.name||"").toLowerCase().indexOf(s)>=0||(c.company||"").toLowerCase().indexOf(s)>=0;
+  });
+
+  function openNew() {setEditCust(null);setName("");setEmail("");setCompany("");setPhone("");setAddr("");setCity("");setState2("");setZip("");setShowForm(true);}
+  function openEdit(c) {setEditCust(c);setName(c.name||"");setEmail(c.email||"");setCompany(c.company||"");setPhone(c.phone||"");setAddr(c.address||"");setCity(c.city||"");setState2(c.state||"");setZip(c.zip||"");setShowForm(true);}
+
+  function save() {
+    if(!name.trim()) return;
+    var id = editCust ? editCust.id : genId("cust");
+    var data = {id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),
+                phone:phone.trim(),address:addr.trim(),city:city.trim(),state:state.trim(),zip:zip.trim(),
+                updatedAt:new Date().toISOString()};
+    if(!editCust) data.createdAt = new Date().toISOString();
+    setCustomers(function(prev){
+      return editCust ? prev.map(function(c){return c.id===editCust.id?data:c;}) : [data].concat(prev);
+    });
+    dbSave("crm_customers",id,data);
+    addToast(editCust?"Customer updated":"Customer added","success");
+    setShowForm(false);
+  }
+
+  return (
+    <div>
+      <PageHeader title="My Customers" subtitle={myCusts.length+" customers"}
+        action={<Btn onClick={openNew}>+ Add Customer</Btn>}/>
+      <div style={{marginBottom:14}}>
+        <input value={search} onChange={function(e){setSearch(e.target.value);}}
+          placeholder="Search customers…"
+          style={{width:"100%",maxWidth:360,background:C.surface,border:"1px solid "+C.border,
+                  borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+      </div>
+      {filtered.length===0 ? (
+        <EmptyState icon="👥" title="No customers" subtitle="Add your first customer to start placing orders."
+          action={<Btn onClick={openNew}>Add Customer</Btn>}/>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
+          {filtered.map(function(c){
+            var custOrds = orders.filter(function(o){return o.custId===c.id;});
+            var spend = custOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+            return (
+              <div key={c.id} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 18px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                  <Avatar name={c.name} size={34}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:14,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</div>
+                    {c.company&&<div style={{fontSize:11,color:C.dim}}>{c.company}</div>}
+                  </div>
+                </div>
+                {c.email&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>✉️ {c.email}</div>}
+                {c.phone&&<div style={{fontSize:11,color:C.muted,marginBottom:8}}>📞 {c.phone}</div>}
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.dim,
+                             padding:"8px 0",borderTop:"1px solid "+C.border,marginBottom:10}}>
+                  <span>{custOrds.length} orders</span>
+                  <span style={{fontWeight:700,color:C.success}}>{fmtMoney(spend)}</span>
+                </div>
+                <Btn small variant="ghost" fullWidth={true} onClick={function(){openEdit(c);}}>Edit</Btn>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {showForm&&(
+        <Modal title={editCust?"Edit Customer":"New Customer"} onClose={function(){setShowForm(false);}}
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn><Btn onClick={save}>{editCust?"Save Changes":"Add Customer"}</Btn></div>}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+            <div style={{gridColumn:"1/-1"}}><Field label="Full Name *" value={name} onChange={setName} placeholder="Dr. Jane Smith"/></div>
+            <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="jane@practice.com"/>
+            <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
+            <div style={{gridColumn:"1/-1"}}><Field label="Company / Practice" value={company} onChange={setCompany} placeholder="Smith Medical Group"/></div>
+            <div style={{gridColumn:"1/-1"}}><Field label="Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/></div>
+            <Field label="City" value={city} onChange={setCity}/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              <Field label="State" value={state} onChange={setState2} placeholder="CA"/>
+              <Field label="ZIP" value={zip} onChange={setZip}/>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ─── Rep Commissions ────────────────────────────────────────────────────── */
+function RepCommissions({repId,orders,commissions}) {
+  var now = Date.now();
+  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var myComm = (commissions||[]).filter(function(c){return c.repId===repId;});
+  var paidIds = myComm.map(function(c){return c.orderId;});
+
+  var held = myOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded") return false;
+    return (now-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  });
+  var released = myOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded") return false;
+    return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000 && paidIds.indexOf(o.id)<0;
+  });
+  var totalPaid = myComm.reduce(function(s,c){return s+(c.amount||0);},0);
+  var totalHeld = held.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var totalReady = released.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+
+  return (
+    <div>
+      <PageHeader title="My Commissions"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
+        <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub="Paid out" color={C.success}/>
+        <KpiCard label="Ready to Collect" value={fmtMoney(totalReady)} sub={released.length+" orders"} color={C.gold}/>
+        <KpiCard label="In Return Window" value={fmtMoney(totalHeld)} sub={"Held · "+RETURN_WINDOW_DAYS+"-day window"} color={C.warning}/>
+      </div>
+
+      {released.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>Ready to Release</div>
+          <div style={{background:C.surface,border:"1px solid "+C.gold+"30",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Order","Customer","Delivered","Commission"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {released.map(function(o){return (
+                  <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(o.totals&&o.totals.commission||0)}</td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Contact your admin to process payout for ready commissions.</div>
+        </div>
+      )}
+
+      {held.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>In Return Window</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Order","Customer","Delivers","Releases","Commission"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {held.map(function(o){
+                  var releaseDate = new Date(new Date(o.deliveredAt).getTime()+RETURN_WINDOW_DAYS*24*60*60*1000);
+                  return (
+                    <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                      <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
+                      <td style={{padding:"10px 14px",fontSize:11,color:C.warning,fontWeight:600}}>{fmtDate(releaseDate.toISOString())}</td>
+                      <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.warning}}>🔒 {fmtMoney(o.totals&&o.totals.commission||0)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {myComm.length>0&&(
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>Payment History</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Date","Order","Amount"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {myComm.map(function(c){return (
+                  <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(c.paidAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.dim}}>{c.orderId}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(c.amount)}</td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {myOrds.length===0&&myComm.length===0&&(
+        <EmptyState icon="💰" title="No commissions yet" subtitle="Commissions appear here after you place orders and they are delivered."/>
+      )}
+    </div>
+  );
+}
+
+/* ─── Rep Profile ────────────────────────────────────────────────────────── */
+
+</script>
+<script id="c5" type="text/plain">
+function RepProfile({user,repData,setReps,addToast}) {
+  const [tab,      setTab]      = useState("profile");
+  const [name,     setName]     = useState(user&&user.name||"");
+  const [phone,    setPhone]    = useState(repData&&repData.phone||"");
+  const [msg,      setMsg]      = useState("");
+  const [oldPass,  setOldPass]  = useState("");
+  const [newPass,  setNewPass2] = useState("");
+  const [conf,     setConf]     = useState("");
+  const [passMsg,  setPassMsg]  = useState("");
+
+  function saveProfile() {
+    if(!name.trim()) return;
+    if(setReps && repData) {
+      var updated = Object.assign({},repData,{name:name.trim(),phone:phone.trim()});
+      setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
+      dbSave("crm_reps",repData.id,updated);
+    }
+    addToast("Profile updated","success");
+    setMsg("Saved!"); setTimeout(function(){setMsg("");},3000);
+  }
+
+  function changePassword() {
+    if(!newPass2||newPass2.length<8){setPassMsg("New password must be at least 8 characters.");return;}
+    if(newPass2!==conf){setPassMsg("Passwords do not match.");return;}
+    var sb = getSB();
+    if(!sb){setPassMsg("Service unavailable.");return;}
+    setPassMsg("Updating…");
+    sb.auth.updateUser({password:newPass2})
+      .then(function(r){
+        if(r.error){setPassMsg(r.error.message);return;}
+        setPassMsg("Password updated successfully!");
+        setOldPass(""); setNewPass2(""); setConf("");
+        addToast("Password changed","success");
+      })
+      .catch(function(e){setPassMsg(e.message||"Error");});
+  }
+
+  var plan = repData ? REP_PLANS.find(function(p){return p.id===repData.planId;}) : null;
+  var TABS = [{id:"profile",l:"Profile"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+
+  return (
+    <div>
+      <PageHeader title="My Profile"/>
+      <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:24}}>
+        {TABS.map(function(t){
+          var active = tab===t.id;
+          return (
+            <button key={t.id} onClick={function(){setTab(t.id);}}
+              style={{padding:"8px 16px",background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",
+                      fontSize:13,fontWeight:active?600:400,color:active?C.text:C.dim,
+                      borderBottom:"2px solid "+(active?C.accent:"transparent"),marginBottom:-1}}>
+              {t.l}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab==="profile"&&(
+        <div style={{maxWidth:480}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:22,padding:"16px",
+                       background:C.surface2,borderRadius:12,border:"1px solid "+C.border}}>
+            <Avatar name={name||user&&user.name} size={48}/>
+            <div>
+              <div style={{fontWeight:700,fontSize:16,color:C.text}}>{name||user&&user.name}</div>
+              <div style={{fontSize:12,color:C.muted,marginTop:2}}>{user&&user.email}</div>
+              <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:2,textTransform:"capitalize"}}>Sales Rep</div>
+            </div>
+          </div>
+          <Field label="Full Name" value={name} onChange={setName}/>
+          <Field label="Email" value={user&&user.email} readOnly={true} hint="Email cannot be changed here."/>
+          <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
+          {msg&&<div style={{padding:"8px 12px",background:C.success+"12",borderRadius:6,color:C.success,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
+          <Btn onClick={saveProfile}>Save Profile</Btn>
+        </div>
+      )}
+
+      {tab==="subscription"&&(
+        <div style={{maxWidth:480}}>
+          {repData&&(
+            <div>
+              <div style={{background:C.surface2,borderRadius:12,padding:"18px 20px",marginBottom:16,border:"1px solid "+C.border}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Current Plan</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div>
+                    <div style={{fontSize:20,fontWeight:800,color:C.accent,letterSpacing:"-.02em"}}>{plan?plan.name:"No Plan"}</div>
+                    {plan&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>{plan.desc}</div>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {plan&&<div style={{fontSize:24,fontWeight:900,fontFamily:"monospace",color:C.text}}>${plan.price}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>}
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,
+                                  background:repData.subscriptionStatus==="active"?C.success+"18":C.warning+"18",
+                                  color:repData.subscriptionStatus==="active"?C.success:C.warning,
+                                  textTransform:"capitalize"}}>{repData.subscriptionStatus}</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+                {REP_PLANS.map(function(p,i){
+                  var current = repData.planId===p.id;
+                  return (
+                    <div key={p.id} style={{padding:"16px 18px",borderBottom:i<REP_PLANS.length-1?"1px solid "+C.border:"none",
+                                             background:current?C.accent+"08":"none"}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div>
+                          <div style={{fontWeight:700,fontSize:14,color:C.text}}>{p.name} {current&&<span style={{fontSize:10,color:C.accent,fontWeight:600}}>(current)</span>}</div>
+                          <div style={{fontSize:12,color:C.muted,marginTop:2}}>{p.desc}</div>
+                        </div>
+                        <div style={{fontFamily:"monospace",fontWeight:800,fontSize:18,color:C.accent}}>${p.price}<span style={{fontSize:11,color:C.dim,fontWeight:400}}>/mo</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>To change your plan, contact your admin at PreVasive.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab==="password"&&(
+        <div style={{maxWidth:400}}>
+          <Field label="New Password" value={newPass2} onChange={setNewPass2} type="password"/>
+          <Field label="Confirm Password" value={conf} onChange={setConf} type="password"/>
+          {passMsg&&<div style={{padding:"8px 12px",borderRadius:6,fontSize:12,fontWeight:600,marginBottom:12,
+                                  color:passMsg.indexOf("success")>=0?C.success:passMsg.indexOf("pdat")>=0?C.muted:C.danger,
+                                  background:passMsg.indexOf("success")>=0?C.success+"12":passMsg.indexOf("pdat")>=0?C.surface2:C.danger+"12"}}>{passMsg}</div>}
+          <Btn onClick={changePassword}>Update Password</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── App Shell ──────────────────────────────────────────────────────────── */
+function App() {
+  const [theme,       setTheme]       = useLS("theme","dark");
+  const [currentUser, setCurrentUser] = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [activeTab,   setActiveTab]   = useState("dashboard");
+  const [orders,      setOrders]      = useState([]);
+  const [customers,   setCustomers]   = useState([]);
+  const [products,    setProducts]    = useState([]);
+  const [reps,        setReps]        = useState([]);
+  const [commissions, setCommissions] = useState([]);
+  const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
+  const [toasts,      setToasts]      = useState([]);
+  const [resultModal, setResultModal] = useState(null);
+
+  // Apply theme
+  Object.assign(C, THEMES[theme]||THEMES.dark);
+
+  function addToast(msg, type, detail) {
+    var id = Date.now();
+    setToasts(function(prev){return [{id:id,msg:msg,type:type||"success",detail:detail||""}].concat(prev).slice(0,5);});
+    setTimeout(function(){setToasts(function(prev){return prev.filter(function(t){return t.id!==id;});});}, 4500);
+  }
+
+  function showResult(data) { setResultModal(data); }
+
+  // Session restore
+  useEffect(function() {
+    var sb = getSB();
+    if(!sb) { setLoading(false); return; }
+    sb.auth.getSession()
+      .then(function(r){
+        var session = r.data&&r.data.session;
+        if(!session) { setLoading(false); return; }
+        return sb.from("crm_users").select("*").eq("id",session.user.id).single()
+          .then(function(ur){
+            if(ur.data) setCurrentUser(Object.assign({},ur.data,{email:session.user.email}));
+            setLoading(false);
+          });
+      })
+      .catch(function(e){
+        console.warn("Session restore error:",e.message);
+        setLoading(false);
+      });
+  }, []);
+
+  // Load data when logged in
+  useEffect(function() {
+    if(!currentUser) return;
+    var alive = true;
+    dbLoad("crm_orders").then(function(d){if(alive) setOrders(d);});
+    dbLoad("crm_customers").then(function(d){if(alive) setCustomers(d);});
+    dbLoad("crm_products").then(function(d){if(alive) setProducts(d);});
+    dbLoad("crm_reps").then(function(d){if(alive) setReps(d);});
+    dbLoad("crm_commission_payouts").then(function(d){if(alive) setCommissions(d);});
+    return function(){alive=false;};
+  }, [currentUser&&currentUser.id]);
+
+  function handleLogin(user) { setCurrentUser(user); setActiveTab("dashboard"); }
+  function handleLogout() {
+    var sb = getSB();
+    if(sb) sb.auth.signOut();
+    setCurrentUser(null); setActiveTab("dashboard");
+  }
+
+  if(loading) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{width:32,height:32,border:"3px solid "+C.border,borderTopColor:C.accent,
+                     borderRadius:"50%",animation:"spin .7s linear infinite",margin:"0 auto 16px"}}/>
+        <div style={{fontSize:13,color:C.muted}}>Loading…</div>
+      </div>
+    </div>
+  );
+
+  if(!currentUser) return React.createElement(AppLanding, {onLogin:handleLogin});
+
+  var isAdmin = currentUser.role==="admin";
+  var myRepData = isAdmin ? null : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null;
+
+  var adminModules = [
+    {label:"General"},
+    {id:"dashboard",  name:"Dashboard",   icon:"◉"},
+    {id:"orders",     name:"Orders",      icon:"📦"},
+    {id:"customers",  name:"Customers",   icon:"👥"},
+    {id:"products",   name:"Products",    icon:"📋"},
+    {divider:true},
+    {label:"Management"},
+    {id:"reps",       name:"Sales Reps",  icon:"🤝"},
+    {id:"commissions",name:"Commissions", icon:"💰"},
+    {id:"settings",   name:"Settings",    icon:"⚙️"},
+  ];
+
+  var repModules = [
+    {id:"dashboard",  name:"Dashboard",   icon:"◉"},
+    {id:"new_order",  name:"New Order",   icon:"➕"},
+    {id:"orders",     name:"My Orders",   icon:"📦"},
+    {id:"customers",  name:"Customers",   icon:"👥"},
+    {id:"commissions",name:"Commissions", icon:"💰"},
+    {id:"profile",    name:"My Profile",  icon:"👤"},
+  ];
+
+  var modules = isAdmin ? adminModules : repModules;
+
+  return (
+    <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,
+                 fontFamily:"'Inter',system-ui,-apple-system,sans-serif"}}>
+      <Sidebar modules={modules} active={activeTab} onNav={setActiveTab}
+        user={currentUser} onLogout={handleLogout}
+        theme={theme} onToggleTheme={function(){setTheme(theme==="dark"?"light":"dark");}}/>
+
+      <main style={{flex:1,overflowY:"auto",padding:"28px 32px",minWidth:0}}>
+        {/* Admin Modules */}
+        {isAdmin&&activeTab==="dashboard"&&(
+          <AdminDashboard orders={orders} reps={reps} customers={customers} products={products} commissions={commissions} onNav={setActiveTab}/>
+        )}
+        {isAdmin&&activeTab==="orders"&&(
+          <AdminOrders orders={orders} reps={reps} customers={customers} products={products}
+            onUpdate={function(updated){setOrders(function(prev){return prev.map(function(o){return o.id===updated.id?updated:o;});});}}
+            addToast={addToast}/>
+        )}
+        {isAdmin&&activeTab==="customers"&&(
+          <AdminCustomers customers={customers} reps={reps} orders={orders} addToast={addToast}/>
+        )}
+        {isAdmin&&activeTab==="products"&&(
+          <AdminProducts products={products} setProducts={setProducts} addToast={addToast}/>
+        )}
+        {isAdmin&&activeTab==="reps"&&(
+          <AdminReps reps={reps} setReps={setReps} orders={orders} addToast={addToast} showResult={showResult}/>
+        )}
+        {isAdmin&&activeTab==="commissions"&&(
+          <AdminCommissions orders={orders} reps={reps} commissions={commissions}
+            setCommissions={setCommissions} addToast={addToast} showResult={showResult}/>
+        )}
+        {isAdmin&&activeTab==="settings"&&(
+          <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg} addToast={addToast}/>
+        )}
+
+        {/* Rep Modules */}
+        {!isAdmin&&activeTab==="dashboard"&&(
+          <RepDashboard repId={currentUser.rep_id||currentUser.id} repName={currentUser.name}
+            orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast}/>
+        )}
+        {!isAdmin&&(activeTab==="orders"||activeTab==="new_order")&&(
+          <RepOrders repId={currentUser.rep_id||currentUser.id} repName={currentUser.name}
+            orders={orders} customers={customers} products={products}
+            setOrders={setOrders} setCustomers={setCustomers}
+            addToast={addToast} showResult={showResult}/>
+        )}
+        {!isAdmin&&activeTab==="customers"&&(
+          <RepCustomers repId={currentUser.rep_id||currentUser.id}
+            customers={customers} setCustomers={setCustomers}
+            orders={orders} addToast={addToast}/>
+        )}
+        {!isAdmin&&activeTab==="commissions"&&(
+          <RepCommissions repId={currentUser.rep_id||currentUser.id}
+            orders={orders} commissions={commissions}/>
+        )}
+        {!isAdmin&&activeTab==="profile"&&(
+          <RepProfile user={currentUser} repData={myRepData} setReps={setReps} addToast={addToast}/>
+        )}
+        {!isAdmin&&activeTab==="new_order"&&null}
+      </main>
+
+      {React.createElement(ToastStack,{toasts:toasts,setToasts:setToasts})}
+      {resultModal&&React.createElement(ResultModal,{data:resultModal,onClose:function(){setResultModal(null);}})}
+    </div>
+  );
+}
+
+</script>
+
+<script>
+var N=6;
+window.addEventListener('load',function(){
+  var e=document.getElementById('err');
+  function showErr(m){e.style.display='block';e.textContent=m;}
+  try{
+    var code='const {useState,useCallback,useRef,useEffect}=React;\n';
+    for(var i=0;i<N;i++){
+      var src=document.getElementById('c'+i).textContent;
+      code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';
+    }
+    code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(App));';
+    new Function('React','ReactDOM',code)(React,ReactDOM);
+  }catch(ex){showErr('Error: '+ex.message+'\n\n'+(ex.stack||''));}
+});
+</script>
+</body></html>
