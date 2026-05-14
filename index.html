@@ -9,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}
+  body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;transition:background .2s,color .2s;}
   #root{min-height:100vh}
   #err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}
   input,button,select,textarea{font-family:"Inter",system-ui,-apple-system,sans-serif;}
@@ -341,13 +341,142 @@ function ResultModal({data,onClose}) {
 }
 
 /* ─── AppLanding ─────────────────────────────────────────────────────────── */
+var REP_AGREEMENT_VERSION = "1.0";
+var REP_AGREEMENT_CLAUSES = [
+  {id:"contractor",title:"1. Independent Contractor",text:"I understand I am an independent contractor, not an employee of PreVasive. I am responsible for my own taxes and expenses."},
+  {id:"commission",title:"2. Commission Structure",text:"I earn commission on net invoice value of orders placed and paid. Commission is subject to a 15-day return window from confirmed delivery. Returns or refunds forfeit commission for that order."},
+  {id:"subscription",title:"3. Subscription Plan & Access",text:"Platform access requires an active subscription plan after the 15-day free trial. My selected plan determines the maximum monthly commission I may earn. PreVasive may modify plan pricing with 30 days notice."},
+  {id:"confidential",title:"4. Confidentiality",text:"I agree to keep all customer, pricing, and proprietary business information strictly confidential during and after my engagement with PreVasive."},
+  {id:"conduct",title:"5. Professional Conduct",text:"I agree to represent PreVasive professionally and in accordance with all applicable laws and regulations in my sales territory."},
+  {id:"termination",title:"6. Termination",text:"Either party may terminate this agreement with 30 days written notice. Earned commissions for completed orders will be paid per normal schedule after termination."},
+];
+
+function RepAgreementModal({repName,onAgree,onDecline}) {
+  const [checked, setChecked] = useState({});
+  const [step,    setStep]    = useState("review");
+  var allChecked = REP_AGREEMENT_CLAUSES.every(function(cl){return checked[cl.id];});
+  function toggle(id) { setChecked(function(prev){return Object.assign({},prev,{[id]:!prev[id]});}); }
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.95)",backdropFilter:"blur(8px)",
+                 zIndex:5000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,
+                 fontFamily:"'Inter',system-ui,sans-serif"}}>
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,
+                   width:"100%",maxWidth:560,maxHeight:"90vh",display:"flex",flexDirection:"column",
+                   boxShadow:"0 24px 60px rgba(0,0,0,.5)"}}>
+        <div style={{padding:"22px 24px 16px",borderBottom:"1px solid "+C.border}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.accent,textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>Action Required</div>
+          <div style={{fontSize:19,fontWeight:700,color:C.text,letterSpacing:"-.02em"}}>Sales Representative Agreement</div>
+          <div style={{fontSize:12,color:C.muted,marginTop:4}}>Please review and accept each clause to continue. Version {REP_AGREEMENT_VERSION}</div>
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"20px 24px"}}>
+          {REP_AGREEMENT_CLAUSES.map(function(cl){
+            var ok = checked[cl.id];
+            return (
+              <div key={cl.id} style={{marginBottom:14,padding:"14px 16px",borderRadius:10,
+                                       background:ok?C.success+"08":C.surface2,
+                                       border:"1px solid "+(ok?C.success+"30":C.border),
+                                       transition:"all .15s"}}>
+                <div style={{fontWeight:700,fontSize:13,color:ok?C.success:C.text,marginBottom:6}}>{cl.title}</div>
+                <div style={{fontSize:12,color:C.muted,lineHeight:1.65,marginBottom:10}}>{cl.text}</div>
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+                  <input type="checkbox" checked={!!ok} onChange={function(){toggle(cl.id);}}
+                    style={{width:15,height:15,accentColor:C.success,cursor:"pointer"}}/>
+                  <span style={{fontSize:12,fontWeight:600,color:ok?C.success:C.muted}}>
+                    {ok?"I agree to this clause":"I agree to this clause"}
+                  </span>
+                </label>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{padding:"16px 24px",borderTop:"1px solid "+C.border,display:"flex",gap:10}}>
+          <button onClick={onDecline}
+            style={{flex:1,padding:"10px",borderRadius:6,border:"1px solid "+C.border,
+                    background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>
+            Decline & Sign Out
+          </button>
+          <button onClick={function(){if(allChecked) onAgree();}} disabled={!allChecked}
+            style={{flex:2,padding:"10px",borderRadius:6,border:"none",
+                    background:allChecked?C.accent:C.border,color:allChecked?"#fff":C.dim,
+                    cursor:allChecked?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700,
+                    fontSize:14,letterSpacing:"-.01em",boxShadow:allChecked?"0 2px 10px "+C.accent+"40":"none"}}>
+            {allChecked?"Sign Agreement →":"Check all clauses to continue ("+(REP_AGREEMENT_CLAUSES.filter(function(cl){return !checked[cl.id];}).length)+" remaining)"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function RepSubscriptionWall({rep,onActivate,onLogout}) {
+  const [selPlan, setSelPlan] = useState("starter");
+  var now = Date.now();
+  var trialMs = rep&&rep.trialStartedAt ? now-new Date(rep.trialStartedAt).getTime() : TRIAL_DAYS*25*60*60*1000;
+  var trialExpired = trialMs >= TRIAL_DAYS*24*60*60*1000;
+  var daysLeft = Math.max(0, Math.ceil((TRIAL_DAYS*24*60*60*1000-trialMs)/(24*60*60*1000)));
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.95)",backdropFilter:"blur(8px)",
+                 zIndex:5000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,
+                 fontFamily:"'Inter',system-ui,sans-serif"}}>
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:16,
+                   padding:"36px 32px",maxWidth:480,width:"100%",textAlign:"center",
+                   boxShadow:"0 24px 60px rgba(0,0,0,.5)"}}>
+        <div style={{width:56,height:56,borderRadius:"50%",background:C.warning+"15",
+                     border:"2px solid "+C.warning+"30",display:"flex",alignItems:"center",
+                     justifyContent:"center",fontSize:24,margin:"0 auto 18px"}}>
+          {trialExpired?"🔒":"⏳"}
+        </div>
+        <div style={{fontSize:21,fontWeight:700,color:C.text,marginBottom:6,letterSpacing:"-.02em"}}>
+          {trialExpired?"Trial Expired":"Trial Ending Soon"}
+        </div>
+        <div style={{fontSize:13,color:C.muted,marginBottom:24,lineHeight:1.6}}>
+          {trialExpired
+            ? "Your 15-day free trial has ended. Choose a plan to continue placing orders and earning commissions."
+            : daysLeft+" day"+(daysLeft!==1?"s":"")+" left on your trial. Upgrade now to keep your access."}
+        </div>
+        <div style={{display:"flex",gap:10,marginBottom:20}}>
+          {REP_PLANS.map(function(p){
+            var sel = selPlan===p.id;
+            return (
+              <button key={p.id} onClick={function(){setSelPlan(p.id);}}
+                style={{flex:1,padding:"14px 10px",borderRadius:10,fontFamily:"inherit",cursor:"pointer",
+                        border:"2px solid "+(sel?C.accent:C.border),
+                        background:sel?C.accent+"10":C.surface2,textAlign:"left"}}>
+                <div style={{fontWeight:800,fontSize:15,color:sel?C.accent:C.text,marginBottom:4}}>{p.name}</div>
+                <div style={{fontFamily:"monospace",fontWeight:900,fontSize:20,color:sel?C.accent:C.text}}>
+                  ${p.price}<span style={{fontSize:11,fontWeight:400,color:C.muted}}>/mo</span>
+                </div>
+                <div style={{fontSize:11,color:C.muted,marginTop:4}}>{p.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={function(){onActivate(selPlan);}}
+          style={{width:"100%",padding:"12px",borderRadius:6,border:"none",background:C.accent,
+                  color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:15,
+                  boxShadow:"0 2px 12px "+C.accent+"40",marginBottom:10,letterSpacing:"-.01em"}}>
+          Activate {(REP_PLANS.find(function(p){return p.id===selPlan;})||REP_PLANS[0]).name} Plan
+        </button>
+        <button onClick={onLogout}
+          style={{width:"100%",padding:"10px",borderRadius:6,border:"1px solid "+C.border,
+                  background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",
+                  fontWeight:500,fontSize:13}}>
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 function ApplyForm({onSubmit,onCancel}) {
   const [name,    setName]    = useState("");
   const [company, setCompany] = useState("");
   const [email,   setEmail]   = useState("");
   const [err,     setErr]     = useState("");
-  var inp = {width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",
-             borderRadius:6,padding:"9px 12px",color:"#f0f4ff",fontSize:13,
+  var inp = {width:"100%",background:C.surface2,border:"1px solid "+C.border,
+             borderRadius:6,padding:"9px 12px",color:C.text,fontSize:13,
              fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
   function submit() {
     if(!name.trim()||!email.trim()){setErr("Name and email are required.");return;}
@@ -358,16 +487,16 @@ function ApplyForm({onSubmit,onCancel}) {
       {err&&<div style={{padding:"8px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:12}}>{err}</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
         <div>
-          <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>Full Name *</div>
+          <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Full Name *</div>
           <input value={name} onChange={function(e){setName(e.target.value);}} placeholder="Jane Smith" style={inp}/>
         </div>
         <div>
-          <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>Company</div>
+          <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Company</div>
           <input value={company} onChange={function(e){setCompany(e.target.value);}} placeholder="Optional" style={inp}/>
         </div>
       </div>
       <div style={{marginBottom:20}}>
-        <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>Email *</div>
+        <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Email *</div>
         <input value={email} onChange={function(e){setEmail(e.target.value);}} type="email" placeholder="you@company.com" style={inp}/>
       </div>
       <button onClick={submit}
@@ -460,11 +589,11 @@ function AppLanding({onLogin}) {
   var navStyle = {
     position:"fixed",top:0,left:0,right:0,zIndex:100,
     borderBottom:"1px solid rgba(255,255,255,.06)",
-    background:"rgba(9,17,31,.96)",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)"
+    background:C.surface+"f5",backdropFilter:"blur(12px)",WebkitBackdropFilter:"blur(12px)"
   };
 
   if(resetMode) return (
-    <div style={{minHeight:"100vh",background:"#09111f",display:"flex",alignItems:"center",
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",
                  justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,
                    padding:"40px 36px",width:"100%",maxWidth:400,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
@@ -473,8 +602,8 @@ function AppLanding({onLogin}) {
             <div style={{width:52,height:52,borderRadius:"50%",background:"rgba(30,166,114,.15)",
                          display:"flex",alignItems:"center",justifyContent:"center",
                          fontSize:22,margin:"0 auto 18px"}}>✓</div>
-            <div style={{fontSize:20,fontWeight:700,marginBottom:8,color:"#f0f4ff",letterSpacing:"-.02em"}}>Password Updated</div>
-            <div style={{fontSize:13,color:"rgba(240,244,255,.4)",marginBottom:24,lineHeight:1.6}}>You can now sign in with your new password.</div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:8,color:C.text,letterSpacing:"-.02em"}}>Password Updated</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:24,lineHeight:1.6}}>You can now sign in with your new password.</div>
             <button onClick={function(){setResetMode(false);setResetDone(false);setNewPass("");setNewPass2("");setShowSignIn(true);}}
               style={{padding:"10px 28px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
                       cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,letterSpacing:"-.01em"}}>
@@ -483,8 +612,8 @@ function AppLanding({onLogin}) {
           </div>
         ) : (
           <div>
-            <div style={{fontSize:20,fontWeight:700,marginBottom:6,color:"#f0f4ff",letterSpacing:"-.02em"}}>Set new password</div>
-            <div style={{fontSize:13,color:"rgba(240,244,255,.4)",marginBottom:22}}>Minimum 8 characters.</div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:6,color:C.text,letterSpacing:"-.02em"}}>Set new password</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:22}}>Minimum 8 characters.</div>
             {resetErr&&<div style={{padding:"9px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:14}}>{resetErr}</div>}
             {["New Password","Confirm Password"].map(function(label,i){
               var val = i===0?newPass:newPass2;
@@ -492,13 +621,13 @@ function AppLanding({onLogin}) {
               var invalid = i===1&&newPass2&&newPass!==newPass2;
               return (
                 <div key={label} style={{marginBottom:12}}>
-                  <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.55)",marginBottom:4}}>{label}</div>
+                  <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>{label}</div>
                   <input value={val} onChange={function(e){set(e.target.value);}}
                     type="password" placeholder="••••••••"
                     onKeyDown={i===1?function(e){if(e.key==="Enter")handleReset();}:undefined}
-                    style={{width:"100%",background:"rgba(255,255,255,.04)",
-                            border:"1px solid "+(invalid?"rgba(223,27,65,.5)":"rgba(255,255,255,.1)"),
-                            borderRadius:6,padding:"9px 12px",color:"#f0f4ff",fontSize:13,
+                    style={{width:"100%",background:C.surface2,
+                            border:"1px solid "+(invalid?C.danger:C.border),
+                            borderRadius:6,padding:"9px 12px",color:C.text,fontSize:13,
                             fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
                   {invalid&&<div style={{fontSize:10,color:"#df1b41",marginTop:3}}>Passwords do not match</div>}
                 </div>
@@ -526,19 +655,19 @@ function AppLanding({onLogin}) {
   );
 
   return (
-    <div style={{minHeight:"100vh",background:"#09111f",fontFamily:"'Inter',system-ui,sans-serif",color:"#f0f4ff",overflowX:"hidden"}}>
+    <div style={{minHeight:"100vh",background:C.bg,fontFamily:"'Inter',system-ui,sans-serif",color:C.text,overflowX:"hidden"}}>
       <nav style={navStyle}>
         <div style={{maxWidth:1080,margin:"0 auto",padding:"0 28px",height:58,
                      display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <div style={{width:26,height:26,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>P</div>
             <span style={{fontWeight:700,fontSize:15,letterSpacing:"-.02em"}}>PreVasive</span>
-            <span style={{fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:4,background:"rgba(99,91,255,.15)",color:"#a49dff",letterSpacing:".04em"}}>REP SALES</span>
+            <span style={{fontSize:10,fontWeight:600,padding:"2px 6px",borderRadius:4,background:"rgba(99,91,255,.15)",color:C.accent,letterSpacing:".04em"}}>REP SALES</span>
           </div>
           <div style={{display:"flex",gap:8}}>
             <button onClick={function(){setSiErr("");setShowSignIn(true);}}
-              style={{padding:"6px 16px",borderRadius:6,border:"1px solid rgba(255,255,255,.15)",
-                      background:"transparent",color:"rgba(255,255,255,.85)",cursor:"pointer",
+              style={{padding:"6px 16px",borderRadius:6,border:"1px solid "+C.border,
+                      background:"transparent",color:C.text,cursor:"pointer",
                       fontFamily:"inherit",fontWeight:500,fontSize:13}}>
               Sign in
             </button>
@@ -566,15 +695,15 @@ function AppLanding({onLogin}) {
                        borderRadius:20,marginBottom:24,background:"rgba(99,91,255,.1)",
                        border:"1px solid rgba(99,91,255,.25)"}}>
             <div style={{width:5,height:5,borderRadius:"50%",background:"#635bff"}}/>
-            <span style={{fontSize:11,fontWeight:500,color:"#a49dff"}}>Sales rep platform · PreVasive USA</span>
+            <span style={{fontSize:11,fontWeight:500,color:C.accent}}>Sales rep platform · PreVasive USA</span>
           </div>
           <h1 style={{fontSize:"clamp(34px,5vw,60px)",fontWeight:700,lineHeight:1.1,
                        letterSpacing:"-.03em",margin:"0 0 20px",
-                       background:"linear-gradient(135deg,#fff 35%,rgba(255,255,255,.55) 100%)",
+                       background:"linear-gradient(135deg,"+C.text+" 35%,"+C.muted+" 100%)",
                        WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>
             Your sales.<br/>Fully managed.
           </h1>
-          <p style={{fontSize:"clamp(14px,2vw,17px)",color:"rgba(240,244,255,.5)",lineHeight:1.7,
+          <p style={{fontSize:"clamp(14px,2vw,17px)",color:C.muted,lineHeight:1.7,
                      margin:"0 auto 32px",maxWidth:460,fontWeight:400}}>
             Place orders, track commissions, manage your customers — all in one clean platform built for PreVasive sales reps.
           </p>
@@ -592,11 +721,11 @@ function AppLanding({onLogin}) {
               Sign In
             </button>
           </div>
-          <div style={{display:"flex",justifyContent:"center",borderTop:"1px solid rgba(255,255,255,.07)",paddingTop:28}}>
+          <div style={{display:"flex",justifyContent:"center",borderTop:"1px solid "+C.border,paddingTop:28}}>
             {["Orders tracked end-to-end","Commissions automated","15-day trial free"].map(function(item,i){return (
-              <div key={i} style={{flex:1,maxWidth:200,borderRight:i<2?"1px solid rgba(255,255,255,.07)":"none",
+              <div key={i} style={{flex:1,maxWidth:200,borderRight:i<2?"1px solid "+C.border:"none",
                                    padding:"0 20px",textAlign:"center"}}>
-                <div style={{fontSize:11,color:"rgba(240,244,255,.35)",lineHeight:1.5}}>{item}</div>
+                <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{item}</div>
               </div>
             );})}
           </div>
@@ -604,13 +733,13 @@ function AppLanding({onLogin}) {
       </div>
 
       {/* Features */}
-      <div style={{borderTop:"1px solid rgba(255,255,255,.06)",background:"rgba(255,255,255,.015)",padding:"56px 28px"}}>
+      <div style={{borderTop:"1px solid rgba(255,255,255,.06)",background:C.surface2,padding:"56px 28px"}}>
         <div style={{maxWidth:960,margin:"0 auto"}}>
           <div style={{textAlign:"center",marginBottom:40}}>
-            <div style={{fontSize:10,fontWeight:600,color:"#635bff",textTransform:"uppercase",letterSpacing:".1em",marginBottom:8}}>Platform</div>
-            <h2 style={{fontSize:"clamp(20px,3vw,30px)",fontWeight:700,letterSpacing:"-.025em",margin:0,color:"#f0f4ff"}}>Built for PreVasive reps</h2>
+            <div style={{fontSize:10,fontWeight:600,color:C.accent,textTransform:"uppercase",letterSpacing:".1em",marginBottom:8}}>Platform</div>
+            <h2 style={{fontSize:"clamp(20px,3vw,30px)",fontWeight:700,letterSpacing:"-.025em",margin:0,color:C.text}}>Built for PreVasive reps</h2>
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:1,background:"rgba(255,255,255,.06)",borderRadius:12,overflow:"hidden"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(260px,1fr))",gap:1,background:C.border,borderRadius:12,overflow:"hidden"}}>
             {[
               ["📦","Order Management","Place and track orders from quote to delivery with full status visibility."],
               ["💸","Commission Tracking","Real-time commission calculation with 15-day return window protection."],
@@ -619,10 +748,10 @@ function AppLanding({onLogin}) {
               ["🔔","Subscription Plans","Starter and Pro plans with commission ceilings. 15-day free trial."],
               ["📊","Your Dashboard","At-a-glance view of your pipeline, earnings, and customer activity."],
             ].map(function(f,i){return (
-              <div key={i} style={{padding:"24px",background:"#09111f"}}>
+              <div key={i} style={{padding:"24px",background:C.bg}}>
                 <div style={{fontSize:20,marginBottom:12}}>{f[0]}</div>
-                <div style={{fontWeight:600,fontSize:13,color:"#f0f4ff",marginBottom:6,letterSpacing:"-.01em"}}>{f[1]}</div>
-                <div style={{fontSize:12,color:"rgba(240,244,255,.38)",lineHeight:1.6}}>{f[2]}</div>
+                <div style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:6,letterSpacing:"-.01em"}}>{f[1]}</div>
+                <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>{f[2]}</div>
               </div>
             );})}
           </div>
@@ -631,10 +760,10 @@ function AppLanding({onLogin}) {
 
       {/* CTA */}
       <div style={{padding:"60px 28px",textAlign:"center",
-                   background:"linear-gradient(135deg,rgba(99,91,255,.1) 0%,rgba(0,119,255,.04) 100%)",
-                   borderTop:"1px solid rgba(99,91,255,.12)"}}>
-        <h2 style={{fontSize:"clamp(20px,3vw,32px)",fontWeight:700,letterSpacing:"-.025em",margin:"0 0 12px",color:"#f0f4ff"}}>Ready to start selling?</h2>
-        <p style={{fontSize:14,color:"rgba(240,244,255,.4)",margin:"0 0 24px"}}>Apply to become a PreVasive authorized sales rep.</p>
+                   background:C.surface2,
+                   borderTop:"1px solid "+C.border}}>
+        <h2 style={{fontSize:"clamp(20px,3vw,32px)",fontWeight:700,letterSpacing:"-.025em",margin:"0 0 12px",color:C.text}}>Ready to start selling?</h2>
+        <p style={{fontSize:14,color:C.muted,margin:"0 0 24px"}}>Apply to become a PreVasive authorized sales rep.</p>
         <button onClick={function(){setRegDone(false);setShowReg(true);}}
           style={{padding:"12px 32px",borderRadius:6,border:"none",background:"#635bff",color:"#fff",
                   cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
@@ -644,41 +773,41 @@ function AppLanding({onLogin}) {
       </div>
 
       {/* Footer */}
-      <div style={{padding:"20px 28px",borderTop:"1px solid rgba(255,255,255,.06)",
+      <div style={{padding:"20px 28px",borderTop:"1px solid "+C.border,
                    display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div style={{display:"flex",alignItems:"center",gap:7}}>
           <div style={{width:18,height:18,borderRadius:4,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:900,color:"#fff"}}>P</div>
-          <span style={{fontSize:11,color:"rgba(240,244,255,.25)",fontWeight:500}}>PreVasive Rep Sales · All rights reserved</span>
+          <span style={{fontSize:11,color:C.dim,fontWeight:500}}>PreVasive Rep Sales · All rights reserved</span>
         </div>
-        <span style={{fontSize:11,color:"rgba(240,244,255,.25)"}}>Powered by PreVasive</span>
+        <span style={{fontSize:11,color:C.dim}}>Powered by PreVasive</span>
       </div>
 
       {/* Sign In Modal */}
       {showSignIn&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.88)",backdropFilter:"blur(8px)",
+        <div style={{position:"fixed",inset:0,background:C.bg+"cc",backdropFilter:"blur(8px)",
                      zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,
-                       padding:"36px",width:"100%",maxWidth:380,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,
+                       padding:"36px",width:"100%",maxWidth:380,boxShadow:"0 24px 40px rgba(0,0,0,.2)"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:22}}>
               <div style={{width:24,height:24,borderRadius:5,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,color:"#fff"}}>P</div>
-              <span style={{fontWeight:700,fontSize:15,letterSpacing:"-.02em",color:"#f0f4ff"}}>PreVasive Rep Sales</span>
+              <span style={{fontWeight:700,fontSize:15,letterSpacing:"-.02em",color:C.text}}>PreVasive Rep Sales</span>
             </div>
-            <div style={{fontSize:19,fontWeight:700,marginBottom:5,letterSpacing:"-.02em",color:"#f0f4ff"}}>Sign in</div>
-            <div style={{fontSize:12,color:"rgba(240,244,255,.35)",marginBottom:20}}>Enter your credentials to continue</div>
+            <div style={{fontSize:19,fontWeight:700,marginBottom:5,letterSpacing:"-.02em",color:C.text}}>Sign in</div>
+            <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Enter your credentials to continue</div>
             {siErr&&<div style={{padding:"9px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:14}}>{siErr}</div>}
             <div style={{marginBottom:11}}>
-              <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.5)",marginBottom:4}}>Email</div>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Email</div>
               <input value={siEmail} onChange={function(e){setSiEmail(e.target.value);}} type="email" placeholder="you@company.com"
-                style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",
-                        borderRadius:6,padding:"9px 11px",color:"#f0f4ff",fontSize:13,
+                style={{width:"100%",background:C.surface2,border:"1px solid "+C.border,
+                        borderRadius:6,padding:"9px 11px",color:C.text,fontSize:13,
                         fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
             </div>
             <div style={{marginBottom:20}}>
-              <div style={{fontSize:11,fontWeight:500,color:"rgba(240,244,255,.5)",marginBottom:4}}>Password</div>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Password</div>
               <input value={siPass} onChange={function(e){setSiPass(e.target.value);}} type="password" placeholder="••••••••"
                 onKeyDown={function(e){if(e.key==="Enter")handleSignIn();}}
-                style={{width:"100%",background:"rgba(255,255,255,.04)",border:"1px solid rgba(255,255,255,.1)",
-                        borderRadius:6,padding:"9px 11px",color:"#f0f4ff",fontSize:13,
+                style={{width:"100%",background:C.surface2,border:"1px solid "+C.border,
+                        borderRadius:6,padding:"9px 11px",color:C.text,fontSize:13,
                         fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
             </div>
             <button onClick={handleSignIn} disabled={signingIn}
@@ -689,7 +818,7 @@ function AppLanding({onLogin}) {
             </button>
             <button onClick={function(){setShowSignIn(false);}}
               style={{width:"100%",padding:"9px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
-                      background:"transparent",color:"rgba(240,244,255,.4)",cursor:"pointer",
+                      background:"transparent",color:C.muted,cursor:"pointer",
                       fontFamily:"inherit",fontWeight:500,fontSize:12}}>
               Cancel
             </button>
@@ -699,17 +828,17 @@ function AppLanding({onLogin}) {
 
       {/* Apply Modal */}
       {showReg&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.88)",backdropFilter:"blur(8px)",
+        <div style={{position:"fixed",inset:0,background:C.bg+"cc",backdropFilter:"blur(8px)",
                      zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-          <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:12,
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,
                        padding:"36px",width:"100%",maxWidth:400,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
             {regDone ? (
               <div style={{textAlign:"center",padding:"8px 0"}}>
                 <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(30,166,114,.15)",
                              display:"flex",alignItems:"center",justifyContent:"center",
                              fontSize:20,margin:"0 auto 14px"}}>✓</div>
-                <div style={{fontSize:18,fontWeight:700,marginBottom:8,color:"#f0f4ff",letterSpacing:"-.02em"}}>Application received</div>
-                <div style={{fontSize:12,color:"rgba(240,244,255,.38)",marginBottom:22,lineHeight:1.6}}>
+                <div style={{fontSize:18,fontWeight:700,marginBottom:8,color:C.text,letterSpacing:"-.02em"}}>Application received</div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:22,lineHeight:1.6}}>
                   Under review. You will receive an invite email once approved.
                 </div>
                 <button onClick={function(){setShowReg(false);}}
@@ -718,8 +847,8 @@ function AppLanding({onLogin}) {
               </div>
             ) : (
               <div>
-                <div style={{fontSize:18,fontWeight:700,marginBottom:5,color:"#f0f4ff",letterSpacing:"-.02em"}}>Apply to join</div>
-                <div style={{fontSize:12,color:"rgba(240,244,255,.35)",marginBottom:20}}>Submit your information to apply as a sales rep.</div>
+                <div style={{fontSize:18,fontWeight:700,marginBottom:5,color:C.text,letterSpacing:"-.02em"}}>Apply to join</div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Submit your information to apply as a sales rep.</div>
                 <ApplyForm onSubmit={function(data){
                   var sb = getSB();
                   if(sb) {
@@ -821,6 +950,129 @@ function PageHeader({title,subtitle,action}) {
     </div>
   );
 }
+
+function CustomerProfile({customer,orders,onEdit,onClose}) {
+  const [tab, setTab] = useState("overview");
+  var custOrds = orders.filter(function(o){return o.custId===customer.id;});
+  var totalSpend = custOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+  var TABS = [{id:"overview",l:"Overview"},{id:"orders",l:"Orders ("+custOrds.length+")"},{id:"addresses",l:"Addresses"}];
+  return (
+    <Modal title={customer.name} wide={true} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        {onEdit&&<Btn variant="ghost" onClick={function(){onEdit(customer);onClose();}}>Edit Customer</Btn>}
+        <Btn variant="ghost" onClick={onClose}>Close</Btn>
+      </div>}>
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:20,padding:"14px 16px",
+                   background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
+        <Avatar name={customer.name} size={46}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:16,color:C.text}}>{customer.name}</div>
+          {customer.company&&<div style={{fontSize:12,color:C.muted,marginTop:1}}>{customer.company}</div>}
+          <div style={{display:"flex",gap:14,marginTop:6,fontSize:11,color:C.dim}}>
+            {customer.email&&<span>✉ {customer.email}</span>}
+            {customer.phone&&<span>📞 {customer.phone}</span>}
+          </div>
+        </div>
+        <div style={{textAlign:"right"}}>
+          <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:C.success}}>{fmtMoney(totalSpend)}</div>
+          <div style={{fontSize:11,color:C.dim,marginTop:2}}>lifetime spend</div>
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:20}}>
+        {TABS.map(function(t){
+          var act = tab===t.id;
+          return (
+            <button key={t.id} onClick={function(){setTab(t.id);}}
+              style={{padding:"7px 14px",background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",
+                      fontSize:13,fontWeight:act?600:400,color:act?C.text:C.dim,
+                      borderBottom:"2px solid "+(act?C.accent:"transparent"),marginBottom:-1}}>
+              {t.l}
+            </button>
+          );
+        })}
+      </div>
+
+      {tab==="overview"&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Contact Info</div>
+            <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
+              {[["Name",customer.name],["Email",customer.email||"—"],["Phone",customer.phone||"—"],
+                ["Company",customer.company||"—"],["Customer since",fmtDate(customer.createdAt)]
+              ].map(function(row,i){return (
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                     padding:"5px 0",borderBottom:i<4?"1px solid "+C.border:"none"}}>
+                  <span style={{color:C.muted}}>{row[0]}</span>
+                  <span style={{fontWeight:600,color:C.text}}>{row[1]}</span>
+                </div>
+              );})}
+            </div>
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Order Summary</div>
+            <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
+              {[["Total Orders",custOrds.length],
+                ["Total Spend",fmtMoney(totalSpend)],
+                ["Avg Order",fmtMoney(custOrds.length?totalSpend/custOrds.length:0)],
+                ["Last Order",custOrds.length?fmtDate(custOrds[0].createdAt):"—"],
+                ["Open Orders",custOrds.filter(function(o){return o.status!=="Paid"&&o.status!=="Cancelled";}).length],
+              ].map(function(row,i){return (
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                     padding:"5px 0",borderBottom:i<4?"1px solid "+C.border:"none"}}>
+                  <span style={{color:C.muted}}>{row[0]}</span>
+                  <span style={{fontWeight:600,color:i===1?C.success:C.text}}>{row[1]}</span>
+                </div>
+              );})}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab==="orders"&&(
+        custOrds.length===0 ? <EmptyState icon="📦" title="No orders yet" subtitle="Orders for this customer will appear here."/> : (
+          <div style={{background:C.surface2,borderRadius:10,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Order","Date","Total","Status"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {custOrds.map(function(o){return (
+                  <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                    <td style={{padding:"9px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                    <td style={{padding:"9px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
+                    <td style={{padding:"9px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                    <td style={{padding:"9px 14px"}}><Badge status={o.status}/></td>
+                  </tr>
+                );})}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+
+      {tab==="addresses"&&(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+          {[["Billing Address",customer.billingAddress||customer.address],
+            ["Shipping Address",customer.shippingAddress||customer.address]
+          ].map(function(block,i){return (
+            <div key={i} style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{block[0]}</div>
+              {block[1] ? (
+                <div style={{fontSize:13,color:C.text,lineHeight:1.7}}>{block[1]}</div>
+              ) : (
+                <div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>Not set</div>
+              )}
+            </div>
+          );})}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
@@ -1227,7 +1479,8 @@ function AdminProducts({products,setProducts,addToast}) {
 
 /* ─── Admin Customers ────────────────────────────────────────────────────── */
 function AdminCustomers({customers,reps,orders,addToast}) {
-  const [search, setSearch] = useState("");
+  const [search,   setSearch]   = useState("");
+  const [viewCust, setViewCust] = useState(null);
   var filtered = customers.filter(function(c){
     if(!search) return true;
     var s = search.toLowerCase();
@@ -1261,7 +1514,8 @@ function AdminCustomers({customers,reps,orders,addToast}) {
                 var custOrds = orders.filter(function(o){return o.custId===c.id;});
                 var spend = custOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
                 return (
-                  <tr key={c.id} style={{borderTop:"1px solid "+C.border}}>
+                  <tr key={c.id} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}}
+                    onClick={function(){setViewCust(c);}}>
                     <td style={{padding:"10px 16px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <Avatar name={c.name} size={28}/>
@@ -1280,12 +1534,15 @@ function AdminCustomers({customers,reps,orders,addToast}) {
           </table>
         </div>
       )}
+      {viewCust&&(
+        <CustomerProfile customer={viewCust} orders={orders} onClose={function(){setViewCust(null);}}/>
+      )}
     </div>
   );
 }
 
 /* ─── Admin Reps ─────────────────────────────────────────────────────────── */
-function AdminReps({reps,setReps,orders,addToast,showResult}) {
+function AdminReps({reps,setReps,orders,applications,setApplications,addToast,showResult}) {
   const [tab,      setTab]      = useState("reps");
   const [showForm, setShowForm] = useState(false);
   const [name,     setName]     = useState("");
@@ -1331,7 +1588,7 @@ function AdminReps({reps,setReps,orders,addToast,showResult}) {
     addToast("Plan updated for "+rep.name,"info");
   }
 
-  var TABS = [{id:"reps",label:"Sales Reps"},{id:"subscriptions",label:"Subscriptions"}];
+  var TABS = [{id:"reps",label:"Sales Reps"},{id:"applications",label:"Applications"},{id:"subscriptions",label:"Subscriptions"}];
 
   return (
     <div>
@@ -1357,7 +1614,7 @@ function AdminReps({reps,setReps,orders,addToast,showResult}) {
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr style={{background:C.surface2}}>
-                {["Rep","Email","Status","Orders","Commission","Actions"].map(function(h){return (
+                {["Rep","Email","Status","W-9","Orders","Commission","Actions"].map(function(h){return (
                   <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
                 );})}
               </tr></thead>
@@ -1379,12 +1636,27 @@ function AdminReps({reps,setReps,orders,addToast,showResult}) {
                         <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"18",color:sc,textTransform:"capitalize"}}>{rep.status}</span>
                       </td>
                       <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{repOrds.length}</td>
+                      <td style={{padding:"10px 16px"}}>
+                        <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,
+                          background:rep.w9ReviewStatus==="approved"?C.success+"18":rep.w9Status==="received"?C.warning+"18":C.surface2,
+                          color:rep.w9ReviewStatus==="approved"?C.success:rep.w9Status==="received"?C.warning:C.dim}}>
+                          {rep.w9ReviewStatus==="approved"?"✓ Verified":rep.w9Status==="received"?"Pending":"Not filed"}
+                        </span>
+                      </td>
                       <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(totalComm)}</td>
                       <td style={{padding:"10px 16px"}}>
                         <div style={{display:"flex",gap:6}}>
                           {rep.status==="pending"&&<Btn small onClick={function(){approve(rep);}}>Approve</Btn>}
                           {rep.status==="active"&&<Btn small variant="ghost" onClick={function(){suspend(rep);}}>Suspend</Btn>}
                           {rep.status==="suspended"&&<Btn small variant="success" onClick={function(){approve(rep);}}>Reactivate</Btn>}
+                          {rep.w9Status==="received"&&rep.w9ReviewStatus!=="approved"&&(
+                            <Btn small variant="success" onClick={function(){
+                              var updated=Object.assign({},rep,{w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()});
+                              setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+                              dbSave("crm_reps",rep.id,updated);
+                              addToast("W-9 approved for "+rep.name,"success");
+                            }}>✓ W-9</Btn>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1394,6 +1666,67 @@ function AdminReps({reps,setReps,orders,addToast,showResult}) {
             </table>
           </div>
         )
+      )}
+
+      {tab==="applications"&&(
+        <div>
+          {applications.length===0 ? (
+            <EmptyState icon="📋" title="No applications" subtitle="Applications submitted via the landing page appear here."/>
+          ) : (
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:C.surface2}}>
+                  {["Applicant","Email","Company","Submitted","Status",""].map(function(h){return (
+                    <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                  );})}
+                </tr></thead>
+                <tbody>
+                  {applications.map(function(app){
+                    return (
+                      <tr key={app.id} style={{borderTop:"1px solid "+C.border}}>
+                        <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:C.text}}>{app.name}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{app.email}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{app.company||"—"}</td>
+                        <td style={{padding:"10px 14px",fontSize:11,color:C.dim}}>{fmtDate(app.submittedAt)}</td>
+                        <td style={{padding:"10px 14px"}}>
+                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
+                                        background:app.status==="approved"?C.success+"18":app.status==="declined"?C.danger+"18":C.warning+"18",
+                                        color:app.status==="approved"?C.success:app.status==="declined"?C.danger:C.warning,
+                                        textTransform:"capitalize"}}>{app.status||"pending"}</span>
+                        </td>
+                        <td style={{padding:"10px 14px"}}>
+                          {(!app.status||app.status==="pending")&&(
+                            <div style={{display:"flex",gap:6}}>
+                              <Btn small onClick={function(){
+                                var id = genId("rep");
+                                var newRep = {id:id,name:app.name,email:app.email,company:app.company||"",
+                                  status:"active",subscriptionStatus:"trial",
+                                  trialStartedAt:new Date().toISOString(),planId:"starter",
+                                  createdAt:new Date().toISOString()};
+                                setReps(function(prev){return [newRep].concat(prev);});
+                                dbSave("crm_reps",id,newRep);
+                                var updated = Object.assign({},app,{status:"approved"});
+                                setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
+                                dbSave("crm_applications",app.id,updated);
+                                addToast(app.name+" approved as rep","success");
+                              }}>Approve</Btn>
+                              <Btn small variant="ghost" onClick={function(){
+                                var updated = Object.assign({},app,{status:"declined"});
+                                setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
+                                dbSave("crm_applications",app.id,updated);
+                                addToast(app.name+" application declined","warning");
+                              }}>Decline</Btn>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {tab==="subscriptions"&&(
@@ -1464,6 +1797,9 @@ function AdminReps({reps,setReps,orders,addToast,showResult}) {
 }
 
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
+
+</script>
+<script id="c3" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult}) {
   var now = Date.now();
   var releasedOrds = orders.filter(function(o){
@@ -1565,9 +1901,6 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-
-</script>
-<script id="c3" type="text/plain">
 function AdminSettings({supabaseCfg,onSaveSupabase,addToast}) {
   const [url,     setUrl]     = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey, setAnonKey] = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -1635,7 +1968,291 @@ function AdminSettings({supabaseCfg,onSaveSupabase,addToast}) {
   );
 }
 
+/* ─── Email Module ───────────────────────────────────────────────────────── */
+var EMAIL_TEMPLATES = [
+  {id:"followup",  label:"Follow-up",    subject:"Following up on your PreVasive order",
+   body:"Hi {{customer_name}},\n\nI wanted to follow up on your recent order {{order_id}}. Please let me know if you have any questions or need anything.\n\nBest,\n{{rep_name}}"},
+  {id:"intro",     label:"Introduction", subject:"Introducing PreVasive — Medical Solutions",
+   body:"Hi {{customer_name}},\n\nI would love to introduce you to PreVasive's product line. We specialize in medical solutions that can benefit your practice.\n\nWould you have 15 minutes for a quick call?\n\nBest,\n{{rep_name}}"},
+  {id:"reorder",   label:"Reorder Reminder", subject:"Time to reorder your PreVasive supplies",
+   body:"Hi {{customer_name}},\n\nBased on your last order, you may be running low on supplies. I can have a new order processed quickly.\n\nLet me know and I will take care of it right away.\n\nBest,\n{{rep_name}}"},
+  {id:"thankyou",  label:"Thank You",    subject:"Thank you for your order",
+   body:"Hi {{customer_name}},\n\nThank you for your order {{order_id}}. We appreciate your business and look forward to serving you again.\n\nDon't hesitate to reach out if you need anything.\n\nBest,\n{{rep_name}}"},
+  {id:"custom",    label:"Custom",       subject:"", body:""},
+];
+
+var EMAIL_VARS = ["{{customer_name}}","{{rep_name}}","{{order_id}}","{{date}}","{{company}}"];
+
+function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult}) {
+  const [toId,      setToId]      = useState("");
+  const [toEmail,   setToEmail]   = useState("");
+  const [subject,   setSubject]   = useState("");
+  const [body,      setBody]      = useState("");
+  const [tmpl,      setTmpl]      = useState("custom");
+  const [search,    setSearch]    = useState("");
+  const [custOpen,  setCustOpen]  = useState(false);
+  const [sending,   setSending]   = useState(false);
+  const [emailLog,  setEmailLog]  = useState([]);
+
+  var myCustomers = isAdmin ? customers : customers.filter(function(c2){
+    return c2.repId===(currentUser&&(currentUser.rep_id||currentUser.id));
+  });
+  var selCust = myCustomers.find(function(c2){return c2.id===toId;})||null;
+  var filtCusts = search ? myCustomers.filter(function(c2){
+    var s=search.toLowerCase();
+    return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.email||"").toLowerCase().indexOf(s)>=0;
+  }) : myCustomers;
+
+  function applyTemplate(t) {
+    setTmpl(t.id);
+    var repName = currentUser&&currentUser.name||"";
+    var custName = selCust?selCust.name:"{{customer_name}}";
+    var company = selCust&&selCust.company?selCust.company:"{{company}}";
+    var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+    function fill(str) {
+      return str
+        .replace(/\{\{customer_name\}\}/g,custName)
+        .replace(/\{\{rep_name\}\}/g,repName)
+        .replace(/\{\{company\}\}/g,company)
+        .replace(/\{\{date\}\}/g,date)
+        .replace(/\{\{order_id\}\}/g,"");
+    }
+    setSubject(fill(t.subject));
+    setBody(fill(t.body));
+  }
+
+  function insertVar(v) {
+    var el = document.getElementById("email-body-ta");
+    if(el) {
+      var s=el.selectionStart; var e=el.selectionEnd;
+      var newBody = body.slice(0,s)+v+body.slice(e);
+      setBody(newBody);
+    } else {
+      setBody(body+v);
+    }
+  }
+
+  function send() {
+    if(!toEmail.trim()){return;}
+    setSending(true);
+    setTimeout(function(){
+      setSending(false);
+      var entry = {id:genId("email"),to:toEmail,toName:selCust?selCust.name:toEmail,
+                   subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
+      setEmailLog(function(prev){return [entry].concat(prev);});
+      addToast("Email sent to "+(selCust?selCust.name:toEmail),"success");
+      showResult({type:"email",title:"Email Sent!",subtitle:"Message delivered successfully.",
+        rows:[["To",selCust?selCust.name+" <"+toEmail+">":toEmail],
+              ["Subject",subject||"(no subject)"],
+              ["Sent",new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"})]],cta:"Done"});
+      setSubject(""); setBody(""); setToId(""); setToEmail(""); setTmpl("custom");
+    }, 800);
+  }
+
+  return (
+    <div>
+      <PageHeader title="Email" subtitle="Compose and send messages to customers"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 360px",gap:20,alignItems:"start"}}>
+        {/* Compose */}
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          {/* Templates */}
+          <div style={{padding:"14px 18px",borderBottom:"1px solid "+C.border,
+                       display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:11,fontWeight:600,color:C.dim,marginRight:4}}>TEMPLATE:</span>
+            {EMAIL_TEMPLATES.map(function(t){
+              var sel = tmpl===t.id;
+              return (
+                <button key={t.id} onClick={function(){applyTemplate(t);}}
+                  style={{padding:"4px 10px",borderRadius:20,border:"none",fontFamily:"inherit",cursor:"pointer",
+                          fontSize:11,fontWeight:sel?700:400,
+                          background:sel?C.accent+"18":"transparent",color:sel?C.accent:C.muted}}>
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{padding:"18px"}}>
+            {/* To field */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>To</div>
+              <div style={{position:"relative"}}>
+                <div onClick={function(){setCustOpen(!custOpen);}}
+                  style={{padding:"8px 12px",background:C.bg,border:"1px solid "+(custOpen?C.accent:C.border),
+                          borderRadius:7,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                  {selCust
+                    ? <span style={{fontSize:13,fontWeight:600,color:C.text}}>{selCust.name} &lt;{selCust.email||toEmail}&gt;</span>
+                    : <span style={{fontSize:13,color:C.dim}}>Select customer or type email…</span>}
+                  <span style={{fontSize:10,color:C.dim}}>{custOpen?"▲":"▼"}</span>
+                </div>
+                {custOpen&&(
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:200,
+                               background:C.surface,border:"1px solid "+C.border,borderRadius:8,
+                               boxShadow:"0 8px 32px rgba(0,0,0,.25)",marginTop:4}}>
+                    <div style={{padding:8,borderBottom:"1px solid "+C.border}}>
+                      <input autoFocus value={search} onChange={function(e){setSearch(e.target.value);}}
+                        placeholder="Search or type email…"
+                        style={{width:"100%",background:C.surface2,border:"1px solid "+C.border,borderRadius:6,
+                                padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div style={{maxHeight:200,overflowY:"auto"}}>
+                      {search&&search.indexOf("@")>=0&&(
+                        <div onClick={function(){setToEmail(search);setToId("");setCustOpen(false);setSearch("");}}
+                          style={{padding:"9px 12px",cursor:"pointer",fontSize:12,color:C.accent,fontWeight:600,borderBottom:"1px solid "+C.border}}>
+                          Send to: {search}
+                        </div>
+                      )}
+                      {filtCusts.map(function(cu){return (
+                        <div key={cu.id} onClick={function(){setToId(cu.id);setToEmail(cu.email||"");setCustOpen(false);setSearch("");}}
+                          style={{padding:"9px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,
+                                  background:cu.id===toId?C.accent+"10":"none",borderBottom:"1px solid "+C.border}}>
+                          <Avatar name={cu.name} size={24}/>
+                          <div>
+                            <div style={{fontSize:12,fontWeight:600,color:C.text}}>{cu.name}</div>
+                            <div style={{fontSize:10,color:C.dim}}>{cu.email||"no email"}</div>
+                          </div>
+                        </div>
+                      );})}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Subject */}
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Subject</div>
+              <input value={subject} onChange={function(e){setSubject(e.target.value);}}
+                placeholder="Email subject…"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                        padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+
+            {/* Variable toolbar */}
+            <div style={{marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span style={{fontSize:10,fontWeight:600,color:C.dim}}>INSERT:</span>
+              {EMAIL_VARS.map(function(v){return (
+                <button key={v} onClick={function(){insertVar(v);}}
+                  style={{padding:"2px 8px",borderRadius:4,border:"1px solid "+C.border,background:C.surface2,
+                          color:C.accent,cursor:"pointer",fontFamily:"monospace",fontSize:10,fontWeight:600}}>
+                  {v}
+                </button>
+              );})}
+            </div>
+
+            {/* Body */}
+            <div style={{marginBottom:14}}>
+              <textarea id="email-body-ta" value={body} onChange={function(e){setBody(e.target.value);}}
+                rows={10} placeholder="Write your message…"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                        padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
+                        boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
+            </div>
+
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:11,color:C.dim}}>{body.length} characters</div>
+              <Btn onClick={send} disabled={sending||!toEmail.trim()||!body.trim()}>
+                {sending?"Sending…":"Send Email →"}
+              </Btn>
+            </div>
+          </div>
+        </div>
+
+        {/* Preview + Log */}
+        <div>
+          {/* Live Preview */}
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,
+                       overflow:"hidden",marginBottom:14}}>
+            <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Preview</div>
+            <div style={{padding:"14px",maxHeight:260,overflowY:"auto"}}>
+              {subject&&<div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:8,paddingBottom:8,borderBottom:"1px solid "+C.border}}>{subject}</div>}
+              {body ? (
+                <div style={{fontSize:12,color:C.muted,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{body}</div>
+              ) : (
+                <div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>Start typing to preview…</div>
+              )}
+            </div>
+          </div>
+
+          {/* Sent Log */}
+          {emailLog.length>0&&(
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Sent</div>
+              {emailLog.slice(0,5).map(function(e){return (
+                <div key={e.id} style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:12}}>
+                  <div style={{fontWeight:600,color:C.text,marginBottom:2}}>{e.toName}</div>
+                  <div style={{color:C.muted,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</div>
+                  <div style={{color:C.dim,fontSize:10,marginTop:2}}>{fmtDate(e.sentAt)}</div>
+                </div>
+              );})}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function generateInvoice(order, customers, products, currentUser) {
+  var cust = customers.find(function(x){return x.id===order.custId;})||{};
+  var date = fmtDate(order.createdAt);
+  var dueDate = fmtDate(new Date(new Date(order.createdAt).getTime()+30*24*60*60*1000).toISOString());
+  var rows = (order.items||[]).map(function(it){
+    var p = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+    var line = (p.price||0)*it.qty;
+    return "<tr><td style='padding:8px 12px;border-bottom:1px solid #e8ecef'>"+p.name+"</td>"
+      +"<td style='padding:8px 12px;border-bottom:1px solid #e8ecef;text-align:center'>"+it.qty+"</td>"
+      +"<td style='padding:8px 12px;border-bottom:1px solid #e8ecef;text-align:right'>"+fmtMoney(p.price||0)+"</td>"
+      +"<td style='padding:8px 12px;border-bottom:1px solid #e8ecef;text-align:right;font-weight:600'>"+fmtMoney(line)+"</td>"
+      +"</tr>";
+  }).join("");
+  var totals = order.totals||{};
+  var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+    +"<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;color:#1a1a2e;max-width:720px;margin:0 auto;padding:40px 24px;font-size:13px}"
+    +"h1{font-size:28px;font-weight:800;letter-spacing:-.03em}.muted{color:#6b7c93}.mono{font-family:monospace}"
+    +"table{width:100%;border-collapse:collapse}.th{padding:8px 12px;background:#f6f9fc;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600}"
+    +"</style></head><body>"
+    +"<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px'>"
+    +"<div><div style='font-size:22px;font-weight:900;color:#635bff'>PreVasive</div><div style='font-size:11px;color:#6b7c93;margin-top:2px'>Medical Solutions</div></div>"
+    +"<div style='text-align:right'><h1>Invoice</h1><div class='mono' style='color:#635bff;margin-top:4px'>"+order.id+"</div>"
+    +"<div style='margin-top:6px;font-size:12px;color:#6b7c93'>Date: "+date+"<br>Due: "+dueDate+"</div></div></div>"
+    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:28px'>"
+    +"<div><div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b7c93;margin-bottom:8px'>Bill To</div>"
+    +"<div style='font-weight:700;font-size:14px'>"+(cust.name||"Customer")+"</div>"
+    +(cust.company?"<div style='color:#6b7c93'>"+cust.company+"</div>":"")
+    +(cust.email?"<div style='color:#6b7c93'>"+cust.email+"</div>":"")
+    +"</div>"
+    +"<div><div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b7c93;margin-bottom:8px'>Sales Rep</div>"
+    +"<div style='font-weight:700;font-size:14px'>"+(order.repName||"Rep")+"</div>"
+    +(currentUser&&currentUser.email?"<div style='color:#6b7c93'>"+currentUser.email+"</div>":"")
+    +"</div></div>"
+    +"<table><thead><tr>"
+    +"<th class='th' style='text-align:left'>Product</th><th class='th' style='text-align:center'>Qty</th>"
+    +"<th class='th' style='text-align:right'>Unit Price</th><th class='th' style='text-align:right'>Total</th>"
+    +"</tr></thead><tbody>"+rows+"</tbody>"
+    +"<tfoot>"
+    +(totals.shipping>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Shipping</td><td class='mono' style='padding:8px 12px;text-align:right'>"+fmtMoney(totals.shipping||0)+"</td></tr>":"")
+    +(totals.tax>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Tax</td><td class='mono' style='padding:8px 12px;text-align:right'>"+fmtMoney(totals.tax||0)+"</td></tr>":"")
+    +"<tr><td colspan='3' style='padding:12px;text-align:right;font-weight:800;font-size:15px'>Total Due</td>"
+    +"<td class='mono' style='padding:12px;text-align:right;font-weight:900;font-size:18px;color:#635bff'>"+fmtMoney(totals.grand||0)+"</td></tr>"
+    +"</tfoot></table>"
+    +"<div style='margin-top:32px;padding-top:20px;border-top:1px solid #e8ecef;color:#6b7c93;font-size:11px;line-height:1.7'>"
+    +"Payment due within 30 days of invoice date. Thank you for your business.</div>"
+    +"</body></html>";
+  var blob = new Blob([html],{type:"text/html"});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href=url; a.download="Invoice-"+order.id+".html";
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);document.body.removeChild(a);},100);
+}
+
+
 /* ─── Order Form (3-Step) ────────────────────────────────────────────────── */
+
+</script>
+<script id="c4" type="text/plain">
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     editOrder,onClose,addToast,showResult}) {
   const [step,       setStep]       = useState(1);
@@ -2039,7 +2656,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c4" type="text/plain">
+<script id="c5" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
   var now = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -2110,7 +2727,7 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 }
 
 /* ─── Rep Orders ─────────────────────────────────────────────────────────── */
-function RepOrders({repId,repName,orders,customers,products,setOrders,setCustomers,addToast,showResult}) {
+function RepOrders({repId,repName,currentUser,orders,customers,products,setOrders,setCustomers,addToast,showResult}) {
   const [showForm, setShowForm] = useState(false);
   const [filter,   setFilter]   = useState("all");
   const [viewOrd,  setViewOrd]  = useState(null);
@@ -2188,6 +2805,7 @@ function RepOrders({repId,repName,orders,customers,products,setOrders,setCustome
 /* ─── Rep Customers ──────────────────────────────────────────────────────── */
 function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
   const [showForm, setShowForm] = useState(false);
+  const [viewCust2, setViewCust2] = useState(null);
   const [editCust, setEditCust] = useState(null);
   const [name,     setName]     = useState("");
   const [email,    setEmail]    = useState("");
@@ -2258,6 +2876,7 @@ function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
                   <span>{custOrds.length} orders</span>
                   <span style={{fontWeight:700,color:C.success}}>{fmtMoney(spend)}</span>
                 </div>
+<Btn small variant="outline" fullWidth={true} onClick={function(){setViewCust2(c);}} style={{marginBottom:6}}>View Profile</Btn>
                 <Btn small variant="ghost" fullWidth={true} onClick={function(){openEdit(c);}}>Edit</Btn>
               </div>
             );
@@ -2265,6 +2884,9 @@ function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
         </div>
       )}
 
+      {viewCust2&&(
+        <CustomerProfile customer={viewCust2} orders={orders} onEdit={openEdit} onClose={function(){setViewCust2(null);}}/> 
+      )}
       {showForm&&(
         <Modal title={editCust?"Edit Customer":"New Customer"} onClose={function(){setShowForm(false);}}
           footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn><Btn onClick={save}>{editCust?"Save Changes":"Add Customer"}</Btn></div>}>
@@ -2403,8 +3025,8 @@ function RepCommissions({repId,orders,commissions}) {
 /* ─── Rep Profile ────────────────────────────────────────────────────────── */
 
 </script>
-<script id="c5" type="text/plain">
-function RepProfile({user,repData,setReps,addToast}) {
+<script id="c6" type="text/plain">
+function RepProfile({user,repData,setReps,commissions,addToast}) {
   const [tab,      setTab]      = useState("profile");
   const [name,     setName]     = useState(user&&user.name||"");
   const [phone,    setPhone]    = useState(repData&&repData.phone||"");
@@ -2442,7 +3064,12 @@ function RepProfile({user,repData,setReps,addToast}) {
   }
 
   var plan = repData ? REP_PLANS.find(function(p){return p.id===repData.planId;}) : null;
-  var TABS = [{id:"profile",l:"Profile"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+  var TABS = [{id:"profile",l:"Profile"},{id:"documents",l:"Documents"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+  const [w9Name,  setW9Name]  = useState(repData&&repData.w9LegalName||"");
+  const [w9Ssn,   setW9Ssn]   = useState("");
+  const [w9Type,  setW9Type]  = useState(repData&&repData.w9EntityType||"individual");
+  const [w9Addr,  setW9Addr]  = useState(repData&&repData.w9Address||"");
+  const [w9Msg,   setW9Msg]   = useState("");
 
   return (
     <div>
@@ -2477,6 +3104,109 @@ function RepProfile({user,repData,setReps,addToast}) {
           <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
           {msg&&<div style={{padding:"8px 12px",background:C.success+"12",borderRadius:6,color:C.success,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
           <Btn onClick={saveProfile}>Save Profile</Btn>
+        </div>
+      )}
+
+      {tab==="documents"&&(
+        <div style={{maxWidth:560}}>
+          {/* W-9 Section */}
+          <div style={{marginBottom:32}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:12,borderBottom:"1px solid "+C.border}}>
+              <div>
+                <div style={{fontWeight:800,fontSize:15,color:C.text}}>W-9 Tax Information</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>Required for commission payments. Admin reviews and approves.</div>
+              </div>
+              {repData&&repData.w9ReviewStatus==="approved"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.success+"18",color:C.success,fontSize:11,fontWeight:700}}>✓ Approved</span>}
+              {repData&&repData.w9Status==="received"&&repData.w9ReviewStatus!=="approved"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>⏳ Pending</span>}
+              {repData&&!repData.w9Status&&<span style={{padding:"3px 10px",borderRadius:20,background:C.surface2,color:C.dim,fontSize:11,fontWeight:700}}>Not Submitted</span>}
+            </div>
+            {repData&&repData.w9ReviewStatus==="approved"&&(
+              <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.success,fontWeight:600}}>✅ W-9 on file and verified. Resubmit below if your information changes.</div>
+            )}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={{gridColumn:"1/-1"}}><Field label="Legal Name (as on tax return) *" value={w9Name} onChange={setW9Name} placeholder="Jane Smith"/></div>
+              <Drop label="Entity Type" value={w9Type} onChange={setW9Type}
+                opts={[{v:"individual",label:"Individual / Sole Proprietor"},{v:"llc",label:"LLC"},{v:"corporation",label:"Corporation"},{v:"partnership",label:"Partnership"}]}/>
+              <Field label="EIN or SSN *" value={w9Ssn} onChange={setW9Ssn} placeholder="XX-XXXXXXX" type="password" hint="Encrypted — never stored in plain text"/>
+              <div style={{gridColumn:"1/-1"}}><Field label="Address" value={w9Addr} onChange={setW9Addr} placeholder="123 Main St, City, State ZIP"/></div>
+            </div>
+            {w9Msg&&<div style={{padding:"8px 12px",borderRadius:6,fontSize:12,fontWeight:600,marginTop:8,marginBottom:4,
+                                  background:w9Msg.indexOf("ubmitted")>=0?C.success+"12":C.danger+"12",
+                                  color:w9Msg.indexOf("ubmitted")>=0?C.success:C.danger}}>{w9Msg}</div>}
+            <div style={{marginTop:12}}>
+              <Btn onClick={function(){
+                if(!w9Name.trim()||!w9Ssn.trim()){setW9Msg("Name and EIN/SSN are required.");return;}
+                if(setReps&&repData){
+                  var updated = Object.assign({},repData,{
+                    w9LegalName:w9Name.trim(),w9EntityType:w9Type,w9Address:w9Addr.trim(),
+                    w9Status:"received",w9ReviewStatus:"pending",w9SubmittedAt:new Date().toISOString()
+                  });
+                  setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
+                  dbSave("crm_reps",repData.id,updated);
+                }
+                setW9Ssn(""); setW9Msg("W-9 submitted! Admin will review shortly."); addToast("W-9 submitted","success");
+              }}>Submit W-9</Btn>
+            </div>
+          </div>
+
+          {/* 1099-NEC Section */}
+          <div>
+            <div style={{paddingBottom:12,borderBottom:"1px solid "+C.border,marginBottom:14}}>
+              <div style={{fontWeight:800,fontSize:15,color:C.text}}>1099-NEC Tax Form</div>
+              <div style={{fontSize:12,color:C.muted,marginTop:2}}>Prior year nonemployee compensation. Available January 1 each year.</div>
+            </div>
+            {(function(){
+              var taxYear = new Date().getFullYear()-1;
+              var myRepId2 = user&&(user.rep_id||user.id);
+              var yearComms = (commissions||[]).filter(function(c2){
+                return c2.repId===myRepId2 && c2.paidAt && new Date(c2.paidAt).getFullYear()===taxYear;
+              });
+              var total = yearComms.reduce(function(s,c2){return s+(c2.amount||0);},0);
+              function download1099() {
+                var rows = yearComms.map(function(p){
+                  return '<tr><td>'+fmtDate(p.paidAt)+'</td><td>'+fmtMoney(p.amount)+'</td></tr>';
+                }).join("");
+                var html2 = "<html><head><style>body{font-family:Arial,sans-serif;max-width:680px;margin:40px auto;font-size:13px;}</style></head><body>"
+                  +"<h1>Form 1099-NEC &#8212; Nonemployee Compensation</h1><h2 style='color:#666'>Tax Year "+taxYear+"</h2>"
+                  +"<div style='border:2px solid #000;padding:16px;margin-bottom:16px'>"
+                  +"<div><strong>Payer:</strong> PreVasive USA &nbsp;&nbsp; <strong>Payer EIN:</strong> XX-XXXXXXX</div>"
+                  +"<div style='margin-top:8px'><strong>Recipient:</strong> "+(repData&&repData.w9LegalName||user&&user.name||"")+"</div>"
+                  +"</div>"
+                  +"<div style='border:2px solid #000;padding:16px;margin-bottom:16px'>"
+                  +"<div style='font-size:11px;text-transform:uppercase;color:#555'>Box 1 &#8212; Nonemployee Compensation</div>"
+                  +"<div style='font-size:28px;font-weight:900'>"+fmtMoney(total)+"</div>"
+                  +"</div>"
+                  +(rows?"<table style='width:100%;border-collapse:collapse'><tr style='background:#f5f5f5'><th style='padding:8px;text-align:left;border:1px solid #ddd'>Date</th><th style='padding:8px;text-align:left;border:1px solid #ddd'>Amount</th></tr>"+rows+"</table>":"<p style='color:#888'>No payments for "+taxYear+".</p>")
+                  +"<p style='font-size:11px;color:#888;margin-top:24px;border-top:1px solid #ccc;padding-top:12px'>File by January 31, "+(taxYear+1)+". Visit www.irs.gov/Form1099NEC</p>"
+                  +"</body></html>";
+                var blob = new Blob([html2],{type:"text/html"});
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement("a");
+                a.href=url; a.download="1099-NEC-"+(user&&user.name||"rep").replace(/\s+/g,"-")+"-"+taxYear+".html";
+                document.body.appendChild(a); a.click();
+                setTimeout(function(){URL.revokeObjectURL(url);document.body.removeChild(a);},100);
+              }
+              return (
+                <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"16px 18px"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div>
+                      <div style={{fontWeight:700,fontSize:14,color:C.text}}>1099-NEC · Tax Year {taxYear}</div>
+                      <div style={{fontSize:12,color:C.muted,marginTop:2}}>Total paid: <strong style={{color:total>0?C.success:C.dim}}>{fmtMoney(total)}</strong></div>
+                    </div>
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,
+                      background:total>=600?C.warning+"18":C.surface,color:total>=600?C.warning:C.dim}}>
+                      {total>=600?"1099 Required":"Below $600"}
+                    </span>
+                  </div>
+                  {total>0?(
+                    <Btn onClick={download1099}>⬇ Download 1099-NEC — {taxYear}</Btn>
+                  ):(
+                    <div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>No payments on record for {taxYear}.</div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
 
@@ -2548,12 +3278,17 @@ function App() {
   const [products,    setProducts]    = useState([]);
   const [reps,        setReps]        = useState([]);
   const [commissions, setCommissions] = useState([]);
+  const [applications, setApplications] = useState([]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [toasts,      setToasts]      = useState([]);
   const [resultModal, setResultModal] = useState(null);
 
   // Apply theme
   Object.assign(C, THEMES[theme]||THEMES.dark);
+  useEffect(function(){
+    document.body.style.background = C.bg;
+    document.body.style.color = C.text;
+  }, [theme]);
 
   function addToast(msg, type, detail) {
     var id = Date.now();
@@ -2592,6 +3327,7 @@ function App() {
     dbLoad("crm_products").then(function(d){if(alive) setProducts(d);});
     dbLoad("crm_reps").then(function(d){if(alive) setReps(d);});
     dbLoad("crm_commission_payouts").then(function(d){if(alive) setCommissions(d);});
+    dbLoad("crm_applications").then(function(d){if(alive) setApplications(d);});
     return function(){alive=false;};
   }, [currentUser&&currentUser.id]);
 
@@ -2603,7 +3339,7 @@ function App() {
   }
 
   if(loading) return (
-    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center"}}>
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{textAlign:"center"}}>
         <div style={{width:32,height:32,border:"3px solid "+C.border,borderTopColor:C.accent,
                      borderRadius:"50%",animation:"spin .7s linear infinite",margin:"0 auto 16px"}}/>
@@ -2617,9 +3353,41 @@ function App() {
   var isAdmin = currentUser.role==="admin";
   var myRepData = isAdmin ? null : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null;
 
+  // Rep agreement gate
+  var needsAgreement = !isAdmin && myRepData && !myRepData.agreementSignedAt;
+  // Rep subscription gate
+  var now2 = Date.now();
+  var trialExpired = !isAdmin && myRepData && myRepData.trialStartedAt &&
+    (now2-new Date(myRepData.trialStartedAt).getTime()) >= TRIAL_DAYS*24*60*60*1000 &&
+    myRepData.subscriptionStatus!=="active";
+
+  if(needsAgreement) return React.createElement(RepAgreementModal, {
+    repName: currentUser.name,
+    onAgree: function() {
+      var updated = Object.assign({},myRepData,{
+        agreementSignedAt: new Date().toISOString(),
+        agreementVersion: REP_AGREEMENT_VERSION,
+      });
+      setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?updated:r;});});
+      dbSave("crm_reps",myRepData.id,updated);
+    },
+    onDecline: handleLogout,
+  });
+
+  if(trialExpired) return React.createElement(RepSubscriptionWall, {
+    rep: myRepData,
+    onActivate: function(planId) {
+      var updated = Object.assign({},myRepData,{planId:planId,subscriptionStatus:"active",planActivatedAt:new Date().toISOString()});
+      setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?updated:r;});});
+      dbSave("crm_reps",myRepData.id,updated);
+    },
+    onLogout: handleLogout,
+  });
+
   var adminModules = [
     {label:"General"},
     {id:"dashboard",  name:"Dashboard",   icon:"◉"},
+    {id:"email",      name:"Email",       icon:"✉️"},
     {id:"orders",     name:"Orders",      icon:"📦"},
     {id:"customers",  name:"Customers",   icon:"👥"},
     {id:"products",   name:"Products",    icon:"📋"},
@@ -2632,6 +3400,7 @@ function App() {
 
   var repModules = [
     {id:"dashboard",  name:"Dashboard",   icon:"◉"},
+    {id:"email",      name:"Email",       icon:"✉️"},
     {id:"new_order",  name:"New Order",   icon:"➕"},
     {id:"orders",     name:"My Orders",   icon:"📦"},
     {id:"customers",  name:"Customers",   icon:"👥"},
@@ -2650,6 +3419,11 @@ function App() {
 
       <main style={{flex:1,overflowY:"auto",padding:"28px 32px",minWidth:0}}>
         {/* Admin Modules */}
+        {(activeTab==="email")&&(
+          <EmailModule currentUser={currentUser} customers={customers} orders={orders}
+            isAdmin={isAdmin} addToast={addToast} showResult={showResult}/>
+        )}
+
         {isAdmin&&activeTab==="dashboard"&&(
           <AdminDashboard orders={orders} reps={reps} customers={customers} products={products} commissions={commissions} onNav={setActiveTab}/>
         )}
@@ -2665,7 +3439,9 @@ function App() {
           <AdminProducts products={products} setProducts={setProducts} addToast={addToast}/>
         )}
         {isAdmin&&activeTab==="reps"&&(
-          <AdminReps reps={reps} setReps={setReps} orders={orders} addToast={addToast} showResult={showResult}/>
+          <AdminReps reps={reps} setReps={setReps} orders={orders}
+            applications={applications} setApplications={setApplications}
+            addToast={addToast} showResult={showResult}/>
         )}
         {isAdmin&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} reps={reps} commissions={commissions}
@@ -2682,7 +3458,7 @@ function App() {
         )}
         {!isAdmin&&(activeTab==="orders"||activeTab==="new_order")&&(
           <RepOrders repId={currentUser.rep_id||currentUser.id} repName={currentUser.name}
-            orders={orders} customers={customers} products={products}
+            currentUser={currentUser} orders={orders} customers={customers} products={products}
             setOrders={setOrders} setCustomers={setCustomers}
             addToast={addToast} showResult={showResult}/>
         )}
@@ -2696,7 +3472,7 @@ function App() {
             orders={orders} commissions={commissions}/>
         )}
         {!isAdmin&&activeTab==="profile"&&(
-          <RepProfile user={currentUser} repData={myRepData} setReps={setReps} addToast={addToast}/>
+          <RepProfile user={currentUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast}/>
         )}
         {!isAdmin&&activeTab==="new_order"&&null}
       </main>
@@ -2710,7 +3486,7 @@ function App() {
 </script>
 
 <script>
-var N=6;
+var N=7;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
