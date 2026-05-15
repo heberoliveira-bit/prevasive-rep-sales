@@ -1797,7 +1797,7 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr style={{background:C.surface2}}>
-                {["Rep","Email","Status","W-9","Orders","Commission","Actions"].map(function(h){return (
+                {["Rep","Email","Status","Orders","Commission","W-9",""].map(function(h){return (
                   <th key={h} style={{padding:"8px 16px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
                 );})}
               </tr></thead>
@@ -1807,7 +1807,11 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
                   var totalComm = repOrds.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
                   var sc = {active:C.success,pending:C.warning,suspended:C.danger,trial:C.accent}[rep.status]||C.muted;
                   return (
-                    <tr key={rep.id} style={{borderTop:"1px solid "+C.border}}>
+                    <tr key={rep.id}
+                      onClick={function(){onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});}}
+                      style={{borderTop:"1px solid "+C.border,cursor:"pointer",transition:"background .1s"}}
+                      onMouseEnter={function(e){e.currentTarget.style.background=C.accent+"08";}}
+                      onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
                       <td style={{padding:"10px 16px"}}>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
                           <Avatar name={rep.name} size={28}/>
@@ -1819,6 +1823,7 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
                         <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"18",color:sc,textTransform:"capitalize"}}>{rep.status}</span>
                       </td>
                       <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{repOrds.length}</td>
+                      <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(totalComm)}</td>
                       <td style={{padding:"10px 16px"}}>
                         <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,
                           background:rep.w9ReviewStatus==="approved"?C.success+"18":rep.w9Status==="received"?C.warning+"18":C.surface2,
@@ -1826,15 +1831,11 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
                           {rep.w9ReviewStatus==="approved"?"✓ Verified":rep.w9Status==="received"?"Pending":"Not filed"}
                         </span>
                       </td>
-                      <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(totalComm)}</td>
-                      <td style={{padding:"10px 16px"}}>
-                        <div style={{display:"flex",gap:6}}>
+                      <td style={{padding:"10px 16px"}} onClick={function(e){e.stopPropagation();}}>
+                        <div style={{display:"flex",gap:6,alignItems:"center"}}>
                           {rep.status==="pending"&&<Btn small onClick={function(){approve(rep);}}>Approve</Btn>}
                           {rep.status==="active"&&<Btn small variant="ghost" onClick={function(){suspend(rep);}}>Suspend</Btn>}
                           {rep.status==="suspended"&&<Btn small variant="success" onClick={function(){approve(rep);}}>Reactivate</Btn>}
-                          <Btn small variant="ghost" onClick={function(){
-                            onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});
-                          }}>👁 View</Btn>
                           {rep.w9Status==="received"&&rep.w9ReviewStatus!=="approved"&&(
                             <Btn small variant="success" onClick={function(){
                               var updated=Object.assign({},rep,{w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()});
@@ -1843,6 +1844,14 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
                               addToast("W-9 approved for "+rep.name,"success");
                             }}>✓ W-9</Btn>
                           )}
+                          <button
+                            onClick={function(){onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});}}
+                            style={{padding:"5px 12px",borderRadius:6,border:"1px solid "+C.accent+"40",
+                                    background:C.accent+"10",color:C.accent,cursor:"pointer",
+                                    fontFamily:"inherit",fontWeight:700,fontSize:11,
+                                    display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
+                            👁 View Account
+                          </button>
                         </div>
                       </td>
                     </tr>
