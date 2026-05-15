@@ -200,7 +200,7 @@ function Drop({label,value,onChange,opts,hint}) {
 
 function Modal({title,onClose,children,footer,wide}) {
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.82)",backdropFilter:"blur(6px)",
+    <div style={{position:"fixed",inset:0,background:C.bg+"d0",backdropFilter:"blur(6px)",
                  zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
          onClick={function(e){if(e.target===e.currentTarget&&onClose)onClose();}}>
       <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,
@@ -286,7 +286,7 @@ function ToastStack({toasts,setToasts}) {
           <div key={t.id} style={{pointerEvents:"all",display:"flex",alignItems:"flex-start",gap:10,
                                    padding:"12px 16px",borderRadius:10,minWidth:280,maxWidth:380,
                                    background:C.surface,border:"1px solid "+col+"40",
-                                   boxShadow:"0 8px 32px rgba(0,0,0,.3)",animation:"slideIn .2s ease"}}>
+                                   boxShadow:"0 4px 20px rgba(0,0,0,.15)",animation:"slideIn .2s ease"}}>
             <div style={{width:7,height:7,borderRadius:"50%",background:col,flexShrink:0,marginTop:5}}/>
             <div style={{flex:1}}>
               <div style={{fontSize:13,fontWeight:600,color:C.text,lineHeight:1.4}}>{t.msg}</div>
@@ -306,12 +306,12 @@ function ResultModal({data,onClose}) {
   var icons = {order:"📦",email:"✉️",payment:"💳",commission:"💰",rep:"🤝",success:"✓",error:"⚠️"};
   var col = data.type==="error"?C.danger:C.success;
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.75)",backdropFilter:"blur(6px)",
+    <div style={{position:"fixed",inset:0,background:C.bg+"c0",backdropFilter:"blur(6px)",
                  zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
          onClick={function(e){if(e.target===e.currentTarget)onClose();}}>
       <div style={{background:C.surface,border:"1px solid "+col+"30",borderRadius:14,
                    padding:"32px 28px",maxWidth:420,width:"100%",
-                   boxShadow:"0 24px 60px rgba(0,0,0,.5)",textAlign:"center"}}>
+                   boxShadow:"0 16px 48px rgba(0,0,0,.25)",textAlign:"center"}}>
         <div style={{width:52,height:52,borderRadius:"50%",background:col+"15",border:"2px solid "+col+"30",
                      display:"flex",alignItems:"center",justifyContent:"center",
                      fontSize:22,margin:"0 auto 16px"}}>{icons[data.type]||"✓"}</div>
@@ -351,18 +351,40 @@ var REP_AGREEMENT_CLAUSES = [
   {id:"termination",title:"6. Termination",text:"Either party may terminate this agreement with 30 days written notice. Earned commissions for completed orders will be paid per normal schedule after termination."},
 ];
 
+function ImpersonationBanner({rep, onExit}) {
+  return (
+    <div style={{position:"fixed",top:0,left:0,right:0,zIndex:6000,
+                 background:"linear-gradient(90deg,#f6ab2f,#e8920a)",
+                 padding:"8px 20px",display:"flex",alignItems:"center",
+                 justifyContent:"space-between",boxShadow:"0 2px 12px rgba(246,171,47,.4)"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10}}>
+        <span style={{fontSize:14,fontWeight:800,color:"#1a0f00"}}>👁 Viewing as rep:</span>
+        <span style={{fontSize:14,fontWeight:700,color:"#1a0f00"}}>{rep.repName}</span>
+        <span style={{fontSize:11,color:"rgba(0,0,0,.5)",fontWeight:500}}>— Admin mode. Changes are real.</span>
+      </div>
+      <button onClick={onExit}
+        style={{padding:"5px 14px",borderRadius:6,border:"2px solid rgba(0,0,0,.2)",
+                background:"rgba(0,0,0,.12)",color:"#1a0f00",cursor:"pointer",
+                fontFamily:"inherit",fontWeight:700,fontSize:12}}>
+        ← Exit to Admin
+      </button>
+    </div>
+  );
+}
+
+
 function RepAgreementModal({repName,onAgree,onDecline}) {
   const [checked, setChecked] = useState({});
   const [step,    setStep]    = useState("review");
   var allChecked = REP_AGREEMENT_CLAUSES.every(function(cl){return checked[cl.id];});
   function toggle(id) { setChecked(function(prev){return Object.assign({},prev,{[id]:!prev[id]});}); }
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.95)",backdropFilter:"blur(8px)",
+    <div style={{position:"fixed",inset:0,background:C.bg+"f2",backdropFilter:"blur(8px)",
                  zIndex:5000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,
                  fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,
                    width:"100%",maxWidth:560,maxHeight:"90vh",display:"flex",flexDirection:"column",
-                   boxShadow:"0 24px 60px rgba(0,0,0,.5)"}}>
+                   boxShadow:"0 16px 48px rgba(0,0,0,.25)"}}>
         <div style={{padding:"22px 24px 16px",borderBottom:"1px solid "+C.border}}>
           <div style={{fontSize:11,fontWeight:600,color:C.accent,textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>Action Required</div>
           <div style={{fontSize:19,fontWeight:700,color:C.text,letterSpacing:"-.02em"}}>Sales Representative Agreement</div>
@@ -416,12 +438,12 @@ function RepSubscriptionWall({rep,onActivate,onLogout}) {
   var trialExpired = trialMs >= TRIAL_DAYS*24*60*60*1000;
   var daysLeft = Math.max(0, Math.ceil((TRIAL_DAYS*24*60*60*1000-trialMs)/(24*60*60*1000)));
   return (
-    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,.95)",backdropFilter:"blur(8px)",
+    <div style={{position:"fixed",inset:0,background:C.bg+"f2",backdropFilter:"blur(8px)",
                  zIndex:5000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,
                  fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:16,
                    padding:"36px 32px",maxWidth:480,width:"100%",textAlign:"center",
-                   boxShadow:"0 24px 60px rgba(0,0,0,.5)"}}>
+                   boxShadow:"0 16px 48px rgba(0,0,0,.25)"}}>
         <div style={{width:56,height:56,borderRadius:"50%",background:C.warning+"15",
                      border:"2px solid "+C.warning+"30",display:"flex",alignItems:"center",
                      justifyContent:"center",fontSize:24,margin:"0 auto 18px"}}>
@@ -596,7 +618,7 @@ function AppLanding({onLogin}) {
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",
                  justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
       <div style={{background:"#0d1826",border:"1px solid rgba(255,255,255,.08)",borderRadius:14,
-                   padding:"40px 36px",width:"100%",maxWidth:400,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
+                   padding:"40px 36px",width:"100%",maxWidth:400,boxShadow:"0 24px 60px rgba(0,0,0,.3)"}}>
         {resetDone ? (
           <div style={{textAlign:"center"}}>
             <div style={{width:52,height:52,borderRadius:"50%",background:"rgba(30,166,114,.15)",
@@ -784,7 +806,7 @@ function AppLanding({onLogin}) {
 
       {/* Sign In Modal */}
       {showSignIn&&(
-        <div style={{position:"fixed",inset:0,background:C.bg+"cc",backdropFilter:"blur(8px)",
+        <div style={{position:"fixed",inset:0,background:C.bg+"e8",backdropFilter:"blur(8px)",
                      zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,
                        padding:"36px",width:"100%",maxWidth:380,boxShadow:"0 24px 40px rgba(0,0,0,.2)"}}>
@@ -828,10 +850,10 @@ function AppLanding({onLogin}) {
 
       {/* Apply Modal */}
       {showReg&&(
-        <div style={{position:"fixed",inset:0,background:C.bg+"cc",backdropFilter:"blur(8px)",
+        <div style={{position:"fixed",inset:0,background:C.bg+"e8",backdropFilter:"blur(8px)",
                      zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,
-                       padding:"36px",width:"100%",maxWidth:400,boxShadow:"0 24px 80px rgba(0,0,0,.6)"}}>
+                       padding:"36px",width:"100%",maxWidth:400,boxShadow:"0 24px 60px rgba(0,0,0,.3)"}}>
             {regDone ? (
               <div style={{textAlign:"center",padding:"8px 0"}}>
                 <div style={{width:48,height:48,borderRadius:"50%",background:"rgba(30,166,114,.15)",
@@ -872,10 +894,10 @@ function AppLanding({onLogin}) {
 
 </script>
 <script id="c1" type="text/plain">
-function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme}) {
+function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount}) {
   var isAdmin = user&&user.role==="admin";
   return (
-    <div style={{width:220,flexShrink:0,background:"linear-gradient(180deg,#0a1525 0%,#09111f 100%)",
+    <div style={{width:220,flexShrink:0,background:C.bg,
                  borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",
                  height:"100vh",position:"sticky",top:0,overflowY:"auto"}}>
       {/* Logo */}
@@ -913,7 +935,11 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme}) {
                       borderLeft:isActive?"2px solid "+C.accent:"2px solid transparent",
                       marginBottom:2,letterSpacing:"-.01em",transition:"all .12s"}}>
               <span style={{fontSize:15,opacity:isActive?1:.7}}>{m.icon}</span>
-              {m.name}
+              <span style={{flex:1}}>{m.name}</span>
+              {m.badge&&taskCount>0&&(
+                <span style={{padding:"1px 6px",borderRadius:10,background:C.danger,
+                              color:"#fff",fontSize:9,fontWeight:800,minWidth:16,textAlign:"center"}}>{taskCount}</span>
+              )}
             </button>
           );
         })}
@@ -1074,7 +1100,162 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
+function AdminTasks({reps,setReps,applications,setApplications,addToast,showResult}) {
+  var pendingW9 = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
+  var pendingApps = applications.filter(function(a){return !a.status||a.status==="pending";});
+  var pendingReps = reps.filter(function(r){return r.status==="pending";});
+  var total = pendingW9.length+pendingApps.length+pendingReps.length;
+
+  function approveW9(rep) {
+    var updated = Object.assign({},rep,{w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()});
+    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    addToast("W-9 approved for "+rep.name,"success");
+    showResult({type:"success",title:"W-9 Approved",subtitle:rep.name+"'s tax information is now verified.",rows:[["Rep",rep.name],["Status","Verified ✓"],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
+  }
+
+  function approveRep(rep) {
+    var updated = Object.assign({},rep,{status:"active",approvedAt:new Date().toISOString()});
+    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    addToast(rep.name+" approved","success");
+  }
+
+  function approveApp(app) {
+    var id = genId("rep");
+    var newRep = {id:id,name:app.name,email:app.email,company:app.company||"",
+      status:"active",subscriptionStatus:"trial",trialStartedAt:new Date().toISOString(),
+      planId:"starter",createdAt:new Date().toISOString()};
+    setReps(function(prev){return [newRep].concat(prev);});
+    dbSave("crm_reps",id,newRep);
+    var updated = Object.assign({},app,{status:"approved"});
+    setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
+    dbSave("crm_applications",app.id,updated);
+    addToast(app.name+" approved","success");
+  }
+
+  function declineApp(app) {
+    var updated = Object.assign({},app,{status:"declined"});
+    setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
+    dbSave("crm_applications",app.id,updated);
+    addToast(app.name+" declined","warning");
+  }
+
+  return (
+    <div>
+      <PageHeader title="Tasks" subtitle={total+" item"+(total!==1?"s":"")+" need your attention"}/>
+
+      {total===0&&(
+        <EmptyState icon="✅" title="All caught up!" subtitle="No pending tasks. New items appear here when reps submit forms or apply to join."/>
+      )}
+
+      {pendingReps.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>Rep Approvals</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.danger+"18",color:C.danger,fontSize:11,fontWeight:700}}>{pendingReps.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {pendingReps.map(function(rep,i){return (
+              <div key={rep.id} style={{padding:"14px 18px",borderBottom:i<pendingReps.length-1?"1px solid "+C.border:"none",
+                                         display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Avatar name={rep.name} size={34}/>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13,color:C.text}}>{rep.name}</div>
+                    <div style={{fontSize:11,color:C.muted}}>{rep.email} · Applied {fmtDate(rep.createdAt)}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn small onClick={function(){approveRep(rep);}}>✓ Approve</Btn>
+                  <Btn small variant="ghost" onClick={function(){
+                    var updated=Object.assign({},rep,{status:"declined"});
+                    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+                    dbSave("crm_reps",rep.id,updated);
+                    addToast(rep.name+" declined","warning");
+                  }}>Decline</Btn>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+      )}
+
+      {pendingW9.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>W-9 Reviews</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>{pendingW9.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {pendingW9.map(function(rep,i){return (
+              <div key={rep.id} style={{padding:"14px 18px",borderBottom:i<pendingW9.length-1?"1px solid "+C.border:"none",
+                                         display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Avatar name={rep.name} size={34}/>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13,color:C.text}}>{rep.name}</div>
+                    <div style={{fontSize:11,color:C.muted}}>
+                      {rep.w9LegalName&&<span>Legal name: <strong style={{color:C.text}}>{rep.w9LegalName}</strong> · </span>}
+                      {rep.w9EntityType&&<span style={{textTransform:"capitalize"}}>{rep.w9EntityType} · </span>}
+                      Submitted {fmtDate(rep.w9SubmittedAt)}
+                    </div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn small variant="success" onClick={function(){approveW9(rep);}}>✓ Approve W-9</Btn>
+                  <Btn small variant="ghost" onClick={function(){
+                    var updated=Object.assign({},rep,{w9ReviewStatus:"rejected",w9RejectedAt:new Date().toISOString()});
+                    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+                    dbSave("crm_reps",rep.id,updated);
+                    addToast("W-9 rejected for "+rep.name,"warning");
+                  }}>Reject</Btn>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+      )}
+
+      {pendingApps.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>New Applications</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.accent+"18",color:C.accent,fontSize:11,fontWeight:700}}>{pendingApps.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {pendingApps.map(function(app,i){return (
+              <div key={app.id} style={{padding:"14px 18px",borderBottom:i<pendingApps.length-1?"1px solid "+C.border:"none",
+                                         display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <Avatar name={app.name} size={34}/>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13,color:C.text}}>{app.name}</div>
+                    <div style={{fontSize:11,color:C.muted}}>
+                      {app.email}
+                      {app.company&&<span> · {app.company}</span>}
+                      <span> · Applied {fmtDate(app.submittedAt)}</span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn small onClick={function(){approveApp(app);}}>✓ Approve</Btn>
+                  <Btn small variant="ghost" onClick={function(){declineApp(app);}}>Decline</Btn>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
+
+</script>
+<script id="c2" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   var now = Date.now();
   var totalRevenue = orders.filter(function(o){return o.status==="Paid";})
@@ -1090,6 +1271,8 @@ function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
     return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var activeReps = reps.filter(function(r){return r.status==="active";}).length;
+  var taskCount2 = reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length
+    + (reps.filter(function(r){return r.status==="pending";}).length);
   var recentOrders = orders.slice(0,5);
 
   return (
@@ -1375,9 +1558,6 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast}) {
 }
 
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
-
-</script>
-<script id="c2" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -1478,6 +1658,9 @@ function AdminProducts({products,setProducts,addToast}) {
 }
 
 /* ─── Admin Customers ────────────────────────────────────────────────────── */
+
+</script>
+<script id="c3" type="text/plain">
 function AdminCustomers({customers,reps,orders,addToast}) {
   const [search,   setSearch]   = useState("");
   const [viewCust, setViewCust] = useState(null);
@@ -1542,7 +1725,7 @@ function AdminCustomers({customers,reps,orders,addToast}) {
 }
 
 /* ─── Admin Reps ─────────────────────────────────────────────────────────── */
-function AdminReps({reps,setReps,orders,applications,setApplications,addToast,showResult}) {
+function AdminReps({reps,setReps,orders,applications,setApplications,addToast,showResult,onViewAsRep}) {
   const [tab,      setTab]      = useState("reps");
   const [showForm, setShowForm] = useState(false);
   const [name,     setName]     = useState("");
@@ -1649,6 +1832,9 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
                           {rep.status==="pending"&&<Btn small onClick={function(){approve(rep);}}>Approve</Btn>}
                           {rep.status==="active"&&<Btn small variant="ghost" onClick={function(){suspend(rep);}}>Suspend</Btn>}
                           {rep.status==="suspended"&&<Btn small variant="success" onClick={function(){approve(rep);}}>Reactivate</Btn>}
+                          <Btn small variant="ghost" onClick={function(){
+                            onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});
+                          }}>👁 View</Btn>
                           {rep.w9Status==="received"&&rep.w9ReviewStatus!=="approved"&&(
                             <Btn small variant="success" onClick={function(){
                               var updated=Object.assign({},rep,{w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()});
@@ -1797,9 +1983,6 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
 }
 
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
-
-</script>
-<script id="c3" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult}) {
   var now = Date.now();
   var releasedOrds = orders.filter(function(o){
@@ -1901,6 +2084,9 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
+
+</script>
+<script id="c4" type="text/plain">
 function AdminSettings({supabaseCfg,onSaveSupabase,addToast}) {
   const [url,     setUrl]     = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey, setAnonKey] = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -2250,9 +2436,6 @@ function generateInvoice(order, customers, products, currentUser) {
 
 
 /* ─── Order Form (3-Step) ────────────────────────────────────────────────── */
-
-</script>
-<script id="c4" type="text/plain">
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     editOrder,onClose,addToast,showResult}) {
   const [step,       setStep]       = useState(1);
@@ -2404,7 +2587,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               {custOpen&&(
                 <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:200,
                              background:C.surface,border:"1px solid "+C.border,borderRadius:8,
-                             boxShadow:"0 8px 32px rgba(0,0,0,.3)",marginTop:4}}>
+                             boxShadow:"0 4px 20px rgba(0,0,0,.15)",marginTop:4}}>
                   <div style={{padding:8,borderBottom:"1px solid "+C.border}}>
                     <input autoFocus value={custSearch} onChange={function(e){setCustSearch(e.target.value);}}
                       placeholder="Search…"
@@ -3282,6 +3465,7 @@ function App() {
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [toasts,      setToasts]      = useState([]);
   const [resultModal, setResultModal] = useState(null);
+  const [viewAsRep,   setViewAsRep]   = useState(null); // {repId, repName, repData}
 
   // Apply theme
   Object.assign(C, THEMES[theme]||THEMES.dark);
@@ -3350,8 +3534,10 @@ function App() {
 
   if(!currentUser) return React.createElement(AppLanding, {onLogin:handleLogin});
 
-  var isAdmin = currentUser.role==="admin";
-  var myRepData = isAdmin ? null : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null;
+  // Impersonation override
+  var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName}) : currentUser;
+  var isAdmin = !viewAsRep && currentUser.role==="admin";
+  var myRepData = isAdmin ? null : (viewAsRep ? viewAsRep.repData : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null);
 
   // Rep agreement gate
   var needsAgreement = !isAdmin && myRepData && !myRepData.agreementSignedAt;
@@ -3394,6 +3580,7 @@ function App() {
     {divider:true},
     {label:"Management"},
     {id:"reps",       name:"Sales Reps",  icon:"🤝"},
+    {id:"tasks",       name:"Tasks",       icon:"✅", badge:true},
     {id:"commissions",name:"Commissions", icon:"💰"},
     {id:"settings",   name:"Settings",    icon:"⚙️"},
   ];
@@ -3413,11 +3600,13 @@ function App() {
   return (
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,
                  fontFamily:"'Inter',system-ui,-apple-system,sans-serif"}}>
-      <Sidebar modules={modules} active={activeTab} onNav={setActiveTab}
-        user={currentUser} onLogout={handleLogout}
-        theme={theme} onToggleTheme={function(){setTheme(theme==="dark"?"light":"dark");}}/>
+      <Sidebar modules={modules} active={activeTab} onNav={function(id){setViewAsRep(null);if(id!==activeTab||viewAsRep)setActiveTab(id);else setActiveTab(id);}}
+        user={viewAsRep?Object.assign({},currentUser,{name:currentUser.name+" (Admin)"}):currentUser}
+        onLogout={handleLogout} theme={theme}
+        onToggleTheme={function(){setTheme(theme==="dark"?"light":"dark");}}
+        taskCount={isAdmin?(reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length+applications.filter(function(a){return !a.status||a.status==="pending";}).length):0}/>
 
-      <main style={{flex:1,overflowY:"auto",padding:"28px 32px",minWidth:0}}>
+      <main style={{flex:1,overflowY:"auto",padding:viewAsRep?"56px 32px 28px":"28px 32px",minWidth:0}}>
         {/* Admin Modules */}
         {(activeTab==="email")&&(
           <EmailModule currentUser={currentUser} customers={customers} orders={orders}
@@ -3441,11 +3630,17 @@ function App() {
         {isAdmin&&activeTab==="reps"&&(
           <AdminReps reps={reps} setReps={setReps} orders={orders}
             applications={applications} setApplications={setApplications}
-            addToast={addToast} showResult={showResult}/>
+            addToast={addToast} showResult={showResult}
+            onViewAsRep={function(rep){setViewAsRep(rep);setActiveTab("dashboard");}}/>
         )}
         {isAdmin&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} reps={reps} commissions={commissions}
             setCommissions={setCommissions} addToast={addToast} showResult={showResult}/>
+        )}
+        {isAdmin&&activeTab==="tasks"&&(
+          <AdminTasks reps={reps} setReps={setReps}
+            applications={applications} setApplications={setApplications}
+            addToast={addToast} showResult={showResult}/>
         )}
         {isAdmin&&activeTab==="settings"&&(
           <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg} addToast={addToast}/>
@@ -3453,30 +3648,31 @@ function App() {
 
         {/* Rep Modules */}
         {!isAdmin&&activeTab==="dashboard"&&(
-          <RepDashboard repId={currentUser.rep_id||currentUser.id} repName={currentUser.name}
+          <RepDashboard repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
             orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast}/>
         )}
         {!isAdmin&&(activeTab==="orders"||activeTab==="new_order")&&(
-          <RepOrders repId={currentUser.rep_id||currentUser.id} repName={currentUser.name}
-            currentUser={currentUser} orders={orders} customers={customers} products={products}
+          <RepOrders repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
+            currentUser={effectiveUser} orders={orders} customers={customers} products={products}
             setOrders={setOrders} setCustomers={setCustomers}
             addToast={addToast} showResult={showResult}/>
         )}
         {!isAdmin&&activeTab==="customers"&&(
-          <RepCustomers repId={currentUser.rep_id||currentUser.id}
+          <RepCustomers repId={effectiveUser.rep_id||effectiveUser.id}
             customers={customers} setCustomers={setCustomers}
             orders={orders} addToast={addToast}/>
         )}
         {!isAdmin&&activeTab==="commissions"&&(
-          <RepCommissions repId={currentUser.rep_id||currentUser.id}
+          <RepCommissions repId={effectiveUser.rep_id||effectiveUser.id}
             orders={orders} commissions={commissions}/>
         )}
         {!isAdmin&&activeTab==="profile"&&(
-          <RepProfile user={currentUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast}/>
+          <RepProfile user={effectiveUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast}/>
         )}
         {!isAdmin&&activeTab==="new_order"&&null}
       </main>
 
+      {viewAsRep&&React.createElement(ImpersonationBanner,{rep:viewAsRep,onExit:function(){setViewAsRep(null);setActiveTab("dashboard");}})}
       {React.createElement(ToastStack,{toasts:toasts,setToasts:setToasts})}
       {resultModal&&React.createElement(ResultModal,{data:resultModal,onClose:function(){setResultModal(null);}})}
     </div>
