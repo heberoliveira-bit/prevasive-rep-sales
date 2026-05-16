@@ -1183,12 +1183,12 @@ function AppLanding({onLogin}) {
                 <div style={{fontSize:18,fontWeight:700,marginBottom:5,color:C.text,letterSpacing:"-.02em"}}>Apply to join</div>
                 <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Submit your information to apply as a sales rep.</div>
                 <ApplyForm onSubmit={function(data){
-                  var sb = getSB();
+                  var sb = window.supabase?window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
                   if(sb) {
-                    sb.from("crm_applications").upsert({
+                    sb.from("crm_applications").insert({
                       id:"app_"+Date.now(), data:Object.assign({},data,{submittedAt:new Date().toISOString(),status:"pending"}),
                       updated_at:new Date().toISOString()
-                    });
+                    }).then(function(r){if(r.error) console.warn("Apply error:",r.error.message);});
                   }
                   setRegDone(true);
                 }} onCancel={function(){setShowReg(false);}}/>
@@ -1223,7 +1223,9 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCou
         <Avatar name={user&&user.name} size={30}/>
         <div style={{flex:1,minWidth:0}}>
           <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user&&user.name}</div>
-          <div style={{fontSize:10,color:C.dim,textTransform:"capitalize"}}>{user&&user.role}</div>
+          {user&&user._impersonating
+            ?<div style={{fontSize:9,color:C.gold,fontWeight:700}}>👁 Admin: {user._impersonating}</div>
+            :<div style={{fontSize:10,color:C.dim,textTransform:"capitalize"}}>{user&&user.role}</div>}
         </div>
         <div style={{width:7,height:7,borderRadius:"50%",background:C.success,flexShrink:0}}/>
       </div>
@@ -1289,6 +1291,9 @@ function PageHeader({title,subtitle,action}) {
   );
 }
 
+
+</script>
+<script id="c2" type="text/plain">
 function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast,showResult}) {
   var cust = customers.find(function(x){return x.id===order.custId;})||{};
   const [toEmail, setToEmail] = useState(cust.email||"");
@@ -1325,9 +1330,6 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
 }
 
 
-
-</script>
-<script id="c2" type="text/plain">
 function OrderEditModal({order,products,customers,onSave,onClose}) {
   const [items,    setItems]    = useState(JSON.parse(JSON.stringify(order.items||[])));
   const [commRate, setCommRate] = useState(order.commissionRate||10);
@@ -1402,18 +1404,20 @@ function OrderEditModal({order,products,customers,onSave,onClose}) {
 }
 
 function OrderDupModal({order,products,customers,reps,setOrders,addToast,showResult,onClose}) {
-  var id = "ORD-"+String(Date.now()).slice(-6);
-  var newOrder = Object.assign({},order,{
-    id:id, status:"Submitted", createdAt:new Date().toISOString(),
-    deliveredAt:null, returnedAt:null, returnReason:null,
-    auditLog:[{ts:new Date().toISOString(),action:"Re-order from "+order.id,actor:"Rep",detail:""}],
-  });
-  setOrders(function(prev){return [newOrder].concat(prev);});
-  dbSave("crm_orders",id,newOrder);
-  addToast("Re-order "+id+" created from "+order.id,"success");
-  showResult({type:"order",title:"Re-order Created!",subtitle:"New order based on "+order.id,
-    rows:[["New Order",id],["Customer",order.custName||""],["Total",fmtMoney(order.totals&&order.totals.grand||0)],["Status","Submitted"]],cta:"Done"});
-  onClose();
+  useEffect(function() {
+    var id = "ORD-"+String(Date.now()).slice(-6);
+    var newOrder = Object.assign({},order,{
+      id:id, status:"Submitted", createdAt:new Date().toISOString(),
+      deliveredAt:null, returnedAt:null, returnReason:null,
+      auditLog:[{ts:new Date().toISOString(),action:"Re-order from "+order.id,actor:"Rep",detail:""}],
+    });
+    setOrders(function(prev){return [newOrder].concat(prev);});
+    dbSave("crm_orders",id,newOrder);
+    addToast("Re-order "+id+" created from "+order.id,"success");
+    showResult({type:"order",title:"Re-order Created!",subtitle:"New order based on "+order.id,
+      rows:[["New Order",id],["Customer",order.custName||""],["Total",fmtMoney(order.totals&&order.totals.grand||0)],["Status","Submitted"]],cta:"Done"});
+    setTimeout(onClose, 50);
+  }, []);
   return null;
 }
 
@@ -2203,10 +2207,12 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
 
   function convertToOrder(quote) {
     var id = "ORD-"+String(Date.now()).slice(-6);
+    var commR = quote.commissionRate||0;
+    if(!commR&&quote.repId) { var repForComm=reps.find(function(r){return r.id===quote.repId;}); commR=(repForComm&&repForComm.defaultCommissionRate)||10; }
     var order = Object.assign({},quote,{id:id,status:"Submitted",
-      createdAt:new Date().toISOString(),
+      createdAt:new Date().toISOString(),commissionRate:commR,
       totals:{subtotal:quote.total,shipping:0,tax:0,grand:quote.total,
-              commission:quote.total*(quote.commissionRate||0)/100},
+              commission:quote.total*(commR/100)},
       quoteId:quote.id,payMethod:"pay_later"});
     setOrders(function(prev){return [order].concat(prev);});
     dbSave("crm_orders",id,order);
@@ -4754,6 +4760,7 @@ function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   const [currentUser, setCurrentUser] = useState(null);
   const [loading,     setLoading]     = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [activeTab,   setActiveTab]   = useState("dashboard");
   const [orders,      setOrders]      = useState([]);
   const [customers,   setCustomers]   = useState([]);
@@ -4820,6 +4827,7 @@ function App() {
   useEffect(function() {
     if(!currentUser) return;
     var alive = true;
+    setDataLoading(true);
     dbLoad("crm_orders").then(function(d){if(alive) setOrders(d);});
     dbLoad("crm_customers").then(function(d){if(alive) setCustomers(d);});
     dbLoad("crm_products").then(function(d){if(alive) setProducts(d);});
@@ -4828,7 +4836,8 @@ function App() {
     dbLoad("crm_applications").then(function(d){if(alive) setApplications(d);});
     dbLoad("crm_legal_docs").then(function(d){if(alive) setLegalDocs(d);});
     dbLoad("crm_legal_signatures").then(function(d){if(alive) setSignatures(d);});
-    dbLoad("crm_quotes").then(function(d){if(alive) setQuotes(d);}); 
+    dbLoad("crm_quotes").then(function(d){if(alive) setQuotes(d);});
+    Promise.all([]).then(function(){if(alive) setDataLoading(false);}); 
     return function(){alive=false;};
   }, [currentUser&&currentUser.id]);
 
@@ -4860,9 +4869,9 @@ function App() {
   if(!currentUser) return React.createElement(AppLanding, {onLogin:handleLogin});
 
   // Impersonation override
-  var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName}) : currentUser;
+  var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName,_isImpersonated:true}) : currentUser;
   var isAdmin = !viewAsRep && currentUser.role==="admin";
-  var myRepData = isAdmin ? null : (viewAsRep ? viewAsRep.repData : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null);
+  var myRepData = isAdmin ? null : (viewAsRep ? reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null);
 
   // Legal docs signing gate
   var unsignedDocs = !isAdmin && currentUser ? legalDocs.filter(function(doc){
@@ -4873,16 +4882,16 @@ function App() {
     return !alreadySigned;
   }) : [];
 
-  // Rep agreement gate
-  var needsAgreement = !isAdmin && myRepData && !myRepData.agreementSignedAt;
+  // Rep agreement gate (skip when admin impersonating)
+  var needsAgreement = !isAdmin && !viewAsRep && myRepData && !myRepData.agreementSignedAt;
   // Rep subscription gate
   var now2 = Date.now();
-  var trialExpired = !isAdmin && myRepData && myRepData.trialStartedAt &&
+  var trialExpired = !isAdmin && !viewAsRep && myRepData && myRepData.trialStartedAt &&
     (now2-new Date(myRepData.trialStartedAt).getTime()) >= TRIAL_DAYS*24*60*60*1000 &&
     myRepData.subscriptionStatus!=="active";
 
-  // Terms of service gate — first login only for reps
-  var needsTerms = !isAdmin && myRepData && !myRepData.termsAcceptedAt;
+  // Terms of service gate — first login only for reps (skip when admin impersonating)
+  var needsTerms = !isAdmin && !viewAsRep && myRepData && !myRepData.termsAcceptedAt;
 
   if(needsTerms) return React.createElement(TermsModal, {
     onAccept: function() {
@@ -4893,7 +4902,7 @@ function App() {
     onDecline: handleLogout,
   });
 
-  if(!isAdmin && unsignedDocs.length>0 && myRepData && myRepData.agreementSignedAt) {
+  if(!isAdmin && !viewAsRep && unsignedDocs.length>0 && myRepData && myRepData.agreementSignedAt) {
     var doc = unsignedDocs[0];
     return React.createElement(LegalDocSignModal, {
       doc: doc,
@@ -4967,8 +4976,8 @@ function App() {
   return (
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,
                  fontFamily:"'Inter',system-ui,-apple-system,sans-serif"}}>
-      <Sidebar modules={modules} active={activeTab} onNav={function(id){setViewAsRep(null);if(id!==activeTab||viewAsRep)setActiveTab(id);else setActiveTab(id);}}
-        user={viewAsRep?Object.assign({},currentUser,{name:currentUser.name+" (Admin)"}):currentUser}
+      <Sidebar modules={modules} active={activeTab} onNav={function(id){setActiveTab(id);}}
+        user={viewAsRep?Object.assign({},currentUser,{name:viewAsRep.repName,role:"rep",_impersonating:currentUser.name}):currentUser}
         onLogout={handleLogout} theme={theme}
         onToggleTheme={function(){setTheme(theme==="dark"?"light":"dark");}}
         taskCount={isAdmin?(reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length+applications.filter(function(a){return !a.status||a.status==="pending";}).length):0}
