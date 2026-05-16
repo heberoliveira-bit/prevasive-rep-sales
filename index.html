@@ -4760,7 +4760,332 @@ function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult})
   );
 }
 
+/* ─── Order Form (3-step) ────────────────────────────────────────────────── */
+function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
+                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate}) {
+  const [step,       setStep]       = useState(1);
+  const [custId,     setCustId]     = useState((editOrder&&editOrder.custId)||"");
+  const [newCust,    setNewCust]    = useState(false);
+  const [custName,   setCustName]   = useState("");
+  const [custEmail,  setCustEmail]  = useState("");
+  const [custPhone,  setCustPhone]  = useState("");
+  const [custComp,   setCustComp]   = useState("");
+  const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1}]);
+  const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"pay_later");
+  const [commRate,   setCommRate]   = useState((editOrder&&editOrder.commissionRate)||(repData&&repData.defaultCommissionRate)||10);
+  const [notes,      setNotes]      = useState((editOrder&&editOrder.notes)||"");
+  const [agreed,     setAgreed]     = useState(false);
+  const [placing,    setPlacing]    = useState(false);
+  const [sendConfirm,setSendConfirm]= useState(true);
+  const [discCode,   setDiscCode]   = useState("");
+  const [discApplied,setDiscApplied]= useState(null);
+  const [discErr,    setDiscErr]    = useState("");
+
+  function applyDiscount() {
+    if(!discCode.trim()) return;
+    var code = (discountCodes||[]).find(function(d){return d.active&&d.code===discCode.trim().toUpperCase();});
+    if(!code){setDiscErr("Invalid or expired code.");setDiscApplied(null);return;}
+    setDiscApplied(code); setDiscErr("");
+  }
+
+  var isEdit = !!(editOrder&&editOrder.id);
+  var activeProds = products.filter(function(p){return p.active!==false;});
+  var myCusts = custId==="_new" ? [] : customers.filter(function(c2){
+    return c2.repId===repId;
+  });
+  var selCust = customers.find(function(c2){return c2.id===custId;})||null;
+
+  function calcTotals() {
+    var subtotal = items.reduce(function(s,it){
+      var p=products.find(function(x){return x.id===it.prodId;});
+      return s+(p?p.price:it.unitPrice||0)*it.qty;
+    },0);
+    var discount = 0;
+    if(discApplied) {
+      discount = discApplied.type==="percent" ? subtotal*(discApplied.value/100) : Math.min(discApplied.value,subtotal);
+    }
+    var discounted = subtotal-discount;
+    var commission = discounted*(parseFloat(commRate)||0)/100;
+    return {subtotal:subtotal,discount:discount,shipping:0,tax:0,grand:discounted,commission:commission};
+  }
+
+  function step1Valid() {
+    if(newCust) return custName.trim().length>0;
+    return custId.length>0;
+  }
+  function step2Valid() { return items.some(function(it){return it.prodId;}); }
+
+  function place() {
+    if(!agreed||placing) return;
+    setPlacing(true);
+    var totals = calcTotals();
+    var cid = custId; var cname = selCust?selCust.name:custName;
+    if(newCust&&custName.trim()) {
+      var nid = genId("cust");
+      var nc = {id:nid,repId:repId,name:custName.trim(),email:custEmail.trim(),
+                phone:custPhone.trim(),company:custComp.trim(),createdAt:new Date().toISOString()};
+      setCustomers(function(prev){return [nc].concat(prev);});
+      dbSave("crm_customers",nid,nc);
+      cid=nid; cname=custName.trim();
+    }
+    var id = isEdit?editOrder.id:("ORD-"+String(Date.now()).slice(-6));
+    var order = {
+      id:id, repId:repId, repName:repName,
+      custId:cid, custName:cname,
+      items:items.filter(function(it){return it.prodId;}),
+      totals:totals, commissionRate:parseFloat(commRate)||0,
+      payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
+      notes:notes, status:isEdit?(editOrder.status||"Submitted"):"Submitted",
+      createdAt:isEdit?(editOrder.createdAt||new Date().toISOString()):new Date().toISOString(),
+      updatedAt:new Date().toISOString(),
+    };
+    if(!isEdit) order.auditLog=[{ts:new Date().toISOString(),action:"Order created",actor:repName,detail:""}];
+    setOrders(function(prev){
+      return isEdit?prev.map(function(o){return o.id===id?order:o;}): [order].concat(prev);
+    });
+    dbSave("crm_orders",id,order);
+    setTimeout(function(){
+      setPlacing(false);
+      addToast((isEdit?"Order updated":"Order placed")+" — "+id,"success");
+      showResult({type:"order",title:isEdit?"Order Updated!":"Order Placed!",
+        subtitle:isEdit?"Changes saved.":"Your order has been submitted for processing.",
+        rows:[["Order #",id],["Customer",cname],["Total",fmtMoney(totals.grand)],["Commission",fmtMoney(totals.commission)]],
+        cta:"Done"});
+      onClose();
+    },600);
+  }
+
+  var totals = calcTotals();
+  var plan = repData?REP_PLANS.find(function(p){return p.id===repData.planId;}):null;
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg+"e8",backdropFilter:"blur(8px)",
+                 zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,
+                   width:"100%",maxWidth:640,maxHeight:"92vh",display:"flex",flexDirection:"column",
+                   boxShadow:"0 16px 48px rgba(0,0,0,.25)"}}>
+        {/* Header */}
+        <div style={{padding:"18px 22px 14px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontWeight:800,fontSize:17,color:C.text,letterSpacing:"-.02em"}}>
+              {isEdit?"Edit Order":"New Order"}
+            </div>
+            <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:20}}>×</button>
+          </div>
+          {/* Steps */}
+          <div style={{display:"flex",gap:0}}>
+            {[["1","Details"],["2","Payment"],["3","Confirm"]].map(function(s,i){
+              var num=parseInt(s[0]); var active=step===num; var done=step>num;
+              return (
+                <div key={s[0]} style={{display:"flex",alignItems:"center",flex:i<2?1:"auto"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:22,height:22,borderRadius:"50%",display:"flex",alignItems:"center",
+                                 justifyContent:"center",fontSize:11,fontWeight:800,
+                                 background:done?C.success:active?C.accent:C.surface2,
+                                 color:done||active?"#fff":C.dim}}>
+                      {done?"✓":s[0]}
+                    </div>
+                    <span style={{fontSize:12,fontWeight:active?600:400,color:active?C.text:C.dim}}>{s[1]}</span>
+                  </div>
+                  {i<2&&<div style={{flex:1,height:1,background:done?C.success:C.border,margin:"0 10px"}}/>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1,overflowY:"auto",padding:"18px 22px"}}>
+
+          {/* Step 1 — Details */}
+          {step===1&&(
+            <div>
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Customer</div>
+                <div style={{display:"flex",gap:8,marginBottom:8}}>
+                  <button onClick={function(){setNewCust(false);}} style={{flex:1,padding:"8px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",border:"2px solid "+(newCust?C.border:C.accent),background:newCust?C.surface2:C.accent+"10",color:newCust?C.muted:C.accent,fontSize:12,fontWeight:newCust?400:600}}>Existing Customer</button>
+                  <button onClick={function(){setNewCust(true);setCustId("");}} style={{flex:1,padding:"8px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",border:"2px solid "+(newCust?C.accent:C.border),background:newCust?C.accent+"10":C.surface2,color:newCust?C.accent:C.muted,fontSize:12,fontWeight:newCust?600:400}}>New Customer</button>
+                </div>
+                {!newCust?(
+                  <select value={custId} onChange={function(e){setCustId(e.target.value);}}
+                    style={{width:"100%",background:C.bg,border:"1px solid "+(custId?C.success:C.border),borderRadius:7,padding:"9px 12px",color:custId?C.text:C.dim,fontSize:13,fontFamily:"inherit",outline:"none"}}>
+                    <option value="">Select customer…</option>
+                    {myCusts.map(function(c2){return <option key={c2.id} value={c2.id}>{c2.name}{c2.company?" — "+c2.company:""}</option>;})}
+                  </select>
+                ):(
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <div style={{gridColumn:"1/-1"}}><Field label="Customer Name *" value={custName} onChange={setCustName} placeholder="Dr. Jane Smith"/></div>
+                    <Field label="Email" value={custEmail} onChange={setCustEmail} type="email"/>
+                    <Field label="Phone" value={custPhone} onChange={setCustPhone}/>
+                    <div style={{gridColumn:"1/-1"}}><Field label="Company" value={custComp} onChange={setCustComp}/></div>
+                  </div>
+                )}
+              </div>
+
+              {/* Items */}
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Products</div>
+                {items.map(function(it,i){return (
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px auto",gap:8,marginBottom:8,alignItems:"center"}}>
+                    <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value}):x;});});}}
+                      style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
+                      <option value="">Select product…</option>
+                      {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}{p.sku?" ("+p.sku+")":""}</option>;})}
+                    </select>
+                    <input type="number" min="1" value={it.qty}
+                      onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{qty:parseInt(e.target.value)||1}):x;});});}}
+                      style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
+                    {items.length>1&&<button onClick={function(){setItems(function(prev){return prev.filter(function(_,j){return j!==i;});});}} style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:18,lineHeight:1}}>×</button>}
+                  </div>
+                );})}
+                <button onClick={function(){setItems(function(prev){return prev.concat([{prodId:"",qty:1}]);});}}
+                  style={{width:"100%",padding:"8px",borderRadius:7,border:"1px dashed "+C.border,background:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>+ Add Product</button>
+              </div>
+
+              {/* Discount code */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Discount Code</div>
+                <div style={{display:"flex",gap:8}}>
+                  <input value={discCode} onChange={function(e){setDiscCode(e.target.value.toUpperCase());}} placeholder="PROMO CODE"
+                    style={{flex:1,background:C.bg,border:"1px solid "+(discApplied?C.success:discErr?C.danger:C.border),borderRadius:7,padding:"8px 12px",color:C.text,fontSize:12,fontFamily:"monospace",letterSpacing:".05em",boxSizing:"border-box",outline:"none"}}/>
+                  <Btn small onClick={applyDiscount}>Apply</Btn>
+                </div>
+                {discErr&&<div style={{fontSize:11,color:C.danger,marginTop:4}}>{discErr}</div>}
+                {discApplied&&<div style={{fontSize:11,color:C.success,marginTop:4,fontWeight:600}}>✓ {discApplied.code} — {discApplied.type==="percent"?discApplied.value+"%":"$"+discApplied.value} off</div>}
+              </div>
+
+              <TextArea label="Notes (optional)" value={notes} onChange={setNotes} rows={2} placeholder="Special instructions…"/>
+            </div>
+          )}
+
+          {/* Step 2 — Payment */}
+          {step===2&&(
+            <div>
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Payment Method</div>
+                {[["pay_later","Pay Later / Invoice","Customer pays via invoice"],["credit_card","Credit Card","Charge on delivery"],["check","Check","Payment by check"]].map(function(opt){
+                  var sel=payMethod===opt[0];
+                  return (
+                    <div key={opt[0]} onClick={function(){setPayMethod(opt[0]);}}
+                      style={{padding:"12px 14px",borderRadius:10,border:"2px solid "+(sel?C.accent:C.border),
+                              background:sel?C.accent+"08":C.surface2,cursor:"pointer",marginBottom:8,
+                              display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div>
+                        <div style={{fontWeight:700,fontSize:13,color:sel?C.accent:C.text}}>{opt[1]}</div>
+                        <div style={{fontSize:11,color:C.muted,marginTop:2}}>{opt[2]}</div>
+                      </div>
+                      <div style={{width:18,height:18,borderRadius:"50%",border:"2px solid "+(sel?C.accent:C.border),
+                                   background:sel?C.accent:"none",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                        {sel&&<div style={{width:8,height:8,borderRadius:"50%",background:"#fff"}}/>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission Rate</div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <input type="range" min="0" max={maxCommRate||25} step="0.5" value={commRate}
+                    onChange={function(e){setCommRate(e.target.value);}} style={{flex:1,accentColor:C.accent}}/>
+                  <span style={{fontSize:14,fontWeight:800,color:C.gold,fontFamily:"monospace",minWidth:90,textAlign:"right"}}>
+                    {commRate}% = {fmtMoney(totals.commission)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Totals */}
+              <div style={{background:C.surface2,borderRadius:12,padding:"16px",border:"1px solid "+C.border}}>
+                {[["Subtotal",fmtMoney(totals.subtotal),false],
+                  totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount),false],
+                  ["Commission ("+commRate+"%)",fmtMoney(totals.commission),false],
+                ].filter(Boolean).map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
+                    <span>{row[0]}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{row[1]}</span>
+                  </div>
+                );})}
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:900,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}>
+                  <span>Grand Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3 — Confirm */}
+          {step===3&&(
+            <div>
+              {/* Commission ceiling check */}
+              {(function(){
+                if(!plan) return null;
+                var cap=plan.ceiling;
+                if(totals.commission>cap*0.8) return (
+                  <div style={{padding:"10px 12px",background:totals.commission>cap?C.danger+"12":C.warning+"10",
+                               border:"1px solid "+(totals.commission>cap?C.danger:C.warning)+"25",
+                               borderRadius:8,fontSize:12,fontWeight:600,marginBottom:14,
+                               color:totals.commission>cap?C.danger:C.warning}}>
+                    {totals.commission>cap?"⛔ Commission exceeds your "+plan.name+" plan ceiling of "+fmtMoney(cap)+"/mo":"⚠ Commission is approaching your "+fmtMoney(cap)+"/mo "+plan.name+" ceiling"}
+                  </div>
+                );
+                return null;
+              })()}
+
+              <div style={{background:C.surface2,borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid "+C.border}}>
+                <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Order Summary</div>
+                {[["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
+                  ["Payment",payMethod.replace(/_/g," ")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
+                  ["Grand Total",fmtMoney(totals.grand)]].map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.border}}>
+                    <span style={{color:C.muted}}>{row[0]}</span>
+                    <span style={{fontWeight:700,color:C.text,textTransform:"capitalize"}}>{row[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              <div style={{padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:12,color:C.warning,fontWeight:600,marginBottom:14}}>
+                ⚠ Once placed, this order will be submitted for processing.
+              </div>
+
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                  <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{accentColor:C.accent}}/>
+                  I confirm this order and payment terms
+                </label>
+                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                  <input type="checkbox" checked={sendConfirm} onChange={function(e){setSendConfirm(e.target.checked);}} style={{accentColor:C.accent}}/>
+                  Send confirmation email to customer
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{padding:"14px 22px",borderTop:"1px solid "+C.border,flexShrink:0,
+                     display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <Btn variant="ghost" onClick={step===1?onClose:function(){setStep(step-1);}}>
+            {step===1?"Cancel":"← Back"}
+          </Btn>
+          {step<3?(
+            <Btn onClick={function(){if(step===1&&!step1Valid()) return; if(step===2&&!step2Valid()) return; setStep(step+1);}}
+              disabled={(step===1&&!step1Valid())||(step===2&&!step2Valid())}>
+              Next →
+            </Btn>
+          ):(
+            <Btn onClick={place} disabled={!agreed||placing}>
+              {placing?"Placing…":isEdit?"Save Changes":"Place Order"}
+            </Btn>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
+
+</script>
+<script id="c10" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -4911,9 +5236,6 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
 }
 
 /* ─── Rep Customers ──────────────────────────────────────────────────────── */
-
-</script>
-<script id="c10" type="text/plain">
 function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editCust, setEditCust] = useState(null);
@@ -5089,6 +5411,9 @@ function RepCommissions({repId,orders,commissions,repName}) {
 }
 
 /* ─── Rep Profile ────────────────────────────────────────────────────────── */
+
+</script>
+<script id="c11" type="text/plain">
 function RepProfile({user,repData,setReps,commissions,addToast}) {
   const [tab,   setTab]   = useState("profile");
   const [name,  setName]  = useState(user&&user.name||"");
@@ -5219,9 +5544,6 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
 
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
-
-</script>
-<script id="c11" type="text/plain">
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   const [currentUser, setCurrentUser] = useState(null);
