@@ -4042,10 +4042,714 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
 }
 
 
-/* ─── App Shell ──────────────────────────────────────────────────────────── */
+/* ─── Invoice Generator ──────────────────────────────────────────────────── */
+function generateInvoice(order, customers, products, currentUser, returnHtml) {
+  var cust = customers.find(function(x){return x.id===order.custId;})||{};
+  var date = fmtDate(order.createdAt);
+  var cfg = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||'{"prefix":"INV","company":"PreVasive USA","footer":"Thank you for your business.","paymentTerms":"Net 30"}');
+  var dueDate = fmtDate(new Date(new Date(order.createdAt).getTime()+30*24*60*60*1000).toISOString());
+  var rows = (order.items||[]).map(function(it){
+    var p = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+    var line = (p.price||0)*it.qty;
+    return "<tr><td style='padding:8px 12px;border-bottom:1px solid #e8ecef'>"+p.name+"</td><td style='padding:8px 12px;text-align:center;border-bottom:1px solid #e8ecef'>"+it.qty+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef'>"+fmtMoney(p.price||0)+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef;font-weight:600'>"+fmtMoney(line)+"</td></tr>";
+  }).join("");
+  var totals = order.totals||{};
+  var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;color:#1a1a2e;max-width:720px;margin:0 auto;padding:40px 24px;font-size:13px}h1{font-size:28px;font-weight:800;letter-spacing:-.03em}.muted{color:#6b7c93}.mono{font-family:monospace}table{width:100%;border-collapse:collapse}.th{padding:8px 12px;background:#f6f9fc;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600}</style></head><body>"
+    +"<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:36px'>"
+    +"<div><div style='font-size:22px;font-weight:900;color:#635bff'>"+(cfg.company||"PreVasive")+"</div></div>"
+    +"<div style='text-align:right'><h1>Invoice</h1><div class='mono' style='color:#635bff;margin-top:4px'>"+(cfg.prefix||"INV")+"-"+order.id+"</div>"
+    +"<div style='margin-top:6px;font-size:12px;color:#6b7c93'>Date: "+date+"<br>Due: "+dueDate+"<br>Terms: "+(cfg.paymentTerms||"Net 30")+"</div></div></div>"
+    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:28px'>"
+    +"<div><div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b7c93;margin-bottom:8px'>Bill To</div>"
+    +"<div style='font-weight:700;font-size:14px'>"+(cust.name||order.custName||"Customer")+"</div>"
+    +(cust.company?"<div style='color:#6b7c93'>"+cust.company+"</div>":"")
+    +(cust.email?"<div style='color:#6b7c93'>"+cust.email+"</div>":"")+"</div>"
+    +"<div><div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b7c93;margin-bottom:8px'>Sales Rep</div>"
+    +"<div style='font-weight:700;font-size:14px'>"+(order.repName||"Rep")+"</div></div></div>"
+    +"<table><thead><tr><th class='th' style='text-align:left'>Product</th><th class='th' style='text-align:center'>Qty</th><th class='th' style='text-align:right'>Unit Price</th><th class='th' style='text-align:right'>Total</th></tr></thead><tbody>"+rows+"</tbody>"
+    +"<tfoot>"
+    +(totals.discount>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Discount</td><td class='mono' style='padding:8px 12px;text-align:right;color:#1ea672'>-"+fmtMoney(totals.discount||0)+"</td></tr>":"")
+    +"<tr><td colspan='3' style='padding:12px;text-align:right;font-weight:800;font-size:15px'>Total Due</td><td class='mono' style='padding:12px;text-align:right;font-weight:900;font-size:18px;color:#635bff'>"+fmtMoney(totals.grand||0)+"</td></tr>"
+    +"</tfoot></table>"
+    +"<div style='margin-top:32px;padding-top:20px;border-top:1px solid #e8ecef;color:#6b7c93;font-size:11px;line-height:1.7'>"+(cfg.footer||"Thank you for your business.")+"</div>"
+    +"</body></html>";
+  if(returnHtml) return html;
+  var blob = new Blob([html],{type:"text/html"});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href=url; a.download="Invoice-"+order.id+".html";
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);document.body.removeChild(a);},100);
+}
+
+/* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
 <script id="c8" type="text/plain">
+function CommissionStatement({repId,orders,commissions,repName}) {
+  var now3 = new Date();
+  var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const [selYear,  setSelYear]  = useState(now3.getFullYear());
+  const [selMonth, setSelMonth] = useState(now3.getMonth());
+
+  var monthOrds = orders.filter(function(o){
+    if(o.repId!==repId) return false;
+    var d=new Date(o.createdAt);
+    return d.getFullYear()===selYear&&d.getMonth()===selMonth;
+  });
+  var paidComms = (commissions||[]).filter(function(cp){
+    if(cp.repId!==repId) return false;
+    var d=new Date(cp.paidAt);
+    return d.getFullYear()===selYear&&d.getMonth()===selMonth;
+  });
+  var totalSales = monthOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+  var totalComm  = monthOrds.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var paidTotal  = paidComms.reduce(function(s,cp){return s+(cp.amount||0);},0);
+  var heldComm   = monthOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
+    return (Date.now()-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+
+  function download() {
+    var rn = repName||"Rep";
+    var html2 = "<!DOCTYPE html><html><head><style>body{font-family:Arial,sans-serif;max-width:600px;margin:40px auto;font-size:13px}h1{color:#635bff}table{width:100%;border-collapse:collapse}td,th{padding:8px 12px;border-bottom:1px solid #e8ecef;text-align:left}.mono{font-family:monospace}.tot{font-weight:900;font-size:15px;color:#635bff}</style></head><body>"
+      +"<h1>Commission Statement</h1><p><strong>"+rn+"</strong> &mdash; "+MONTHS[selMonth]+" "+selYear+"</p>"
+      +"<table><tr style='background:#f6f9fc'><th>Summary</th><th class='mono' style='text-align:right'>Amount</th></tr>"
+      +"<tr><td>Orders Placed</td><td class='mono' style='text-align:right'>"+monthOrds.length+"</td></tr>"
+      +"<tr><td>Total Sales</td><td class='mono' style='text-align:right'>"+fmtMoney(totalSales)+"</td></tr>"
+      +"<tr><td>Total Commission Earned</td><td class='mono' style='text-align:right'>"+fmtMoney(totalComm)+"</td></tr>"
+      +"<tr><td>Commission Held (return window)</td><td class='mono' style='text-align:right'>"+fmtMoney(heldComm)+"</td></tr>"
+      +"<tr><td class='tot'>Commission Paid This Month</td><td class='mono tot' style='text-align:right'>"+fmtMoney(paidTotal)+"</td></tr>"
+      +"</table><p style='font-size:11px;color:#888;margin-top:24px'>Generated "+new Date().toLocaleDateString()+"</p></body></html>";
+    var blob=new Blob([html2],{type:"text/html"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");
+    a.href=url; a.download="Statement-"+rn.replace(/\s+/g,"-")+"-"+MONTHS[selMonth]+"-"+selYear+".html";
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){URL.revokeObjectURL(url);document.body.removeChild(a);},100);
+  }
+
+  return (
+    <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:20}}>
+      <div style={{padding:"14px 18px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+        <div style={{fontWeight:700,fontSize:14,color:C.text}}>Monthly Statement</div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <select value={selMonth} onChange={function(e){setSelMonth(parseInt(e.target.value));}} style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:6,padding:"5px 10px",color:C.text,fontSize:12,fontFamily:"inherit"}}>
+            {MONTHS.map(function(m,i){return <option key={i} value={i}>{m}</option>;})}
+          </select>
+          <select value={selYear} onChange={function(e){setSelYear(parseInt(e.target.value));}} style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:6,padding:"5px 10px",color:C.text,fontSize:12,fontFamily:"inherit"}}>
+            {[now3.getFullYear(),now3.getFullYear()-1].map(function(y){return <option key={y} value={y}>{y}</option>;})}
+          </select>
+          <Btn small variant="ghost" onClick={download}>⬇ Download</Btn>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:1,background:C.border}}>
+        {[["Orders",monthOrds.length,C.text],["Total Sales",fmtMoney(totalSales),C.accent],["Comm Earned",fmtMoney(totalComm),C.gold],["Comm Paid",fmtMoney(paidTotal),C.success]].map(function(item,i){return (
+          <div key={i} style={{background:C.surface,padding:"14px 16px",textAlign:"center"}}>
+            <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>{item[0]}</div>
+            <div style={{fontSize:18,fontWeight:900,fontFamily:"monospace",color:item[2]}}>{item[1]}</div>
+          </div>
+        );})}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Email Module ───────────────────────────────────────────────────────── */
+var EMAIL_TEMPLATES = [
+  {id:"followup",label:"Follow-up",subject:"Following up on your PreVasive order",body:"Hi {{customer_name}},\n\nI wanted to follow up on your recent order. Please let me know if you have any questions.\n\nBest,\n{{rep_name}}"},
+  {id:"intro",label:"Introduction",subject:"Introducing PreVasive Medical Solutions",body:"Hi {{customer_name}},\n\nI would love to introduce you to PreVasive products that can benefit your practice.\n\nBest,\n{{rep_name}}"},
+  {id:"reorder",label:"Reorder Reminder",subject:"Time to reorder your PreVasive supplies",body:"Hi {{customer_name}},\n\nBased on your last order, you may be running low on supplies. I can process a new order quickly.\n\nBest,\n{{rep_name}}"},
+  {id:"thankyou",label:"Thank You",subject:"Thank you for your order",body:"Hi {{customer_name}},\n\nThank you for your order. We appreciate your business!\n\nBest,\n{{rep_name}}"},
+  {id:"custom",label:"Custom",subject:"",body:""},
+];
+var EMAIL_VARS = ["{{customer_name}}","{{rep_name}}","{{order_id}}","{{date}}","{{company}}"];
+
+function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult}) {
+  const [toId,     setToId]     = useState("");
+  const [toEmail,  setToEmail]  = useState("");
+  const [subject,  setSubject]  = useState("");
+  const [body,     setBody]     = useState("");
+  const [tmpl,     setTmpl]     = useState("custom");
+  const [custOpen, setCustOpen] = useState(false);
+  const [search,   setSearch]   = useState("");
+  const [sending,  setSending]  = useState(false);
+  const [sentLog,  setSentLog]  = useState([]);
+
+  var myCusts = isAdmin ? customers : customers.filter(function(c2){return c2.repId===(currentUser&&(currentUser.rep_id||currentUser.id));});
+  var selCust = myCusts.find(function(c2){return c2.id===toId;})||null;
+  var filtCusts = search ? myCusts.filter(function(c2){var s=search.toLowerCase();return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.email||"").toLowerCase().indexOf(s)>=0;}) : myCusts;
+
+  function applyTemplate(t) {
+    setTmpl(t.id);
+    var rn=currentUser&&currentUser.name||""; var cn=selCust?selCust.name:"{{customer_name}}";
+    var dt=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+    function fill(s){return s.replace(/\{\{customer_name\}\}/g,cn).replace(/\{\{rep_name\}\}/g,rn).replace(/\{\{date\}\}/g,dt).replace(/\{\{company\}\}/g,selCust&&selCust.company||"{{company}}").replace(/\{\{order_id\}\}/g,"");}
+    setSubject(fill(t.subject)); setBody(fill(t.body));
+  }
+
+  function insertVar(v){setBody(function(prev){return prev+v;});}
+
+  function send() {
+    if(!toEmail.trim()||!body.trim()) return;
+    setSending(true);
+    setTimeout(function(){
+      setSending(false);
+      var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
+      setSentLog(function(prev){return [entry].concat(prev);});
+      addToast("Email sent to "+(selCust?selCust.name:toEmail),"success");
+      showResult({type:"email",title:"Email Sent!",subtitle:"Message delivered successfully.",rows:[["To",selCust?selCust.name+" <"+toEmail+">":toEmail],["Subject",subject||"(no subject)"],["Sent",new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"})]],cta:"Done"});
+      setSubject(""); setBody(""); setToId(""); setToEmail(""); setTmpl("custom");
+    },800);
+  }
+
+  return (
+    <div>
+      <PageHeader title="Email" subtitle="Compose and send messages to customers"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 340px",gap:20,alignItems:"start"}}>
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:11,fontWeight:600,color:C.dim,marginRight:4}}>TEMPLATE:</span>
+            {EMAIL_TEMPLATES.map(function(t){var sel=tmpl===t.id;return (
+              <button key={t.id} onClick={function(){applyTemplate(t);}}
+                style={{padding:"4px 10px",borderRadius:20,border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:sel?700:400,background:sel?C.accent+"18":"transparent",color:sel?C.accent:C.muted}}>{t.label}</button>
+            );})}
+          </div>
+          <div style={{padding:"16px"}}>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>To</div>
+              <div style={{position:"relative"}}>
+                <div onClick={function(){setCustOpen(!custOpen);}} style={{padding:"8px 12px",background:C.bg,border:"1px solid "+(custOpen?C.accent:C.border),borderRadius:7,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  {selCust?<span style={{fontSize:13,fontWeight:600,color:C.text}}>{selCust.name}</span>:<span style={{fontSize:13,color:C.dim}}>Select customer or type email…</span>}
+                  <span style={{fontSize:10,color:C.dim}}>{custOpen?"▲":"▼"}</span>
+                </div>
+                {custOpen&&(
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:C.surface,border:"1px solid "+C.border,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,.2)",marginTop:4}}>
+                    <div style={{padding:8,borderBottom:"1px solid "+C.border}}>
+                      <input autoFocus value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Search or type email…"
+                        style={{width:"100%",background:C.surface2,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div style={{maxHeight:180,overflowY:"auto"}}>
+                      {search&&search.indexOf("@")>=0&&<div onClick={function(){setToEmail(search);setToId("");setCustOpen(false);setSearch("");}} style={{padding:"9px 12px",cursor:"pointer",fontSize:12,color:C.accent,fontWeight:600,borderBottom:"1px solid "+C.border}}>Send to: {search}</div>}
+                      {filtCusts.map(function(cu){return (
+                        <div key={cu.id} onClick={function(){setToId(cu.id);setToEmail(cu.email||"");setCustOpen(false);setSearch("");}} style={{padding:"9px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,background:cu.id===toId?C.accent+"10":"none",borderBottom:"1px solid "+C.border}}>
+                          <Avatar name={cu.name} size={24}/>
+                          <div><div style={{fontSize:12,fontWeight:600,color:C.text}}>{cu.name}</div><div style={{fontSize:10,color:C.dim}}>{cu.email||"no email"}</div></div>
+                        </div>
+                      );})}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Subject</div>
+              <input value={subject} onChange={function(e){setSubject(e.target.value);}} placeholder="Email subject…"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+            <div style={{marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+              <span style={{fontSize:10,fontWeight:600,color:C.dim}}>INSERT:</span>
+              {EMAIL_VARS.map(function(v){return (
+                <button key={v} onClick={function(){insertVar(v);}} style={{padding:"2px 7px",borderRadius:4,border:"1px solid "+C.border,background:C.surface2,color:C.accent,cursor:"pointer",fontFamily:"monospace",fontSize:10,fontWeight:600}}>{v}</button>
+              );})}
+            </div>
+            <div style={{marginBottom:12}}>
+              <textarea value={body} onChange={function(e){setBody(e.target.value);}} rows={9} placeholder="Write your message…"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
+            </div>
+            <div style={{display:"flex",justifyContent:"flex-end"}}>
+              <Btn onClick={send} disabled={sending||!toEmail.trim()||!body.trim()}>{sending?"Sending…":"Send Email →"}</Btn>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+            <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Preview</div>
+            <div style={{padding:"14px",maxHeight:220,overflowY:"auto"}}>
+              {subject&&<div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:8,paddingBottom:8,borderBottom:"1px solid "+C.border}}>{subject}</div>}
+              {body?<div style={{fontSize:12,color:C.muted,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{body}</div>:<div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>Start typing to preview…</div>}
+            </div>
+          </div>
+          {sentLog.length>0&&(
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Sent</div>
+              {sentLog.slice(0,5).map(function(e){return (
+                <div key={e.id} style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:12}}>
+                  <div style={{fontWeight:600,color:C.text,marginBottom:2}}>{e.toName}</div>
+                  <div style={{color:C.muted,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</div>
+                  <div style={{color:C.dim,fontSize:10,marginTop:2}}>{fmtDate(e.sentAt)}</div>
+                </div>
+              );})}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
+function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
+  var now4 = Date.now();
+  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
+  var totalEarned = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
+  var heldComm = myOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
+    return (now4-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var releasedComm = myOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
+    var paidIds=myComm.map(function(cp){return cp.orderId;});
+    return (now4-new Date(o.deliveredAt).getTime())>=RETURN_WINDOW_DAYS*24*60*60*1000&&paidIds.indexOf(o.id)<0;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var myCusts = customers.filter(function(c2){return c2.repId===repId;});
+
+  return (
+    <div>
+      <PageHeader title={"Welcome back, "+(repName&&repName.split(" ")[0])||"Rep"+"!"} subtitle="Your sales dashboard"/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:24}}>
+        <KpiCard label="My Orders" value={myOrds.length} sub={myOrds.filter(function(o){return o.status==="Submitted";}).length+" pending"} color={C.accent}/>
+        <KpiCard label="Total Earned" value={fmtMoney(totalEarned)} sub="Paid out" color={C.success}/>
+        <KpiCard label="Commission Due" value={fmtMoney(releasedComm)} sub="Ready for payout" color={C.gold}/>
+        <KpiCard label="My Customers" value={myCusts.length} sub="Active accounts" color={C.text}/>
+      </div>
+      {heldComm>0&&(
+        <div style={{padding:"12px 16px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:10,marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:13,color:C.warning}}>🔒 {fmtMoney(heldComm)} held — return window open</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:2}}>Commission releases {RETURN_WINDOW_DAYS} days after delivery</div>
+          </div>
+        </div>
+      )}
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+        <div style={{padding:"14px 18px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text}}>Recent Orders</div>
+          <button onClick={function(){onNav("orders");}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>View all →</button>
+        </div>
+        {myOrds.length===0?(
+          <div style={{padding:"28px",textAlign:"center"}}>
+            <div style={{fontSize:13,color:C.dim,marginBottom:10}}>No orders yet</div>
+            <Btn small onClick={function(){onNav("new_order");}}>Place First Order</Btn>
+          </div>
+        ):(
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <tbody>
+              {myOrds.slice(0,5).map(function(o){return (
+                <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                  <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                  <td style={{padding:"10px 16px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
+                  <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",fontWeight:600}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                  <td style={{padding:"10px 16px"}}><Badge status={o.status}/></td>
+                </tr>
+              );})}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Rep Orders ─────────────────────────────────────────────────────────── */
+function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes}) {
+  const [showForm, setShowForm] = useState(false);
+  const [filter,   setFilter]   = useState("all");
+  const [viewOrd,  setViewOrd]  = useState(null);
+  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
+
+  return (
+    <div>
+      <PageHeader title="My Orders" subtitle={myOrds.length+" orders"}
+        action={<Btn onClick={function(){setShowForm(true);}}>+ New Order</Btn>}/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18,borderBottom:"1px solid "+C.border,paddingBottom:12}}>
+        {["all"].concat(["Submitted","Processing","Shipped","Delivered","Paid","Cancelled"]).map(function(s){
+          var act=filter===s;
+          return <button key={s} onClick={function(){setFilter(s);}} style={{padding:"6px 12px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:act?600:400,background:act?C.accent+"18":"transparent",color:act?C.accent:C.muted}}>{s==="all"?"All":s}</button>;
+        })}
+      </div>
+      {filtered.length===0?(
+        <EmptyState icon="📦" title={filter==="all"?"No orders yet":"No "+filter+" orders"} subtitle="Start by placing your first order." action={filter==="all"?<Btn onClick={function(){setShowForm(true);}}>Place Order</Btn>:null}/>
+      ):(
+        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:C.surface2}}>
+              {["Order","Customer","Date","Total","Commission","Status",""].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
+            </tr></thead>
+            <tbody>
+              {filtered.map(function(o){
+                var now5=Date.now(); var delMs=o.deliveredAt?new Date(o.deliveredAt).getTime():null;
+                var held=delMs&&(now5-delMs)<RETURN_WINDOW_DAYS*24*60*60*1000;
+                return (
+                  <tr key={o.id} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}} onClick={function(){setViewOrd(o);}}>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600}}>{fmtMoney(o.totals&&o.totals.grand||0)}</td>
+                    <td style={{padding:"10px 14px"}}>
+                      <span style={{fontSize:12,fontFamily:"monospace",fontWeight:700,color:held?C.warning:C.gold}}>{held?"🔒 ":""}{fmtMoney(o.totals&&o.totals.commission||0)}</span>
+                    </td>
+                    <td style={{padding:"10px 14px"}}><Badge status={o.status}/></td>
+                    <td style={{padding:"10px 14px"}} onClick={function(e){e.stopPropagation();}}>
+                      <Btn small variant="ghost" onClick={function(){generateInvoice(o,customers,products,currentUser);}}>⬇</Btn>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {viewOrd&&(
+        <Modal title={"Order "+viewOrd.id} wide={true} onClose={function(){setViewOrd(null);}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+            <div>
+              {[["Status",<Badge status={viewOrd.status}/>],["Customer",viewOrd.custName||"—"],["Date",fmtDate(viewOrd.createdAt)],["Payment",viewOrd.payMethod||"—"]].map(function(r,i){return (
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 0",borderBottom:"1px solid "+C.border}}>
+                  <span style={{color:C.muted}}>{r[0]}</span><span style={{fontWeight:600,color:C.text}}>{r[1]}</span>
+                </div>
+              );})}
+              {viewOrd.notes&&<div style={{marginTop:12,padding:"10px",background:C.surface2,borderRadius:8,fontSize:12,color:C.muted}}>{viewOrd.notes}</div>}
+            </div>
+            <div>
+              <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
+                {(viewOrd.items||[]).map(function(it,i){var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(p.price*it.qty)}</span></div>
+                );})}
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewOrd.totals&&viewOrd.totals.grand||0)}</span></div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <Btn small variant="ghost" onClick={function(){generateInvoice(viewOrd,customers,products,currentUser);}}>⬇ Invoice</Btn>
+                <Btn small variant="ghost" onClick={function(){var w=window.open("","_blank");var h=generateInvoice(viewOrd,customers,products,currentUser,true);w.document.write(h);w.document.close();setTimeout(function(){w.print();},500);}}>🖨 Print</Btn>
+              </div>
+            </div>
+          </div>
+        </Modal>
+      )}
+      {showForm&&React.createElement(OrderForm,{
+        repId:repId,repName:repName,products:products,customers:customers,
+        setCustomers:setCustomers,setOrders:setOrders,
+        editOrder:null,onClose:function(){setShowForm(false);},
+        addToast:addToast,showResult:showResult,discountCodes:discountCodes,repData:repData,
+      })}
+    </div>
+  );
+}
+
+/* ─── Rep Customers ──────────────────────────────────────────────────────── */
+
+</script>
+<script id="c9" type="text/plain">
+function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editCust, setEditCust] = useState(null);
+  const [viewCust2,setViewCust2] = useState(null);
+  const [name,   setName]   = useState(""); const [email,   setEmail]   = useState("");
+  const [company,setCompany] = useState(""); const [phone,   setPhone]   = useState("");
+  const [addr,   setAddr]   = useState(""); const [city,    setCity]    = useState("");
+  const [state2, setState2] = useState(""); const [zip,     setZip]     = useState("");
+  const [payTerms,setPayTerms] = useState(""); const [search, setSearch] = useState("");
+  var myCusts = customers.filter(function(c2){return c2.repId===repId;});
+  var filtered = myCusts.filter(function(c2){
+    if(!search) return true; var s=search.toLowerCase();
+    return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.company||"").toLowerCase().indexOf(s)>=0;
+  });
+  function openNew(){setEditCust(null);setName("");setEmail("");setCompany("");setPhone("");setAddr("");setCity("");setState2("");setZip("");setPayTerms("");setShowForm(true);}
+  function openEdit(c2){setEditCust(c2);setName(c2.name||"");setEmail(c2.email||"");setCompany(c2.company||"");setPhone(c2.phone||"");setAddr(c2.address||"");setCity(c2.city||"");setState2(c2.state||"");setZip(c2.zip||"");setPayTerms(c2.paymentTerms||"");setShowForm(true);}
+  function save(){
+    if(!name.trim()) return;
+    var id=editCust?editCust.id:genId("cust");
+    var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),paymentTerms:payTerms,updatedAt:new Date().toISOString()};
+    if(!editCust) data.createdAt=new Date().toISOString();
+    setCustomers(function(prev){return editCust?prev.map(function(c2){return c2.id===editCust.id?data:c2;}):[data].concat(prev);});
+    dbSave("crm_customers",id,data); addToast(editCust?"Customer updated":"Customer added","success"); setShowForm(false);
+  }
+  return (
+    <div>
+      <PageHeader title="My Customers" subtitle={myCusts.length+" customers"} action={<Btn onClick={openNew}>+ Add Customer</Btn>}/>
+      <div style={{marginBottom:14}}>
+        <input value={search} onChange={function(e){setSearch(e.target.value);}} placeholder="Search customers…"
+          style={{width:"100%",maxWidth:360,background:C.surface,border:"1px solid "+C.border,borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+      </div>
+      {filtered.length===0?<EmptyState icon="👥" title="No customers" subtitle="Add your first customer." action={<Btn onClick={openNew}>Add Customer</Btn>}/>:(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:14}}>
+          {filtered.map(function(c2){
+            var custOrds=orders.filter(function(o){return o.custId===c2.id;});
+            var spend=custOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+            return (
+              <div key={c2.id} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 18px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                  <Avatar name={c2.name} size={34}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:14,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c2.name}</div>
+                    {c2.company&&<div style={{fontSize:11,color:C.dim}}>{c2.company}</div>}
+                  </div>
+                </div>
+                {c2.email&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>✉ {c2.email}</div>}
+                {c2.phone&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>📞 {c2.phone}</div>}
+                {c2.paymentTerms&&<div style={{fontSize:10,fontWeight:600,padding:"1px 7px",borderRadius:20,background:C.accent+"12",color:C.accent,display:"inline-block",marginBottom:8}}>{c2.paymentTerms.replace(/_/g," ")}</div>}
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.dim,padding:"8px 0",borderTop:"1px solid "+C.border,marginBottom:10}}>
+                  <span>{custOrds.length} orders</span><span style={{fontWeight:700,color:C.success}}>{fmtMoney(spend)}</span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <Btn small variant="outline" onClick={function(){setViewCust2(c2);}} fullWidth={true}>View Profile</Btn>
+                  <Btn small variant="ghost" onClick={function(){openEdit(c2);}} fullWidth={true}>Edit</Btn>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {viewCust2&&<CustomerProfile customer={viewCust2} orders={orders} onEdit={openEdit} onClose={function(){setViewCust2(null);}}/>}
+      {showForm&&(
+        <Modal title={editCust?"Edit Customer":"New Customer"} onClose={function(){setShowForm(false);}}
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn><Btn onClick={save}>{editCust?"Save":"Add Customer"}</Btn></div>}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div style={{gridColumn:"1/-1"}}><Field label="Full Name *" value={name} onChange={setName} placeholder="Dr. Jane Smith"/></div>
+            <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="jane@practice.com"/>
+            <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
+            <div style={{gridColumn:"1/-1"}}><Field label="Company" value={company} onChange={setCompany} placeholder="Smith Medical Group"/></div>
+            <Drop label="Payment Terms" value={payTerms} onChange={setPayTerms} opts={[{v:"",label:"Not specified"},{v:"due_receipt",label:"Due on Receipt"},{v:"net_15",label:"Net 15"},{v:"net_30",label:"Net 30"},{v:"net_45",label:"Net 45"},{v:"net_60",label:"Net 60"}]}/>
+            <div/>
+            <div style={{gridColumn:"1/-1"}}><Field label="Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/></div>
+            <Field label="City" value={city} onChange={setCity}/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              <Field label="State" value={state2} onChange={setState2} placeholder="CA"/>
+              <Field label="ZIP" value={zip} onChange={setZip}/>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* ─── Rep Commissions ────────────────────────────────────────────────────── */
+function RepCommissions({repId,orders,commissions,repName}) {
+  var now6 = Date.now();
+  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
+  var paidIds = myComm.map(function(cp){return cp.orderId;});
+  var held = myOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
+    return (now6-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  });
+  var released = myOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
+    return (now6-new Date(o.deliveredAt).getTime())>=RETURN_WINDOW_DAYS*24*60*60*1000&&paidIds.indexOf(o.id)<0;
+  });
+  var totalPaid  = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
+  var totalHeld  = held.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var totalReady = released.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+
+  return (
+    <div>
+      <PageHeader title="My Commissions"/>
+      <CommissionStatement repId={repId} orders={orders} commissions={commissions} repName={repName}/>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
+        <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub="Paid out" color={C.success}/>
+        <KpiCard label="Ready to Collect" value={fmtMoney(totalReady)} sub={released.length+" orders"} color={C.gold}/>
+        <KpiCard label="In Return Window" value={fmtMoney(totalHeld)} sub={"Held · "+RETURN_WINDOW_DAYS+"-day window"} color={C.warning}/>
+      </div>
+      {released.length>0&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>Ready to Release</div>
+          <div style={{background:C.surface,border:"1px solid "+C.gold+"30",borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>{["Order","Customer","Delivered","Commission"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
+              <tbody>{released.map(function(o){return (
+                <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                  <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                  <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                  <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
+                  <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(o.totals&&o.totals.commission||0)}</td>
+                </tr>
+              );})}</tbody>
+            </table>
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginTop:8}}>Contact your admin to process payout.</div>
+        </div>
+      )}
+      {held.length>0&&(
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>In Return Window</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>{["Order","Customer","Delivered","Releases","Commission"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
+              <tbody>{held.map(function(o){
+                var rel=new Date(new Date(o.deliveredAt).getTime()+RETURN_WINDOW_DAYS*24*60*60*1000);
+                return (
+                  <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.warning,fontWeight:600}}>{fmtDate(rel.toISOString())}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.warning}}>🔒 {fmtMoney(o.totals&&o.totals.commission||0)}</td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {myComm.length>0&&(
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>Payment History</div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>{["Date","Order","Amount"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
+              <tbody>{myComm.map(function(cp){return (
+                <tr key={cp.id} style={{borderTop:"1px solid "+C.border}}>
+                  <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(cp.paidAt)}</td>
+                  <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.dim}}>{cp.orderId}</td>
+                  <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(cp.amount)}</td>
+                </tr>
+              );})}</tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {myOrds.length===0&&myComm.length===0&&<EmptyState icon="💰" title="No commissions yet" subtitle="Commissions appear here after you place orders that are delivered."/>}
+    </div>
+  );
+}
+
+/* ─── Rep Profile ────────────────────────────────────────────────────────── */
+function RepProfile({user,repData,setReps,commissions,addToast}) {
+  const [tab,   setTab]   = useState("profile");
+  const [name,  setName]  = useState(user&&user.name||"");
+  const [phone, setPhone] = useState(repData&&repData.phone||"");
+  const [msg,   setMsg]   = useState("");
+  const [newP,  setNewP]  = useState(""); const [conf, setConf] = useState(""); const [pMsg, setPMsg] = useState("");
+  const [w9Name,setW9Name] = useState(repData&&repData.w9LegalName||"");
+  const [w9Ssn, setW9Ssn]  = useState(""); const [w9Type,setW9Type] = useState(repData&&repData.w9EntityType||"individual");
+  const [w9Addr,setW9Addr] = useState(repData&&repData.w9Address||""); const [w9Msg,setW9Msg] = useState("");
+
+  function saveProfile(){
+    if(!name.trim()) return;
+    if(setReps&&repData){var updated=Object.assign({},repData,{name:name.trim(),phone:phone.trim()});setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});dbSave("crm_reps",repData.id,updated);}
+    addToast("Profile updated","success"); setMsg("Saved!"); setTimeout(function(){setMsg("");},3000);
+  }
+  function changePw(){
+    if(!newP||newP.length<8){setPMsg("New password must be at least 8 characters.");return;}
+    if(newP!==conf){setPMsg("Passwords do not match.");return;}
+    var sb=getSB();if(!sb){setPMsg("Service unavailable.");return;}
+    setPMsg("Updating…");
+    sb.auth.updateUser({password:newP}).then(function(r){if(r.error){setPMsg(r.error.message);return;}setPMsg("Password updated!");setNewP("");setConf("");addToast("Password changed","success");}).catch(function(e){setPMsg(e.message||"Error");});
+  }
+
+  var plan = repData?REP_PLANS.find(function(p){return p.id===repData.planId;}):null;
+  var TABS = [{id:"profile",l:"Profile"},{id:"documents",l:"Documents"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+
+  return (
+    <div>
+      <PageHeader title="My Profile"/>
+      <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:24}}>
+        {TABS.map(function(t){var act=tab===t.id;return (
+          <button key={t.id} onClick={function(){setTab(t.id);}} style={{padding:"8px 16px",background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:13,fontWeight:act?600:400,color:act?C.text:C.dim,borderBottom:"2px solid "+(act?C.accent:"transparent"),marginBottom:-1}}>{t.l}</button>
+        );})}
+      </div>
+
+      {tab==="profile"&&(
+        <div style={{maxWidth:480}}>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:22,padding:"16px",background:C.surface2,borderRadius:12,border:"1px solid "+C.border}}>
+            <Avatar name={name||user&&user.name} size={48}/>
+            <div>
+              <div style={{fontWeight:700,fontSize:16,color:C.text}}>{name||user&&user.name}</div>
+              <div style={{fontSize:12,color:C.muted,marginTop:2}}>{user&&user.email}</div>
+              <div style={{fontSize:11,color:C.accent,fontWeight:600,marginTop:2}}>Sales Rep{repData&&repData.defaultCommissionRate?" · "+repData.defaultCommissionRate+"% default commission":""}</div>
+            </div>
+          </div>
+          <Field label="Full Name" value={name} onChange={setName}/>
+          <Field label="Email" value={user&&user.email} readOnly={true} hint="Email cannot be changed here."/>
+          <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
+          {msg&&<div style={{padding:"8px 12px",background:C.success+"12",borderRadius:6,color:C.success,fontSize:12,fontWeight:600,marginBottom:12}}>{msg}</div>}
+          <Btn onClick={saveProfile}>Save Profile</Btn>
+        </div>
+      )}
+
+      {tab==="documents"&&(
+        <div style={{maxWidth:560}}>
+          <div style={{marginBottom:28}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:12,borderBottom:"1px solid "+C.border}}>
+              <div><div style={{fontWeight:800,fontSize:15,color:C.text}}>W-9 Tax Information</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Required for commission payments.</div></div>
+              {repData&&repData.w9ReviewStatus==="approved"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.success+"18",color:C.success,fontSize:11,fontWeight:700}}>✓ Approved</span>}
+              {repData&&repData.w9Status==="received"&&repData.w9ReviewStatus!=="approved"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>⏳ Pending</span>}
+              {repData&&!repData.w9Status&&<span style={{padding:"3px 10px",borderRadius:20,background:C.surface2,color:C.dim,fontSize:11,fontWeight:700}}>Not Submitted</span>}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div style={{gridColumn:"1/-1"}}><Field label="Legal Name *" value={w9Name} onChange={setW9Name} placeholder="Jane Smith"/></div>
+              <Drop label="Entity Type" value={w9Type} onChange={setW9Type} opts={[{v:"individual",label:"Individual / Sole Proprietor"},{v:"llc",label:"LLC"},{v:"corporation",label:"Corporation"},{v:"partnership",label:"Partnership"}]}/>
+              <Field label="EIN or SSN *" value={w9Ssn} onChange={setW9Ssn} placeholder="XX-XXXXXXX" type="password" hint="Encrypted — never stored in plain text"/>
+              <div style={{gridColumn:"1/-1"}}><Field label="Address" value={w9Addr} onChange={setW9Addr} placeholder="123 Main St, City, State ZIP"/></div>
+            </div>
+            {w9Msg&&<div style={{padding:"8px 12px",borderRadius:6,fontSize:12,fontWeight:600,marginBottom:8,background:w9Msg.indexOf("ubmitted")>=0?C.success+"12":C.danger+"12",color:w9Msg.indexOf("ubmitted")>=0?C.success:C.danger}}>{w9Msg}</div>}
+            <Btn onClick={function(){
+              if(!w9Name.trim()||!w9Ssn.trim()){setW9Msg("Name and EIN/SSN are required.");return;}
+              if(setReps&&repData){var u=Object.assign({},repData,{w9LegalName:w9Name.trim(),w9EntityType:w9Type,w9Address:w9Addr.trim(),w9Status:"received",w9ReviewStatus:"pending",w9SubmittedAt:new Date().toISOString()});setReps(function(prev){return prev.map(function(r){return r.id===repData.id?u:r;});});dbSave("crm_reps",repData.id,u);}
+              setW9Ssn(""); setW9Msg("W-9 submitted! Admin will review shortly."); addToast("W-9 submitted","success");
+            }}>Submit W-9</Btn>
+          </div>
+          {(function(){
+            var taxYear=new Date().getFullYear()-1;
+            var myRepId2=user&&(user.rep_id||user.id);
+            var yearComms=(commissions||[]).filter(function(cp){return cp.repId===myRepId2&&cp.paidAt&&new Date(cp.paidAt).getFullYear()===taxYear;});
+            var total=yearComms.reduce(function(s,cp){return s+(cp.amount||0);},0);
+            return (
+              <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"16px 18px"}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div><div style={{fontWeight:700,fontSize:14,color:C.text}}>1099-NEC · Tax Year {taxYear}</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Total paid: <strong style={{color:total>0?C.success:C.dim}}>{fmtMoney(total)}</strong></div></div>
+                  <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:total>=600?C.warning+"18":C.surface,color:total>=600?C.warning:C.dim}}>{total>=600?"1099 Required":"Below $600"}</span>
+                </div>
+                {total>0?(
+                  <Btn small onClick={function(){
+                    var rn=repData&&repData.w9LegalName||user&&user.name||"Rep";
+                    var h2="<!DOCTYPE html><html><body style='font-family:Arial;max-width:680px;margin:40px auto;font-size:13px'><h2>Form 1099-NEC &mdash; "+taxYear+"</h2><p>Recipient: "+rn+"</p><p style='font-size:24px;font-weight:900;color:#635bff'>"+fmtMoney(total)+"</p><p style='font-size:11px;color:#888'>File by January 31, "+(taxYear+1)+"</p></body></html>";
+                    var b=new Blob([h2],{type:"text/html"});var u=URL.createObjectURL(b);var a=document.createElement("a");a.href=u;a.download="1099-NEC-"+rn.replace(/\s+/g,"-")+"-"+taxYear+".html";document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(u);document.body.removeChild(a);},100);
+                  }}>⬇ Download 1099-NEC — {taxYear}</Btn>
+                ):<div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>No payments on record for {taxYear}.</div>}
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {tab==="subscription"&&(
+        <div style={{maxWidth:480}}>
+          {repData&&(
+            <div>
+              <div style={{background:C.surface2,borderRadius:12,padding:"18px 20px",marginBottom:16,border:"1px solid "+C.border}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Current Plan</div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                  <div><div style={{fontSize:20,fontWeight:800,color:C.accent}}>{plan?plan.name:"No Plan"}</div>{plan&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>{plan.desc}</div>}</div>
+                  <div style={{textAlign:"right"}}>{plan&&<div style={{fontSize:24,fontWeight:900,fontFamily:"monospace",color:C.text}}>${plan.price}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>}<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:repData.subscriptionStatus==="active"?C.success+"18":C.warning+"18",color:repData.subscriptionStatus==="active"?C.success:C.warning,textTransform:"capitalize"}}>{repData.subscriptionStatus}</span></div>
+                </div>
+              </div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>To change your plan, contact your admin at PreVasive.</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {tab==="password"&&(
+        <div style={{maxWidth:400}}>
+          <Field label="New Password" value={newP} onChange={setNewP} type="password"/>
+          <Field label="Confirm Password" value={conf} onChange={setConf} type="password"/>
+          {pMsg&&<div style={{padding:"8px 12px",borderRadius:6,fontSize:12,fontWeight:600,marginBottom:12,color:pMsg.indexOf("success")>=0||pMsg.indexOf("pdat")>=0?C.success:pMsg.indexOf("dat")>=0?C.muted:C.danger,background:pMsg.indexOf("success")>=0||pMsg.indexOf("pdat")>=0?C.success+"12":pMsg.indexOf("dat")>=0?C.surface2:C.danger+"12"}}>{pMsg}</div>}
+          <Btn onClick={changePw}>Update Password</Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+/* ─── App Shell ──────────────────────────────────────────────────────────── */
+
+</script>
+<script id="c10" type="text/plain">
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   const [currentUser, setCurrentUser] = useState(null);
@@ -4386,7 +5090,7 @@ function App() {
 </script>
 
 <script>
-var N=9;
+var N=11;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
