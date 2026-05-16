@@ -2702,7 +2702,458 @@ function HelpModal({isAdmin,onClose}) {
 }
 
 
+function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
+                    setCommissions,addToast,showResult,onViewAsRep,onClose}) {
+  const [tab,       setTab]       = useState("overview");
+  const [payTarget, setPayTarget] = useState(null);
+  const [adminNote, setAdminNote] = useState(rep.adminNote||"");
+  const [noteMsg,   setNoteMsg]   = useState("");
+
+  var repOrds   = orders.filter(function(o){return o.repId===rep.id;});
+  var repComms  = (commissions||[]).filter(function(cp){return cp.repId===rep.id;});
+  var repSigs   = (signatures||[]).filter(function(s){return s.repId===rep.id;});
+  var activeDocs = (legalDocs||[]).filter(function(d){return d.active;});
+  var plan      = REP_PLANS.find(function(p){return p.id===rep.planId;})||REP_PLANS[0];
+  var now2      = Date.now();
+
+  var totalRev  = repOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
+  var totalComm = repOrds.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var paidComm  = repComms.reduce(function(s,cp){return s+(cp.amount||0);},0);
+  var heldComm  = repOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Returned") return false;
+    return (now2-new Date(o.deliveredAt).getTime())<RETURN_WINDOW_DAYS*24*60*60*1000;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+  var readyComm = repOrds.filter(function(o){
+    if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Returned") return false;
+    var paid=repComms.map(function(cp){return cp.orderId;});
+    return (now2-new Date(o.deliveredAt).getTime())>=RETURN_WINDOW_DAYS*24*60*60*1000&&paid.indexOf(o.id)<0;
+  }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
+
+  var trialDays = rep.trialStartedAt
+    ? Math.max(0, TRIAL_DAYS - Math.floor((now2-new Date(rep.trialStartedAt).getTime())/(24*60*60*1000)))
+    : null;
+
+  function updateRep(patch) {
+    var updated = Object.assign({},rep,patch);
+    setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    return updated;
+  }
+
+  function approve()  { updateRep({status:"active",   approvedAt:new Date().toISOString()}); addToast(rep.name+" approved","success"); }
+  function suspend()  { updateRep({status:"suspended"}); addToast(rep.name+" suspended","warning"); }
+  function reactivate(){ updateRep({status:"active"}); addToast(rep.name+" reactivated","success"); }
+  function approveW9(){ updateRep({w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()}); addToast("W-9 approved","success"); }
+  function rejectW9() { updateRep({w9ReviewStatus:"rejected"}); addToast("W-9 rejected","warning"); }
+  function changePlan(planId){ updateRep({planId:planId,subscriptionStatus:"active"}); addToast("Plan updated","info"); }
+
+  function saveNote() {
+    updateRep({adminNote:adminNote});
+    addToast("Note saved","success");
+    setNoteMsg("Saved"); setTimeout(function(){setNoteMsg("");},2000);
+  }
+
+  function copyInvite() {
+    var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
+    var link = window.location.origin+window.location.pathname+"#invite="+token;
+    navigator.clipboard.writeText(link).then(function(){addToast("Invite link copied","success");});
+  }
+
+  var STATUS_COLOR = {active:C.success,pending:C.warning,suspended:C.danger}[rep.status]||C.muted;
+  var TABS = [
+    {id:"overview",    l:"Overview"},
+    {id:"orders",      l:"Orders ("+repOrds.length+")"},
+    {id:"commissions", l:"Commissions"},
+    {id:"documents",   l:"Documents"},
+    {id:"legal",       l:"Legal"},
+    {id:"account",     l:"Account"},
+  ];
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:3000,display:"flex",justifyContent:"flex-end"}}
+         onClick={function(e){if(e.target===e.currentTarget)onClose();}}>
+      {/* Backdrop */}
+      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.45)",backdropFilter:"blur(2px)"}}
+           onClick={onClose}/>
+
+      {/* Drawer */}
+      <div style={{position:"relative",width:540,height:"100%",background:C.bg,
+                   borderLeft:"1px solid "+C.border,display:"flex",flexDirection:"column",
+                   boxShadow:"-8px 0 40px rgba(0,0,0,.3)",overflowY:"hidden"}}>
+
+        {/* Header */}
+        <div style={{padding:"18px 20px 0",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:14}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <Avatar name={rep.name} size={44}/>
+              <div>
+                <div style={{fontWeight:800,fontSize:17,color:C.text,letterSpacing:"-.02em"}}>{rep.name}</div>
+                <div style={{fontSize:11,color:C.muted,marginTop:2}}>{rep.email}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginTop:5}}>
+                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
+                                background:STATUS_COLOR+"18",color:STATUS_COLOR,textTransform:"capitalize"}}>
+                    {rep.status}
+                  </span>
+                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:600,
+                                background:C.accent+"12",color:C.accent}}>
+                    {plan?plan.name:"No Plan"}
+                  </span>
+                  {rep.subscriptionStatus==="trial"&&trialDays!==null&&(
+                    <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:600,
+                                  background:trialDays<5?C.danger+"18":C.warning+"18",
+                                  color:trialDays<5?C.danger:C.warning}}>
+                      {trialDays}d trial left
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <button onClick={function(){onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});onClose();}}
+                style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.accent+"40",
+                        background:C.accent+"10",color:C.accent,cursor:"pointer",
+                        fontFamily:"inherit",fontWeight:700,fontSize:12}}>
+                👁 View as Rep
+              </button>
+              <button onClick={onClose}
+                style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:22,
+                        lineHeight:1,padding:"4px 8px",borderRadius:6}}>×</button>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div style={{display:"flex",gap:0,overflowX:"auto"}}>
+            {TABS.map(function(t){var act=tab===t.id;return (
+              <button key={t.id} onClick={function(){setTab(t.id);}}
+                style={{padding:"7px 12px",background:"none",border:"none",fontFamily:"inherit",
+                        cursor:"pointer",fontSize:12,fontWeight:act?600:400,
+                        color:act?C.text:C.dim,whiteSpace:"nowrap",
+                        borderBottom:"2px solid "+(act?C.accent:"transparent"),marginBottom:-1}}>
+                {t.l}
+              </button>
+            );})}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1,overflowY:"auto",padding:"18px 20px"}}>
+
+          {/* ── Overview ── */}
+          {tab==="overview"&&(
+            <div>
+              {/* Quick actions */}
+              <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+                {rep.status==="pending"   &&<Btn small onClick={approve}>✓ Approve Rep</Btn>}
+                {rep.status==="active"    &&<Btn small variant="ghost" onClick={suspend}>Suspend</Btn>}
+                {rep.status==="suspended" &&<Btn small variant="success" onClick={reactivate}>Reactivate</Btn>}
+                {rep.w9Status==="received"&&rep.w9ReviewStatus!=="approved"&&<Btn small variant="success" onClick={approveW9}>✓ Approve W-9</Btn>}
+                <Btn small variant="ghost" onClick={copyInvite}>✉ Copy Invite</Btn>
+              </div>
+
+              {/* KPI strip */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+                {[["Total Orders",repOrds.length,C.accent],["Total Revenue",fmtMoney(totalRev),C.text],
+                  ["Comm Earned",fmtMoney(totalComm),C.gold],["Comm Paid",fmtMoney(paidComm),C.success],
+                  ["Comm Ready",fmtMoney(readyComm),C.warning],["Comm Held",fmtMoney(heldComm),C.dim],
+                ].map(function(item,i){return (
+                  <div key={i} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,
+                                       padding:"12px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:11,color:C.muted}}>{item[0]}</span>
+                    <span style={{fontWeight:800,fontFamily:"monospace",fontSize:14,color:item[2]}}>{item[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* Rep details */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+                {[
+                  ["Default Commission",rep.defaultCommissionRate!=null?(rep.defaultCommissionRate+"%"):"Not set"],
+                  ["Plan / Ceiling", (plan?plan.name:"—")+" · "+fmtMoney(plan?plan.ceiling:0)+"/mo"],
+                  ["Subscription",rep.subscriptionStatus||"—"],
+                  ["Trial Started",rep.trialStartedAt?fmtDate(rep.trialStartedAt):"—"],
+                  ["Rep Since",fmtDate(rep.createdAt)],
+                  ["Last Order",repOrds.length>0?fmtDate(repOrds[0].createdAt):"No orders"],
+                ].map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
+                                       borderBottom:"1px solid "+C.border,fontSize:12}}>
+                    <span style={{color:C.muted}}>{row[0]}</span>
+                    <span style={{fontWeight:600,color:C.text}}>{row[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* Plan change */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px"}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Change Plan</div>
+                <div style={{display:"flex",gap:8}}>
+                  {REP_PLANS.map(function(p){var sel=rep.planId===p.id;return (
+                    <button key={p.id} onClick={function(){changePlan(p.id);}}
+                      style={{flex:1,padding:"8px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",
+                              border:"2px solid "+(sel?C.accent:C.border),
+                              background:sel?C.accent+"10":C.surface2,textAlign:"left"}}>
+                      <div style={{fontWeight:700,fontSize:12,color:sel?C.accent:C.text}}>{p.name}</div>
+                      <div style={{fontSize:10,color:C.dim}}>${p.price}/mo · {fmtMoney(p.ceiling)} cap</div>
+                    </button>
+                  );})}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Orders ── */}
+          {tab==="orders"&&(
+            <div>
+              {repOrds.length===0?<EmptyState icon="📦" title="No orders" subtitle="This rep hasn't placed any orders yet."/>:(
+                <div>
+                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:12,fontSize:12,color:C.muted}}>
+                    <span>{repOrds.length} orders</span>
+                    <span style={{fontWeight:700,color:C.text}}>{fmtMoney(totalRev)} total revenue</span>
+                  </div>
+                  {repOrds.map(function(o){
+                    var sc={Submitted:C.accent,Processing:C.warning,Shipped:C.text,Delivered:C.success,Paid:C.success,Cancelled:C.danger,Returned:C.danger}[o.status]||C.dim;
+                    return (
+                      <div key={o.id} style={{background:C.surface,border:"1px solid "+C.border,
+                                              borderRadius:10,padding:"12px 14px",marginBottom:8}}>
+                        <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+                          <span style={{fontFamily:"monospace",fontWeight:700,fontSize:12,color:C.accent}}>{o.id}</span>
+                          <span style={{padding:"2px 7px",borderRadius:20,fontSize:10,fontWeight:700,
+                                        background:sc+"18",color:sc}}>{o.status}</span>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
+                          <span>{o.custName||"—"} · {fmtDate(o.createdAt)}</span>
+                          <div style={{textAlign:"right"}}>
+                            <span style={{fontFamily:"monospace",fontWeight:700,color:C.text}}>{fmtMoney(o.totals&&o.totals.grand||0)}</span>
+                            <span style={{color:C.gold,marginLeft:8}}>+{fmtMoney(o.totals&&o.totals.commission||0)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Commissions ── */}
+          {tab==="commissions"&&(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginBottom:18}}>
+                {[["Paid Out",fmtMoney(paidComm),C.success],["Ready",fmtMoney(readyComm),C.gold],["Held",fmtMoney(heldComm),C.warning]].map(function(item,i){return (
+                  <div key={i} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"12px",textAlign:"center"}}>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:5}}>{item[0]}</div>
+                    <div style={{fontSize:18,fontWeight:900,fontFamily:"monospace",color:item[2]}}>{item[1]}</div>
+                  </div>
+                );})}
+              </div>
+              {readyComm>0&&(
+                <div style={{marginBottom:14}}>
+                  <Btn onClick={function(){
+                    setPayTarget({order:{id:"BULK",totals:{commission:readyComm}},rep:rep});
+                  }} fullWidth={true}>💳 Release {fmtMoney(readyComm)} to {rep.name}</Btn>
+                </div>
+              )}
+              {repComms.length===0?<EmptyState icon="💰" title="No payments yet" subtitle="Commission payments appear here once released."/>:(
+                <div>
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Payment History</div>
+                  {repComms.map(function(cp){return (
+                    <div key={cp.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
+                                             background:C.surface,border:"1px solid "+C.border,borderRadius:8,marginBottom:6,fontSize:12}}>
+                      <div><div style={{fontWeight:600,color:C.text}}>{fmtDate(cp.paidAt)}</div><div style={{fontSize:10,color:C.dim}}>{cp.orderId}</div></div>
+                      <div style={{fontFamily:"monospace",fontWeight:800,color:C.success,fontSize:14}}>{fmtMoney(cp.amount)}</div>
+                    </div>
+                  );})}
+                </div>
+              )}
+              {payTarget&&(
+                <RepPayModal order={payTarget.order} rep={payTarget.rep}
+                  onConfirm={function(opts){
+                    var id=genId("pay");
+                    var payout={id:id,repId:rep.id,repName:rep.name,amount:readyComm,
+                                orderId:"BULK",note:opts.note,method:opts.method,
+                                paidAt:new Date().toISOString()};
+                    setCommissions(function(prev){return [payout].concat(prev);});
+                    dbSave("crm_commission_payouts",id,payout);
+                    addToast(fmtMoney(readyComm)+" released to "+rep.name,"success");
+                    setPayTarget(null);
+                  }}
+                  onClose={function(){setPayTarget(null);}}/>
+              )}
+            </div>
+          )}
+
+          {/* ── Documents ── */}
+          {tab==="documents"&&(
+            <div>
+              {/* W-9 */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,
+                           padding:"16px",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                  <div style={{fontWeight:700,fontSize:14,color:C.text}}>W-9 Tax Information</div>
+                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
+                    background:rep.w9ReviewStatus==="approved"?C.success+"18":rep.w9Status==="received"?C.warning+"18":C.surface2,
+                    color:rep.w9ReviewStatus==="approved"?C.success:rep.w9Status==="received"?C.warning:C.dim}}>
+                    {rep.w9ReviewStatus==="approved"?"✓ Approved":rep.w9Status==="received"?"Pending Review":"Not Filed"}
+                  </span>
+                </div>
+                {rep.w9Status==="received"?(
+                  <div>
+                    {[["Legal Name",rep.w9LegalName||"—"],["Entity Type",rep.w9EntityType||"—"],
+                      ["Address",rep.w9Address||"—"],["Submitted",fmtDate(rep.w9SubmittedAt)]].map(function(row,i){return (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                           padding:"6px 0",borderBottom:"1px solid "+C.border}}>
+                        <span style={{color:C.muted}}>{row[0]}</span>
+                        <span style={{fontWeight:600,color:C.text,textTransform:"capitalize"}}>{row[1]}</span>
+                      </div>
+                    );})}
+                    {rep.w9ReviewStatus!=="approved"&&(
+                      <div style={{display:"flex",gap:8,marginTop:12}}>
+                        <Btn small variant="success" onClick={approveW9}>✓ Approve W-9</Btn>
+                        <Btn small variant="danger" onClick={rejectW9}>Reject</Btn>
+                      </div>
+                    )}
+                    {rep.w9ReviewStatus==="approved"&&(
+                      <div style={{marginTop:10,fontSize:11,color:C.success,fontWeight:600}}>
+                        ✓ Approved {fmtDate(rep.w9ApprovedAt)}
+                      </div>
+                    )}
+                  </div>
+                ):<div style={{fontSize:13,color:C.dim,fontStyle:"italic"}}>Rep has not submitted a W-9 yet.</div>}
+              </div>
+
+              {/* 1099 */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px"}}>
+                <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:10}}>1099-NEC Reference</div>
+                {(function(){
+                  var yr=new Date().getFullYear()-1;
+                  var total=repComms.filter(function(cp){return new Date(cp.paidAt).getFullYear()===yr;}).reduce(function(s,cp){return s+(cp.amount||0);},0);
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div>
+                        <div style={{fontSize:12,color:C.muted}}>Tax Year {yr}</div>
+                        <div style={{fontSize:20,fontWeight:900,fontFamily:"monospace",color:total>=600?C.gold:C.dim}}>{fmtMoney(total)}</div>
+                      </div>
+                      <span style={{padding:"3px 10px",borderRadius:20,fontSize:10,fontWeight:700,
+                                    background:total>=600?C.warning+"18":C.surface2,
+                                    color:total>=600?C.warning:C.dim}}>
+                        {total>=600?"1099 Required":"Below $600 threshold"}
+                      </span>
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+          )}
+
+          {/* ── Legal ── */}
+          {tab==="legal"&&(
+            <div>
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+                <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,
+                             fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>
+                  Compliance Checklist
+                </div>
+                {[
+                  ["Terms of Service", !!rep.termsAcceptedAt, rep.termsAcceptedAt?fmtDate(rep.termsAcceptedAt):"Not accepted"],
+                  ["Rep Agreement",    !!rep.agreementSignedAt, rep.agreementSignedAt?fmtDate(rep.agreementSignedAt):"Not signed"],
+                  ["W-9 Verified",     rep.w9ReviewStatus==="approved", rep.w9ReviewStatus==="approved"?fmtDate(rep.w9ApprovedAt):"Not verified"],
+                ].map(function(item,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                                       padding:"10px 14px",borderBottom:"1px solid "+C.border}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{fontSize:14}}>{item[1]?"✅":"⬜"}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:C.text}}>{item[0]}</span>
+                    </div>
+                    <span style={{fontSize:11,color:item[1]?C.success:C.danger,fontWeight:600}}>{item[2]}</span>
+                  </div>
+                );})}
+                {activeDocs.map(function(doc){
+                  var sig=repSigs.find(function(s){return s.docId===doc.id&&s.version===doc.version;});
+                  return (
+                    <div key={doc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                                              padding:"10px 14px",borderBottom:"1px solid "+C.border}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:14}}>{sig?"✅":"⬜"}</span>
+                        <div>
+                          <span style={{fontSize:13,fontWeight:600,color:C.text}}>{doc.title}</span>
+                          <span style={{fontSize:10,color:C.dim,marginLeft:6}}>v{doc.version}</span>
+                        </div>
+                      </div>
+                      <span style={{fontSize:11,color:sig?C.success:C.danger,fontWeight:600}}>
+                        {sig?fmtDate(sig.signedAt):"Not signed"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+              {activeDocs.length===0&&repSigs.length===0&&(
+                <div style={{fontSize:12,color:C.dim,fontStyle:"italic",textAlign:"center",padding:"20px"}}>
+                  No legal documents published yet. Go to Legal & Compliance to publish docs.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Account ── */}
+          {tab==="account"&&(
+            <div>
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+                {[["Rep ID",rep.id],["Email",rep.email],["Phone",rep.phone||"—"],["Company",rep.company||"—"],["Created",fmtDate(rep.createdAt)]].map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
+                                       borderBottom:"1px solid "+C.border,fontSize:12}}>
+                    <span style={{color:C.muted}}>{row[0]}</span>
+                    <span style={{fontWeight:600,color:C.text,fontFamily:row[0]==="Rep ID"?"monospace":"inherit",
+                                  fontSize:row[0]==="Rep ID"?10:12}}>{row[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* Invite link */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"14px",marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Login / Invite</div>
+                <Btn small variant="ghost" onClick={copyInvite} fullWidth={true}>📋 Copy Invite Link</Btn>
+                <div style={{fontSize:10,color:C.dim,marginTop:6,lineHeight:1.5}}>
+                  Send this link to the rep to create or reset their login. Link auto-registers them.
+                </div>
+              </div>
+
+              {/* Admin notes */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"14px",marginBottom:14}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Admin Notes</div>
+                <textarea value={adminNote} onChange={function(e){setAdminNote(e.target.value);}} rows={4}
+                  placeholder="Private notes about this rep (territory, performance, follow-ups)…"
+                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                          padding:"8px 10px",color:C.text,fontSize:12,fontFamily:"inherit",
+                          boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.6}}/>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                  <Btn small onClick={saveNote}>Save Note</Btn>
+                  {noteMsg&&<span style={{fontSize:11,color:C.success,fontWeight:600}}>{noteMsg}</span>}
+                </div>
+              </div>
+
+              {/* Danger zone */}
+              <div style={{border:"1px solid "+C.danger+"30",borderRadius:10,padding:"14px",background:C.danger+"06"}}>
+                <div style={{fontSize:12,fontWeight:700,color:C.danger,marginBottom:10}}>Danger Zone</div>
+                <div style={{display:"flex",gap:8}}>
+                  {rep.status!=="suspended"&&<Btn small variant="danger" onClick={suspend}>Suspend Rep</Btn>}
+                  {rep.status==="suspended"&&<Btn small variant="success" onClick={reactivate}>Reactivate</Btn>}
+                </div>
+                <div style={{fontSize:10,color:C.dim,marginTop:8,lineHeight:1.5}}>
+                  Suspended reps cannot log in or place orders. Their data is preserved.
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
+
+</script>
+<script id="c6" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   const [range, setRange] = useState("month");
   var now2 = new Date();
@@ -3151,7 +3602,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c6" type="text/plain">
+<script id="c7" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -3329,13 +3780,16 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast}) {
 }
 
 /* ─── Admin Reps ─────────────────────────────────────────────────────────── */
-function AdminReps({reps,setReps,orders,applications,setApplications,addToast,showResult,onViewAsRep}) {
+function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,setApplications,legalDocs,signatures,addToast,showResult,onViewAsRep}) {
   const [tab,      setTab]      = useState("reps");
   const [showForm, setShowForm] = useState(false);
   const [name,     setName]     = useState("");
   const [email,    setEmail]    = useState("");
-  const [formErr,  setFormErr]  = useState("");
+  const [formErr,    setFormErr]    = useState("");
   const [repCommRate,setRepCommRate] = useState("10");
+  const [showInvite, setShowInvite] = useState(false);
+  const [inviteRep,  setInviteRep]  = useState(null);
+  const [drawerRep,  setDrawerRep]  = useState(null);
 
   function saveRep() {
     if(!name.trim()||!email.trim()){setFormErr("Name and email are required.");return;}
@@ -3416,14 +3870,17 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
                   var sc = {active:C.success,pending:C.warning,suspended:C.danger,trial:C.accent}[rep.status]||C.muted;
                   return (
                     <tr key={rep.id}
-                      onClick={function(){onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});}}
-                      style={{borderTop:"1px solid "+C.border,cursor:"pointer",transition:"background .1s"}}
+                      style={{borderTop:"1px solid "+C.border,transition:"background .1s"}}
                       onMouseEnter={function(e){e.currentTarget.style.background=C.accent+"08";}}
                       onMouseLeave={function(e){e.currentTarget.style.background="transparent";}}>
-                      <td style={{padding:"10px 16px"}}>
+                      <td style={{padding:"10px 16px",cursor:"pointer"}}
+                        onClick={function(){setDrawerRep(rep);}}>
                         <div style={{display:"flex",alignItems:"center",gap:8}}>
                           <Avatar name={rep.name} size={28}/>
-                          <span style={{fontSize:13,fontWeight:600,color:C.text}}>{rep.name}</span>
+                          <div>
+                            <div style={{fontSize:13,fontWeight:600,color:C.text}}>{rep.name}</div>
+                            <div style={{fontSize:10,color:C.accent,fontWeight:600}}>Click to open details</div>
+                          </div>
                         </div>
                       </td>
                       <td style={{padding:"10px 16px",fontSize:12,color:C.muted}}>{rep.email}</td>
@@ -3608,6 +4065,15 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
       {showInvite&&inviteRep&&(
         <InviteModal rep={inviteRep} onClose={function(){setShowInvite(false);setInviteRep(null);}} addToast={addToast}/>
       )}
+      {drawerRep&&(
+        <RepDrawer rep={drawerRep}
+          orders={orders} commissions={commissions} legalDocs={legalDocs}
+          signatures={signatures} reps={reps} setReps={setReps}
+          setCommissions={setCommissions}
+          addToast={addToast} showResult={showResult}
+          onViewAsRep={onViewAsRep}
+          onClose={function(){setDrawerRep(null);}}/>
+      )}
       {showForm&&(
         <Modal title="Add Sales Rep" onClose={function(){setShowForm(false);}}
           footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn><Btn onClick={saveRep}>Add Rep</Btn></div>}>
@@ -3625,7 +4091,7 @@ function AdminReps({reps,setReps,orders,applications,setApplications,addToast,sh
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
 
 </script>
-<script id="c7" type="text/plain">
+<script id="c8" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult}) {
   const [payTarget, setPayTarget] = useState(null); // {order, rep}
   var now = Date.now();
@@ -4091,7 +4557,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
 /* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
-<script id="c8" type="text/plain">
+<script id="c9" type="text/plain">
 function CommissionStatement({repId,orders,commissions,repName}) {
   var now3 = new Date();
   var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -4447,7 +4913,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
 /* ─── Rep Customers ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c9" type="text/plain">
+<script id="c10" type="text/plain">
 function RepCustomers({repId,customers,setCustomers,orders,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editCust, setEditCust] = useState(null);
@@ -4755,7 +5221,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
 
 </script>
-<script id="c10" type="text/plain">
+<script id="c11" type="text/plain">
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   const [currentUser, setCurrentUser] = useState(null);
@@ -5032,7 +5498,9 @@ function App() {
         )}
         {isAdmin&&activeTab==="reps"&&(
           <AdminReps reps={reps} setReps={setReps} orders={orders}
+            commissions={commissions} setCommissions={setCommissions}
             applications={applications} setApplications={setApplications}
+            legalDocs={legalDocs} signatures={signatures}
             addToast={addToast} showResult={showResult}
             onViewAsRep={function(rep){setViewAsRep(rep);setActiveTab("dashboard");}}/>
         )}
@@ -5099,7 +5567,7 @@ function App() {
 </script>
 
 <script>
-var N=11;
+var N=12;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
