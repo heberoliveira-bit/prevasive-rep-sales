@@ -19,14 +19,15 @@ var REP_PLANS = [
 ];
 var ORDER_PIPELINE = ["Submitted","Processing","Shipped","Delivered","Paid"];
 var STATUS_COLOR = {
-  Submitted:{c:"#635bff",bg:"rgba(99,91,255,.12)"},
-  Processing:{c:"#f6ab2f",bg:"rgba(246,171,47,.12)"},
-  Shipped:{c:"#0ea5e9",bg:"rgba(14,165,233,.12)"},
-  Delivered:{c:"#1ea672",bg:"rgba(30,166,114,.12)"},
-  Paid:{c:"#1ea672",bg:"rgba(30,166,114,.22)"},
-  Cancelled:{c:"#df1b41",bg:"rgba(223,27,65,.12)"},
-  Refunded:{c:"#df1b41",bg:"rgba(223,27,65,.12)"},
-  Returned:{c:"#f6ab2f",bg:"rgba(246,171,47,.12)"},
+  Submitted:          {c:"#635bff",bg:"rgba(99,91,255,.12)"},
+  Paid:               {c:"#1ea672",bg:"rgba(30,166,114,.22)"},
+  "Waiting Shipping": {c:"#f6ab2f",bg:"rgba(246,171,47,.12)"},
+  Processing:         {c:"#f6ab2f",bg:"rgba(246,171,47,.12)"},
+  Shipped:            {c:"#0ea5e9",bg:"rgba(14,165,233,.12)"},
+  Delivered:          {c:"#1ea672",bg:"rgba(30,166,114,.12)"},
+  Cancelled:          {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
+  Refunded:           {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
+  Returned:           {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
 };
 
 /* ─── Supabase ───────────────────────────────────────────────────────────── */
@@ -128,6 +129,62 @@ var THEMES = {
 };
 var C = Object.assign({}, THEMES.dark);
 
+/* ─── Order Status Flow ───────────────────────────────────────────────── */
+var CARRIER_URLS = {
+  UPS:   "https://www.ups.com/track?tracknum=",
+  FedEx: "https://www.fedex.com/fedextrack/?trknbr=",
+  USPS:  "https://tools.usps.com/go/TrackConfirmAction?tLabels=",
+  DHL:   "https://www.dhl.com/en/express/tracking.html?AWB=",
+};
+
+function isPayFirstMethod(payMethod) {
+  return payMethod==="due_receipt"||payMethod==="credit_card";
+}
+
+function getOrderFlow(payMethod) {
+  if(isPayFirstMethod(payMethod))
+    return ["Submitted","Paid","Waiting Shipping","Shipped","Delivered"];
+  return ["Submitted","Waiting Shipping","Shipped","Delivered","Paid"];
+}
+
+function getNextOrderStatus(order) {
+  var flow = getOrderFlow(order.payMethod);
+  var idx  = flow.indexOf(order.status);
+  return (idx>=0 && idx<flow.length-1) ? flow[idx+1] : null;
+}
+
+function getTrackingUrl(carrier, trackingNum) {
+  if(!trackingNum) return null;
+  var base = CARRIER_URLS[carrier];
+  if(!base) return null;
+  return base + encodeURIComponent(trackingNum.trim());
+}
+
+function formatShipStationSummary(order, customers, products) {
+  var cust = customers.find(function(x){return x.id===order.custId;})||{};
+  var lines = ["=== ShipStation Order Import ===",
+    "Order #: "+order.id,
+    "Date: "+fmtDate(order.createdAt),
+    "Customer: "+(cust.name||order.custName||""),
+    "Email: "+(cust.email||""),
+    "Phone: "+(cust.phone||""),
+    "Address: "+(cust.address||""),
+    cust.city&&cust.state&&cust.zip?(cust.city+", "+cust.state+" "+cust.zip):"",
+    "",
+    "--- Items ---"];
+  (order.items||[]).forEach(function(it){
+    var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",sku:""};
+    lines.push(it.qty+"x "+p.name+(p.sku?" (SKU: "+p.sku+")":"")+" @ "+fmtMoney(p.price||0));
+  });
+  lines.push("");
+  lines.push("Subtotal: "+fmtMoney(order.totals&&order.totals.subtotal||0));
+  if(order.totals&&order.totals.shipping>0) lines.push("Shipping: "+fmtMoney(order.totals.shipping));
+  lines.push("Total: "+fmtMoney(order.totals&&order.totals.grand||0));
+  lines.push("Payment: "+(order.payMethod||"").replace(/_/g," "));
+  return lines.filter(function(l){return l!==undefined;}).join("\n");
+}
+
+
 /* ─── Hooks ──────────────────────────────────────────────────────────────── */
 function useLS(key, def) {
   var raw = localStorage.getItem("__pv__"+key);
@@ -148,6 +205,12 @@ function genId(prefix) {
 
 function fmtMoney(n) {
   return "$"+(parseFloat(n)||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
+}
+
+function fmtTerms(code) {
+  var map = {"due_receipt":"Due on Receipt","net_15":"Net 15","net_30":"Net 30","net_45":"Net 45","net_60":"Net 60","net_90":"Net 90"};
+  if(!code) return "—";
+  return map[code] || code.replace(/_/g," ").replace(/^[a-z]/,function(l){return l.toUpperCase();});
 }
 
 function fmtDate(d) {
@@ -1279,42 +1342,125 @@ function PageHeader({title,subtitle,action}) {
 }
 
 
+
 </script>
 <script id="c2" type="text/plain">
 function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast,showResult}) {
   var cust = customers.find(function(x){return x.id===order.custId;})||{};
-  const [toEmail, setToEmail] = useState(cust.email||"");
-  const [subject, setSubject] = useState("Invoice "+order.id+" from PreVasive");
-  const [msg,     setMsg]     = useState("Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached for order "+order.id+". Total due: "+fmtMoney(order.totals&&order.totals.grand||0)+".\n\nThank you for your business.\n\n"+(currentUser&&currentUser.name||"PreVasive Sales"));
-  const [sending, setSending] = useState(false);
+  var company = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+  const [toEmail,  setToEmail]  = useState(cust.email||"");
+  const [subject,  setSubject]  = useState("Invoice "+order.id+" from "+company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due");
+  const [msg,      setMsg]      = useState("Hi "+(cust.name||"there")+",\n\nPlease find your invoice for order "+order.id+" attached below.\n\nTotal Due: "+fmtMoney(order.totals&&order.totals.grand||0)+"\n\nClick the payment link to view your invoice and submit payment securely:\n\n{{PAYMENT_LINK}}\n\nThank you for your business.\n\n"+(currentUser&&currentUser.name||company));
+  const [copied,   setCopied]   = useState(false);
+  const [linkGen,  setLinkGen]  = useState(false);
+  const [payLink,  setPayLink]  = useState("");
 
-  function send() {
-    if(!toEmail.trim()) return;
-    setSending(true);
-    setTimeout(function(){
-      setSending(false);
-      generateInvoice(order,customers,products,currentUser);
-      addToast("Invoice sent to "+toEmail,"success");
-      showResult({type:"email",title:"Invoice Sent!",subtitle:"Invoice "+order.id+" delivered to customer.",rows:[["To",toEmail],["Order",order.id],["Amount",fmtMoney(order.totals&&order.totals.grand||0)]],cta:"Done"});
-      onClose();
-    },600);
+  function generateLink() {
+    var token = order.id+"_"+Math.random().toString(36).slice(2,9);
+    var payData = {
+      token:token, status:"pending", order:order,
+      customer:cust, company:company, products:products,
+      createdAt:new Date().toISOString(),
+    };
+    localStorage.setItem("__pv__pay_"+token, JSON.stringify(payData));
+    var link = window.location.origin+window.location.pathname+"#pay="+token;
+    setPayLink(link);
+    setLinkGen(true);
+    setMsg(function(prev){return prev.replace("{{PAYMENT_LINK}}", link);});
+    return link;
+  }
+
+  function copyLink() {
+    var link = payLink||generateLink();
+    navigator.clipboard.writeText(link).then(function(){
+      setCopied(true); setTimeout(function(){setCopied(false);},2500);
+      addToast("Payment link copied!","success");
+    });
+  }
+
+  function openMailto() {
+    var link = payLink||generateLink();
+    var body = msg.replace("{{PAYMENT_LINK}}", link);
+    var mailto = "mailto:"+encodeURIComponent(toEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);
+    window.open(mailto, "_blank");
+    addToast("Opening mail client…","info");
+  }
+
+  function downloadInvoice() {
+    generateInvoice(order, customers, products, currentUser);
   }
 
   return (
-    <Modal title={"Email Invoice — "+order.id} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={send} disabled={sending||!toEmail.trim()}>{sending?"Sending…":"Send Invoice"}</Btn>
+    <Modal title={"Send Invoice — "+order.id} wide={true} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
+        <Btn variant="ghost" onClick={downloadInvoice}>⬇ Download PDF</Btn>
+        <div style={{display:"flex",gap:8}}>
+          <Btn variant="ghost" onClick={onClose}>Close</Btn>
+          <Btn variant="ghost" onClick={copyLink}>{copied?"✓ Copied!":"📋 Copy Pay Link"}</Btn>
+          <Btn onClick={openMailto}>✉ Open in Mail →</Btn>
+        </div>
       </div>}>
-      <Field label="Send to" value={toEmail} onChange={setToEmail} type="email" placeholder="customer@email.com"/>
-      <Field label="Subject" value={subject} onChange={setSubject}/>
-      <TextArea label="Message" value={msg} onChange={setMsg} rows={6}/>
-      <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"20",borderRadius:8,fontSize:12,color:C.accent}}>
-        📎 Invoice PDF will be generated and downloaded. Email sending requires email integration in Settings.
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+        <div>
+          <Field label="Send to" value={toEmail} onChange={setToEmail} type="email" placeholder="customer@email.com"/>
+          <Field label="Subject" value={subject} onChange={setSubject}/>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Message</div>
+            <textarea value={msg.replace("{{PAYMENT_LINK}}",payLink||"[payment link will appear here]")} onChange={function(e){setMsg(e.target.value);}} rows={9}
+              style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
+          </div>
+        </div>
+        <div>
+          {/* Payment link section */}
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px",marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Payment Link</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>
+              Generate a secure link your customer opens to view the invoice and submit payment. No login required.
+            </div>
+            {!linkGen?(
+              <Btn onClick={generateLink} fullWidth={true}>⚡ Generate Payment Link</Btn>
+            ):(
+              <div>
+                <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:8,padding:"8px 12px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",marginBottom:10,lineHeight:1.6}}>
+                  {payLink}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn small onClick={copyLink} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+                </div>
+                <div style={{fontSize:10,color:C.success,marginTop:8,fontWeight:600}}>✓ Link generated — valid until order is paid</div>
+              </div>
+            )}
+          </div>
+
+          {/* Invoice summary */}
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>Invoice Summary</div>
+            {[["Order",order.id],["Customer",cust.name||order.custName||"—"],["Items",(order.items||[]).length+" product(s)"],
+              order.totals&&order.totals.discount>0&&["Discount","-"+fmtMoney(order.totals.discount)],
+              order.totals&&order.totals.shipping>0&&["Shipping",fmtMoney(order.totals.shipping)],
+              ["Total Due",fmtMoney(order.totals&&order.totals.grand||0)],
+            ].filter(Boolean).map(function(row,i,arr){return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",
+                                   borderBottom:i<arr.length-1?"1px solid "+C.border:"none"}}>
+                <span style={{color:C.muted}}>{row[0]}</span>
+                <span style={{fontWeight:i===arr.length-1?800:600,color:i===arr.length-1?C.accent:C.text,fontFamily:"monospace"}}>{row[1]}</span>
+              </div>
+            );})}
+          </div>
+
+          {/* Customer terms info */}
+          {cust.termsStatus==="active"&&(
+            <div style={{marginTop:10,padding:"10px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
+              ✓ Customer has approved {fmtTerms(cust.termsType||"net_30")} terms · ${(cust.termsLimit||0).toLocaleString()} limit
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   );
 }
+
 
 
 function OrderEditModal({order,products,customers,onSave,onClose}) {
@@ -1409,6 +1555,194 @@ function OrderDupModal({order,products,customers,reps,setOrders,addToast,showRes
 }
 
 
+function CustomerPaymentPage({payData,onPaid,onDecline}) {
+  var order    = payData.order||{};
+  var customer = payData.customer||{};
+  var company  = payData.company||"PreVasive USA";
+  var totals   = order.totals||{};
+  var items    = order.items||[];
+  var products = payData.products||[];
+  const [method,     setMethod]     = useState(customer.termsStatus==="active"?customer.termsType||"net_30":"credit_card");
+  const [cardHolder, setCardHolder] = useState(customer.name||"");
+  const [cardLast4,  setCardLast4]  = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardZip,    setCardZip]    = useState("");
+  const [agreed,     setAgreed]     = useState(false);
+  const [paying,     setPaying]     = useState(false);
+  const [done,       setDone]       = useState(false);
+
+  var isTerms  = method==="due_receipt"||method==="net_15"||method==="net_30"||method==="net_45";
+  var canPay   = agreed && (isTerms || (cardLast4.length===4 && cardExpiry.length===5));
+
+  function pay() {
+    if(!canPay) return;
+    setPaying(true);
+    setTimeout(function(){
+      setPaying(false);
+      onPaid({method:method,cardRef:!isTerms?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null,paidAt:new Date().toISOString()});
+      setDone(true);
+    },800);
+  }
+
+  if(done) return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:14,padding:"48px 40px",maxWidth:460,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
+        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
+        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Payment Confirmed</div>
+        <div style={{fontSize:13,color:"#6b7c93",marginBottom:20,lineHeight:1.6}}>
+          Thank you, <strong>{customer.name||"Customer"}</strong>. Your payment for order <strong>{order.id}</strong> has been received.
+        </div>
+        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",textAlign:"left"}}>
+          {[["Order",order.id],["Total",fmtMoney(totals.grand||0)],["Method",fmtTerms(method)],["Date",new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})]].map(function(r,i){return (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:i<3?"1px solid #e8ecef":"none"}}>
+              <span style={{color:"#6b7c93"}}>{r[0]}</span><span style={{fontWeight:700,color:"#1a1a2e"}}>{r[1]}</span>
+            </div>
+          );})}
+        </div>
+        <div style={{marginTop:20,fontSize:11,color:"#a0aec0"}}>You may close this page. A receipt has been recorded.</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif"}}>
+      {/* Header */}
+      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:28,height:28,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:"#fff"}}>P</div>
+          <span style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</span>
+        </div>
+        <div style={{fontSize:11,color:"#6b7c93"}}>Invoice {order.id} · {fmtMoney(totals.grand||0)} due</div>
+      </div>
+
+      <div style={{maxWidth:700,margin:"0 auto",padding:"28px 20px",display:"grid",gridTemplateColumns:"1fr 340px",gap:20,alignItems:"start"}}>
+
+        {/* Invoice */}
+        <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",overflow:"hidden"}}>
+          <div style={{padding:"20px 22px",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontSize:11,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>Invoice</div>
+              <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:"#635bff"}}>{order.id}</div>
+            </div>
+            <div style={{textAlign:"right",fontSize:12,color:"#6b7c93"}}>
+              <div>Date: {fmtDate(order.createdAt)}</div>
+              <div>Rep: {order.repName||"—"}</div>
+            </div>
+          </div>
+          <div style={{padding:"16px 22px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc"}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#6b7c93",marginBottom:4}}>Bill To</div>
+            <div style={{fontWeight:700,fontSize:14,color:"#1a1a2e"}}>{customer.name||"Customer"}</div>
+            {customer.company&&<div style={{fontSize:12,color:"#6b7c93"}}>{customer.company}</div>}
+            {customer.email&&<div style={{fontSize:12,color:"#6b7c93"}}>{customer.email}</div>}
+          </div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#f6f9fc"}}>
+              {["Product","Qty","Unit Price","Total"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
+            </tr></thead>
+            <tbody>
+              {items.map(function(it,i){
+                var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+                return (
+                  <tr key={i} style={{borderTop:"1px solid #e8ecef"}}>
+                    <td style={{padding:"10px 14px",fontSize:13,color:"#1a1a2e",fontWeight:600}}>{p.name}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7c93"}}>{it.qty}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:"#6b7c93"}}>{fmtMoney(p.price||0)}</td>
+                    <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:"#1a1a2e"}}>{fmtMoney((p.price||0)*it.qty)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div style={{padding:"14px 22px",borderTop:"2px solid #e8ecef"}}>
+            {totals.discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#1ea672",marginBottom:4}}><span>Discount</span><span style={{fontFamily:"monospace"}}>-{fmtMoney(totals.discount)}</span></div>}
+            {totals.shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.shipping)}</span></div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:18,fontWeight:900,color:"#635bff"}}><span>Total Due</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand||0)}</span></div>
+          </div>
+        </div>
+
+        {/* Payment form */}
+        <div>
+          <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",padding:"20px"}}>
+            <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:16}}>Pay This Invoice</div>
+
+            {/* Payment method */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:8}}>Payment Method</div>
+              {[
+                ["credit_card","💳 Credit Card","Charge card now"],
+                ["check","🏦 Check / ACH","Pay by check or bank transfer"],
+                ...(customer.termsStatus==="active"?[[customer.termsType||"net_30","📋 "+fmtTerms(customer.termsType||"net_30"),"Credit account · $"+(customer.termsLimit||0).toLocaleString()+" limit"]]:[]),
+              ].map(function(opt){
+                var sel=method===opt[0];
+                return (
+                  <div key={opt[0]} onClick={function(){setMethod(opt[0]);}}
+                    style={{padding:"10px 12px",borderRadius:8,border:"2px solid "+(sel?"#635bff":"#e8ecef"),background:sel?"rgba(99,91,255,.05)":"#fff",cursor:"pointer",marginBottom:8}}>
+                    <div style={{fontWeight:700,fontSize:12,color:sel?"#635bff":"#1a1a2e"}}>{opt[1]}</div>
+                    <div style={{fontSize:10,color:"#6b7c93",marginTop:1}}>{opt[2]}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Card fields */}
+            {method==="credit_card"&&(
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:8}}>Card Details</div>
+                {[["Cardholder Name",cardHolder,setCardHolder,"text","Jane Smith","1/-1"],
+                  ["Card Number (last 4)","···· ···· ···· "+cardLast4,function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));},"text","4242","1"],
+                  ["Expiry",cardExpiry,function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);},"text","MM/YY","1"],
+                  ["Billing ZIP",cardZip,setCardZip,"text","30309","1"],
+                ].map(function(f,i){
+                  var isFullWidth=f[5]==="1/-1";
+                  return (
+                    <div key={i} style={{marginBottom:8,gridColumn:isFullWidth?"1/-1":"auto"}}>
+                      <div style={{fontSize:10,fontWeight:600,color:"#6b7c93",marginBottom:3}}>{f[0]}</div>
+                      <input value={f[1]} onChange={typeof f[2]==="function"&&f[2].length===1?function(e){f[2](e.target.value);}:f[2]}
+                        placeholder={f[4]} type={f[3]} maxLength={f[0]==="Card Number (last 4)"?10:f[0]==="Expiry"?5:undefined}
+                        style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"8px 10px",fontSize:12,fontFamily:f[0]==="Card Number (last 4)"||f[0]==="Expiry"?"monospace":"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"}}/>
+                    </div>
+                  );
+                })}
+                <div style={{fontSize:10,color:"#a0aec0",marginTop:6}}>🔒 Card info for reference only. Processed securely by your rep.</div>
+              </div>
+            )}
+
+            {isTerms&&(
+              <div style={{padding:"10px 12px",background:"rgba(30,166,114,.08)",border:"1px solid rgba(30,166,114,.2)",borderRadius:8,marginBottom:14,fontSize:12,color:"#1ea672",fontWeight:600}}>
+                ✓ Payment due {fmtTerms(method)} from invoice date
+              </div>
+            )}
+
+            <label style={{display:"flex",alignItems:"flex-start",gap:7,marginBottom:14,cursor:"pointer"}}>
+              <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{marginTop:2,accentColor:"#635bff"}}/>
+              <span style={{fontSize:11,color:"#6b7c93",lineHeight:1.5}}>
+                I confirm the amount of <strong style={{color:"#1a1a2e"}}>{fmtMoney(totals.grand||0)}</strong> is correct and authorize payment via the selected method.
+              </span>
+            </label>
+
+            <button onClick={pay} disabled={!canPay||paying}
+              style={{width:"100%",padding:"13px",borderRadius:8,border:"none",
+                      background:canPay&&!paying?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",
+                      color:canPay&&!paying?"#fff":"#a0aec0",cursor:canPay&&!paying?"pointer":"not-allowed",
+                      fontFamily:"inherit",fontWeight:800,fontSize:15,
+                      boxShadow:canPay&&!paying?"0 4px 14px rgba(99,91,255,.35)":"none"}}>
+              {paying?"Processing…":isTerms?"Confirm Invoice ✓":"Pay "+fmtMoney(totals.grand||0)+" →"}
+            </button>
+          </div>
+
+          <div style={{marginTop:12,fontSize:10,color:"#a0aec0",textAlign:"center",lineHeight:1.6}}>
+            Secure invoice from {company} · Questions? Contact your sales rep.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+
+</script>
+<script id="c3" type="text/plain">
 function CustomerSigningPage({signingData,onSigned,onDecline}) {
   var customer = signingData.customer||{};
   var req      = signingData.req||{};
@@ -1420,7 +1754,7 @@ function CustomerSigningPage({signingData,onSigned,onDecline}) {
   const [agreed,      setAgreed]      = useState(false);
   const [done,        setDone]        = useState(false);
 
-  var termsLabel = (req.approvedTerms||"net_30").replace("_"," ").toUpperCase();
+  var termsLabel = fmtTerms(req.approvedTerms||"net_30");
   var limit = "$"+(req.approvedLimit||0).toLocaleString();
   var nameMatch = signerName.trim().length>=3;
   var canSign = scrolled && nameMatch && agreed;
@@ -1567,7 +1901,7 @@ function CustomerSigningPage({signingData,onSigned,onDecline}) {
 function generateCreditAgreement(customer, req, template, company) {
   var co   = company||"PreVasive USA";
   var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
-  var termsLabel = (req.approvedTerms||req.requestedTerms||"net_30").replace("_"," ").toUpperCase();
+  var termsLabel = fmtTerms(req.approvedTerms||req.requestedTerms||"net_30");
   var limit = "$"+(req.approvedLimit||req.requestedLimit||0).toLocaleString();
 
   var defaultTemplate = "CREDIT ACCOUNT AGREEMENT\n\n"
@@ -1609,7 +1943,7 @@ function generateCreditAgreement(customer, req, template, company) {
 function generateCreditAgreementHtml(customer, req, template, company) {
   var body = generateCreditAgreement(customer, req, template, company);
   var co   = company||"PreVasive USA";
-  var termsLabel = (req.approvedTerms||req.requestedTerms||"net_30").replace("_"," ").toUpperCase();
+  var termsLabel = fmtTerms(req.approvedTerms||req.requestedTerms||"net_30");
   var limit = "$"+(req.approvedLimit||req.requestedLimit||0).toLocaleString();
   var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
 
@@ -1714,9 +2048,6 @@ function FileUpload({files,onChange,maxFiles,accept,label}) {
 }
 
 
-
-</script>
-<script id="c3" type="text/plain">
 function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
   const [reqLimit,  setReqLimit]  = useState("5000");
   const [reqTerms,  setReqTerms]  = useState("net_30");
@@ -1751,7 +2082,7 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         <Drop label="Requested Terms" value={reqTerms} onChange={setReqTerms}
-          opts={[{v:"net_30",label:"Net 30"},{v:"net_60",label:"Net 60"},{v:"net_90",label:"Net 90"}]}/>
+          opts={[{v:"due_receipt",label:"Due on Receipt"},{v:"net_15",label:"Net 15"},{v:"net_30",label:"Net 30"},{v:"net_45",label:"Net 45"}]}/>
         <Field label="Requested Credit Limit ($)" value={reqLimit} onChange={setReqLimit} type="number" placeholder="5000"/>
         <div style={{gridColumn:"1/-1"}}>
           <Field label="Business Type" value={bizType} onChange={setBizType} placeholder="e.g. Medical Clinic, Hospital, Private Practice"/>
@@ -1778,6 +2109,119 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
 }
 
 
+function FulfillmentModal({order,customers,products,onSend,onClose}) {
+  const [carrier,   setCarrier]   = useState("UPS");
+  const [trackNum,  setTrackNum]  = useState(order.trackingNumber||"");
+  const [copied,    setCopied]    = useState(false);
+  const [step,      setStep]      = useState(order.status==="Waiting Shipping"?"tracking":"send");
+
+  var summary = formatShipStationSummary(order, customers, products);
+  var cust    = customers.find(function(x){return x.id===order.custId;})||{};
+  var trackUrl = getTrackingUrl(carrier, trackNum);
+
+  function copyToClipboard() {
+    navigator.clipboard.writeText(summary).then(function(){
+      setCopied(true); setTimeout(function(){setCopied(false);},2500);
+    });
+  }
+
+  function openShipStation() {
+    window.open("https://app.shipstation.com/orders/awaiting-shipment","_blank");
+  }
+
+  function sendToFulfillment() {
+    onSend({action:"fulfillment",status:"Waiting Shipping"});
+    setStep("tracking");
+  }
+
+  function saveTracking() {
+    if(!trackNum.trim()) return;
+    onSend({action:"tracking",trackingNumber:trackNum.trim(),carrier:carrier,trackingUrl:trackUrl,status:"Shipped"});
+    onClose();
+  }
+
+  return (
+    <Modal title={step==="send"?"Send to Fulfillment":"Add Tracking Number"} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        {step==="send"&&<Btn onClick={sendToFulfillment}>Send to ShipStation →</Btn>}
+        {step==="tracking"&&<Btn onClick={saveTracking} disabled={!trackNum.trim()}>Save Tracking & Mark Shipped</Btn>}
+      </div>}>
+
+      {step==="send"&&(
+        <div>
+          <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted,lineHeight:1.6}}>
+            Copy the order summary below and paste into ShipStation, or click Open ShipStation to go there directly.
+          </div>
+
+          {/* Order summary */}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Order Summary — Copy to ShipStation</div>
+            <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:8,padding:"12px 14px",
+                         fontFamily:"monospace",fontSize:11,color:C.text,whiteSpace:"pre-wrap",
+                         maxHeight:220,overflowY:"auto",lineHeight:1.8}}>{summary}</div>
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              <Btn small variant="ghost" onClick={copyToClipboard} fullWidth={true}>
+                {copied?"✓ Copied!":"📋 Copy to Clipboard"}
+              </Btn>
+              <Btn small variant="ghost" onClick={openShipStation} fullWidth={true}>
+                Open ShipStation ↗
+              </Btn>
+            </div>
+          </div>
+
+          {/* Shipping address */}
+          <div style={{background:C.surface2,borderRadius:8,padding:"12px 14px",fontSize:12}}>
+            <div style={{fontWeight:700,color:C.text,marginBottom:6}}>Ship To</div>
+            <div style={{color:C.muted,lineHeight:1.7}}>
+              <div style={{fontWeight:600,color:C.text}}>{cust.name||order.custName}</div>
+              {cust.company&&<div>{cust.company}</div>}
+              {cust.address&&<div>{cust.address}</div>}
+              {cust.city&&<div>{cust.city}{cust.state?", "+cust.state:""}{cust.zip?" "+cust.zip:""}</div>}
+              {cust.phone&&<div>📞 {cust.phone}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {step==="tracking"&&(
+        <div>
+          <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:16,fontSize:12,color:C.success,fontWeight:600}}>
+            ✓ Order sent to fulfillment — status: Waiting Shipping. Enter the tracking number once available.
+          </div>
+
+          <Drop label="Carrier" value={carrier} onChange={setCarrier}
+            opts={[{v:"UPS",label:"UPS"},{v:"FedEx",label:"FedEx"},{v:"USPS",label:"USPS"},{v:"DHL",label:"DHL"},{v:"Other",label:"Other"}]}/>
+
+          <Field label="Tracking Number" value={trackNum} onChange={setTrackNum}
+            placeholder="e.g. 1Z999AA10123456784" hint="Entering tracking number will mark order as Shipped"/>
+
+          {trackNum.trim()&&carrier!=="Other"&&(
+            <div style={{marginTop:4,padding:"8px 12px",background:C.surface2,borderRadius:8,fontSize:11}}>
+              <div style={{color:C.muted,marginBottom:4}}>Tracking URL (shared with rep):</div>
+              <a href={trackUrl} target="_blank"
+                style={{color:C.accent,fontFamily:"monospace",fontSize:11,wordBreak:"break-all",textDecoration:"none"}}>
+                {trackUrl}
+              </a>
+            </div>
+          )}
+
+          {order.trackingNumber&&(
+            <div style={{marginTop:12,padding:"10px 12px",background:C.surface2,borderRadius:8,fontSize:12}}>
+              <div style={{color:C.muted,marginBottom:2}}>Current tracking:</div>
+              <div style={{fontFamily:"monospace",fontWeight:600,color:C.text}}>{order.carrier} · {order.trackingNumber}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+
+
+</script>
+<script id="c4" type="text/plain">
 function RepPayModal({order,rep,onConfirm,onClose}) {
   var comm = order.totals&&order.totals.commission||0;
   const [method, setMethod] = useState("manual");
@@ -1946,7 +2390,7 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
                 </div>
                 {customer.termsStatus==="active"&&(
                   <div>
-                    {[["Type",(customer.termsType||"net_30").replace(/_/g," ").toUpperCase()],
+                    {[["Type",fmtTerms(customer.termsType||"net_30")],
                       ["Limit","$"+(customer.termsLimit||0).toLocaleString()],
                       ["Approved",customer.termsApprovedAt?fmtDate(customer.termsApprovedAt):"—"],
                       ["Signed By",customer.termsSignerName||"—"],
@@ -2043,14 +2487,16 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
-function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,addToast,showResult}) {
-  const [tasksTab, setTasksTab] = useState("active");
+function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
+  const [tasksTab,      setTasksTab]      = useState("active");
+  const [fulfillTarget, setFulfillTarget] = useState(null);
   var pendingW9       = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
+  var submittedOrders = (orders||[]).filter(function(o){return o.status==="Submitted";});
   var historyTerms     = (termsRequests||[]).filter(function(r){return r.status==="approved"||r.status==="denied"||r.status==="approved_awaiting_signature";});
   var pendingTermsAll  = (termsRequests||[]).filter(function(r){return r.status==="pending"||r.status==="approved_awaiting_signature";});
   var pendingApps = applications.filter(function(a){return !a.status||a.status==="pending";});
   var pendingReps = reps.filter(function(r){return r.status==="pending";});
-  var total = pendingW9.length+pendingApps.length+pendingReps.length;
+  var total = pendingW9.length+pendingApps.length+pendingReps.length+submittedOrders.length;
 
   function approveW9(rep) {
     var updated = Object.assign({},rep,{w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()});
@@ -2133,7 +2579,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                           {cust&&cust.termsStatus==="awaiting_signature"&&<div style={{fontSize:10,color:C.accent}}>✍ Awaiting signature</div>}
                         </td>
                         <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{req.repName}</td>
-                        <td style={{padding:"10px 14px",fontSize:12,fontWeight:700,color:C.text}}>{(req.approvedTerms||req.requestedTerms||"").replace("_"," ").toUpperCase()}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,fontWeight:700,color:C.text}}>{fmtTerms(req.approvedTerms||req.requestedTerms)}</td>
                         <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>${(req.approvedLimit||req.requestedLimit||0).toLocaleString()}</td>
                         <td style={{padding:"10px 14px"}}>
                           <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"15",color:sc}}>
@@ -2152,6 +2598,92 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
       )}
 
         <EmptyState icon="✅" title="All caught up!" subtitle="No pending tasks. New items appear here when reps submit forms or apply to join."/>
+      )}
+
+      {/* FulfillmentModal */}
+      {fulfillTarget&&(
+        <FulfillmentModal order={fulfillTarget} customers={customers||[]} products={products||[]}
+          onSend={function(result){
+            var patch = {status:result.status};
+            if(result.trackingNumber) patch.trackingNumber=result.trackingNumber;
+            if(result.carrier) patch.carrier=result.carrier;
+            if(result.trackingUrl) patch.trackingUrl=result.trackingUrl;
+            if(result.status==="Shipped") patch.shippedAt=new Date().toISOString();
+            var updated=addAuditEntry(Object.assign({},fulfillTarget,patch),result.status==="Shipped"?"Tracking added → Shipped":"Sent to fulfillment → Waiting Shipping","Admin",result.trackingNumber||"");
+            setOrders(function(prev){return prev.map(function(o){return o.id===fulfillTarget.id?updated:o;});});
+            dbSave("crm_orders",fulfillTarget.id,updated);
+            setFulfillTarget(updated);
+            addToast("Order "+fulfillTarget.id+" → "+result.status,"success");
+          }}
+          onClose={function(){setFulfillTarget(null);}}/>
+      )}
+
+      {/* Submitted Orders Queue */}
+      {tasksTab==="active"&&submittedOrders.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>Orders to Fulfill</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.accent+"18",color:C.accent,fontSize:11,fontWeight:700}}>{submittedOrders.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {submittedOrders.sort(function(a,b){return new Date(a.createdAt)-new Date(b.createdAt);}).map(function(o,i){
+              var payFirst = isPayFirstMethod(o.payMethod);
+              var sc = {Submitted:C.accent,Paid:C.success,"Waiting Shipping":C.warning,Shipped:C.text}[o.status]||C.dim;
+              return (
+                <div key={o.id} style={{padding:"14px 18px",borderBottom:i<submittedOrders.length-1?"1px solid "+C.border:"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10,gap:12,flexWrap:"wrap"}}>
+                    <div>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:C.accent}}>{o.id}</span>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
+                          background:sc+"18",color:sc}}>{o.status}</span>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:600,
+                          background:payFirst?C.success+"12":C.warning+"12",
+                          color:payFirst?C.success:C.warning}}>
+                          {payFirst?"💰 Pay First":"📋 Ship First"}
+                        </span>
+                      </div>
+                      <div style={{fontSize:12,color:C.text,fontWeight:600}}>{o.custName||"Customer"}</div>
+                      <div style={{fontSize:11,color:C.muted,marginTop:1}}>
+                        Rep: {o.repName||"—"} · {(o.items||[]).length} item(s) · {fmtMoney(o.totals&&o.totals.grand||0)} · {fmtDate(o.createdAt)}
+                      </div>
+                      <div style={{fontSize:11,color:C.dim,marginTop:1}}>
+                        Payment: {fmtTerms(o.payMethod||"pay_later")}
+                      </div>
+                    </div>
+                    <div style={{fontSize:14,fontWeight:900,fontFamily:"monospace",color:C.gold}}>{fmtMoney(o.totals&&o.totals.grand||0)}</div>
+                  </div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {payFirst&&o.status==="Submitted"&&(
+                      <Btn small variant="success" onClick={function(){
+                        var updated=addAuditEntry(Object.assign({},o,{status:"Paid",paidAt:new Date().toISOString()}), "Marked Paid","Admin");
+                        setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
+                        dbSave("crm_orders",o.id,updated);
+                        addToast("Order "+o.id+" marked Paid","success");
+                      }}>✓ Mark as Paid</Btn>
+                    )}
+                    {(!payFirst||(payFirst&&o.status==="Paid"))&&(
+                      <Btn small onClick={function(){setFulfillTarget(o);}}>
+                        📦 Send to Fulfillment
+                      </Btn>
+                    )}
+                    {(o.status==="Waiting Shipping"||o.status==="Submitted")&&(
+                      <Btn small variant="ghost" onClick={function(){setFulfillTarget(Object.assign({},o,{status:"Waiting Shipping"}));}}>
+                        🚚 Add Tracking
+                      </Btn>
+                    )}
+                    <Btn small variant="ghost" onClick={function(){
+                      var updated=addAuditEntry(Object.assign({},o,{status:"Cancelled"}),"Cancelled from Tasks","Admin");
+                      setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
+                      dbSave("crm_orders",o.id,updated);
+                      addToast("Order "+o.id+" cancelled","warning");
+                    }}>Cancel</Btn>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {tasksTab==="active"&&pendingReps.length>0&&(
@@ -2238,7 +2770,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     <div>
                       <div style={{fontWeight:700,fontSize:13,color:C.text}}>{req.custName}</div>
                       <div style={{fontSize:11,color:C.muted,marginTop:2}}>
-                        Rep: {req.repName} · Requested: <strong style={{color:C.text}}>{(req.requestedTerms||"net_30").replace("_"," ").toUpperCase()}</strong> · Limit: <strong style={{color:C.text}}>${(req.requestedLimit||0).toLocaleString()}</strong>
+                        Rep: {req.repName} · Requested: <strong style={{color:C.text}}>{fmtTerms(req.requestedTerms||"net_30")}</strong> · Limit: <strong style={{color:C.text}}>${(req.requestedLimit||0).toLocaleString()}</strong>
                       </div>
                       {req.bizType&&<div style={{fontSize:11,color:C.dim,marginTop:1}}>{req.bizType}</div>}
                       {req.reason&&<div style={{fontSize:11,color:C.muted,marginTop:4,fontStyle:"italic"}}>"{req.reason}"</div>}
@@ -2359,7 +2891,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 
 
 </script>
-<script id="c4" type="text/plain">
+<script id="c5" type="text/plain">
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
   const [tab,      setTab]      = useState("docs");
   const [showForm, setShowForm] = useState(false);
@@ -2710,7 +3242,7 @@ function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
 
 
 </script>
-<script id="c5" type="text/plain">
+<script id="c6" type="text/plain">
 function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders,
                        currentUser,isAdmin,addToast,showResult}) {
   const [showForm,  setShowForm]  = useState(false);
@@ -3187,7 +3719,7 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
 
 
 </script>
-<script id="c6" type="text/plain">
+<script id="c7" type="text/plain">
 function HelpModal({isAdmin,onClose}) {
   const [tab, setTab] = useState(isAdmin?"admin":"rep");
   var ADMIN_FAQ = [
@@ -3722,7 +4254,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c7" type="text/plain">
+<script id="c8" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   const [range, setRange] = useState("month");
   var now2 = new Date();
@@ -3874,9 +4406,10 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
   const [showReturn,  setShowReturn]   = useState(false);
   const [showSendInv, setShowSendInv] = useState(false);
   const [auditTab,    setAuditTab]    = useState(false);
-  const [editTarget,  setEditTarget]  = useState(null);
-  const [dupTarget,   setDupTarget]   = useState(null);
-  const [selected,    setSelected]    = useState({});
+  const [editTarget,     setEditTarget]    = useState(null);
+  const [dupTarget,      setDupTarget]     = useState(null);
+  const [selected,       setSelected]      = useState({});
+  const [fulfillTarget2, setFulfillTarget2] = useState(null);
 
   var filtered = orders.filter(function(o){
     if(filter!=="all" && o.status!==filter) return false;
@@ -3995,6 +4528,19 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
         </div>
       )}
 
+      {fulfillTarget2&&(
+        <FulfillmentModal order={fulfillTarget2} customers={customers} products={products}
+          onSend={function(result){
+            var patch={status:result.status};
+            if(result.trackingNumber){patch.trackingNumber=result.trackingNumber;patch.carrier=result.carrier;patch.trackingUrl=result.trackingUrl;}
+            if(result.status==="Shipped") patch.shippedAt=new Date().toISOString();
+            var updated=addAuditEntry(Object.assign({},fulfillTarget2,patch),result.status==="Shipped"?"Tracking added → Shipped":"Sent to fulfillment","Admin",result.trackingNumber||"");
+            onUpdate(updated); setViewOrder(updated); setFulfillTarget2(updated);
+            dbSave("crm_orders",fulfillTarget2.id,updated);
+            addToast("Order "+fulfillTarget2.id+" → "+result.status,"success");
+          }}
+          onClose={function(){setFulfillTarget2(null);}}/>
+      )}
       {editTarget&&(
         <OrderEditModal order={editTarget} products={products} customers={customers}
           onSave={function(updated){onUpdate(updated);dbSave("crm_orders",updated.id,updated);addToast("Order "+updated.id+" updated","success");setEditTarget(null);}}
@@ -4171,7 +4717,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c8" type="text/plain">
+<script id="c9" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -4660,7 +5206,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
 
 </script>
-<script id="c9" type="text/plain">
+<script id="c10" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests}) {
   const [payTarget,    setPayTarget]    = useState(null);
   const [releasingAll, setReleasingAll] = useState(false);
@@ -5213,7 +5759,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
 /* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
-<script id="c10" type="text/plain">
+<script id="c11" type="text/plain">
 function CommissionStatement({repId,orders,commissions,repName}) {
   var now3 = new Date();
   var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -5646,8 +6192,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     {v:"pay_later",    l:"Invoice / Pay Later",sub:"Send invoice after delivery"},
                   ];
                   if(termsApproved) {
-                    opts.push({v:"net_30",l:"Net 30 (Approved ✓)",sub:"Credit limit: $"+termsLimit.toLocaleString()+". Due in 30 days",credit:true});
-                    opts.push({v:"net_60",l:"Net 60 (Approved ✓)",sub:"Credit limit: $"+termsLimit.toLocaleString()+". Due in 60 days",credit:true});
+                    var approvedType = selCust?selCust.termsType:"net_30";
+                    opts.push({v:approvedType,l:fmtTerms(approvedType)+" (Approved ✓)",sub:"Credit limit: $"+termsLimit.toLocaleString()+". "+fmtTerms(approvedType)+" from invoice date",credit:true});
                   } else if(custTerms==="pending") {
                     opts.push({v:"__terms_pending",l:"Net Terms — Pending Approval",sub:"Terms request is being reviewed by admin",credit:true,disabled:true});
                   }
@@ -5873,7 +6419,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c11" type="text/plain">
+<script id="c12" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -5939,9 +6485,10 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 
 /* ─── Rep Orders ─────────────────────────────────────────────────────────── */
 function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,autoOpen}) {
-  const [showForm, setShowForm] = useState(false);
-  const [filter,   setFilter]   = useState("all");
-  const [viewOrd,  setViewOrd]  = useState(null);
+  const [showForm,    setShowForm]    = useState(false);
+  const [filter,      setFilter]      = useState("all");
+  const [viewOrd,     setViewOrd]     = useState(null);
+  const [showSendInv, setShowSendInv] = useState(false);
 
   useEffect(function(){
     if(autoOpen) setShowForm(true);
@@ -6000,6 +6547,20 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                   <span style={{color:C.muted}}>{r[0]}</span><span style={{fontWeight:600,color:C.text}}>{r[1]}</span>
                 </div>
               );})}
+              {viewOrd.trackingNumber&&(
+                <div style={{padding:"10px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginTop:8}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.success,marginBottom:4}}>🚚 Shipment Tracking</div>
+                  <div style={{fontSize:12,color:C.text,marginBottom:4}}>
+                    <strong>{viewOrd.carrier}</strong> · {viewOrd.trackingNumber}
+                  </div>
+                  {viewOrd.trackingUrl&&(
+                    <a href={viewOrd.trackingUrl} target="_blank"
+                      style={{fontSize:11,color:C.accent,fontWeight:600,textDecoration:"none"}}>
+                      Track Package ↗
+                    </a>
+                  )}
+                </div>
+              )}
               {viewOrd.notes&&<div style={{marginTop:12,padding:"10px",background:C.surface2,borderRadius:8,fontSize:12,color:C.muted}}>{viewOrd.notes}</div>}
             </div>
             <div>
@@ -6009,9 +6570,10 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                 );})}
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewOrd.totals&&viewOrd.totals.grand||0)}</span></div>
               </div>
-              <div style={{display:"flex",gap:8}}>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <Btn small variant="ghost" onClick={function(){generateInvoice(viewOrd,customers,products,currentUser);}}>⬇ Invoice</Btn>
                 <Btn small variant="ghost" onClick={function(){var w=window.open("","_blank");var h=generateInvoice(viewOrd,customers,products,currentUser,true);w.document.write(h);w.document.close();setTimeout(function(){w.print();},500);}}>🖨 Print</Btn>
+                <Btn small onClick={function(){setShowSendInv(true);}}>✉ Send to Customer</Btn>
               </div>
             </div>
           </div>
@@ -6079,10 +6641,10 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 </div>
                 {c2.email&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>✉ {c2.email}</div>}
                 {c2.phone&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>📞 {c2.phone}</div>}
-                {c2.paymentTerms&&<div style={{fontSize:10,fontWeight:600,padding:"1px 7px",borderRadius:20,background:C.accent+"12",color:C.accent,display:"inline-block",marginBottom:4}}>{c2.paymentTerms.replace(/_/g," ")}</div>}
+                {c2.paymentTerms&&<div style={{fontSize:10,fontWeight:600,padding:"1px 7px",borderRadius:20,background:C.accent+"12",color:C.accent,display:"inline-block",marginBottom:4}}>{fmtTerms(c2.paymentTerms)}</div>}
                 {(c2.termsStatus==="approved"||c2.termsStatus==="active")&&(
                   <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.success+"15",color:C.success,display:"inline-block",marginBottom:4,marginLeft:4}}>
-                    ✓ {(c2.termsType||"Net 30").replace("_"," ")} · ${(c2.termsLimit||0).toLocaleString()} limit
+                    ✓ {fmtTerms(c2.termsType||"net_30")} · ${(c2.termsLimit||0).toLocaleString()} limit
                   </div>
                 )}
                 {c2.termsStatus==="pending"&&(
@@ -6097,7 +6659,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 )}
                 {c2.termsStatus==="active"&&(
                   <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.success+"15",color:C.success,display:"inline-block",marginBottom:4,marginLeft:4}}>
-                    ✓ Active · {(c2.termsType||"net_30").replace("_"," ")}
+                    ✓ Active · {fmtTerms(c2.termsType||"net_30")}
                   </div>
                 )}
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.dim,padding:"8px 0",borderTop:"1px solid "+C.border,marginBottom:10}}>
@@ -6134,7 +6696,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
               <div style={{padding:"10px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
                   {editCust&&editCust.termsStatus==="active"?(
-                    <span style={{fontSize:12,fontWeight:700,color:C.success}}>✓ {(editCust.termsType||"net_30").replace("_"," ").toUpperCase()} · ${(editCust.termsLimit||0).toLocaleString()} limit</span>
+                    <span style={{fontSize:12,fontWeight:700,color:C.success}}>✓ {fmtTerms(editCust.termsType||"net_30")} · ${(editCust.termsLimit||0).toLocaleString()} limit</span>
                   ):editCust&&editCust.termsStatus==="awaiting_signature"?(
                     <span style={{fontSize:12,fontWeight:600,color:C.accent}}>✍ Awaiting customer signature</span>
                   ):editCust&&editCust.termsStatus==="pending"?(
@@ -6179,7 +6741,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
 /* ─── Rep Commissions ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c12" type="text/plain">
+<script id="c13" type="text/plain">
 function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -6552,7 +7114,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
 
 </script>
-<script id="c13" type="text/plain">
+<script id="c14" type="text/plain">
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -6592,6 +7154,7 @@ function App() {
   const [viewAsRep,   setViewAsRep]   = useState(null);
   const [inviteToken,  setInviteToken]  = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]invite=([^&]+)/);return m?m[1]:null;})());
   const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
+  const [payToken,     setPayToken]     = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]pay=([^&]+)/);return m?m[1]:null;})());
   const [creditAgreementTemplate,setCreditAgreementTemplate] = useLS("creditAgreementTemplate","");
   const [stripeLinks, setStripeLinks] = useLS("stripeLinks",{
     starter:"", pro:"", portal:"",
@@ -6664,6 +7227,27 @@ function App() {
     var sb = getSB();
     if(sb) sb.auth.signOut();
     setCurrentUser(null); setActiveTab("dashboard");
+  }
+
+  // Invoice payment page — no auth required
+  if(payToken) {
+    var payData2 = null;
+    try { payData2 = JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null"); } catch(e){}
+    if(payData2 && payData2.status!=="paid") {
+      return React.createElement(CustomerPaymentPage, {
+        payData: payData2,
+        onPaid: function(result) {
+          var updated = Object.assign({},payData2,{status:"paid",paidAt:result.paidAt,payMethod:result.method,cardRef:result.cardRef});
+          localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
+          // Update order in Supabase
+          var sb = getSB();
+          if(sb && payData2.order && payData2.order.id) {
+            sb.from("crm_orders").update({data:Object.assign({},payData2.order,{status:"Paid",paidAt:result.paidAt,payMethod:result.method}),updated_at:new Date().toISOString()}).eq("id",payData2.order.id);
+          }
+        },
+        onDecline: function(){ setPayToken(null); if(window.history) window.history.replaceState(null,"",window.location.pathname); },
+      });
+    }
   }
 
   // Credit agreement signing page — no auth required
@@ -6824,7 +7408,7 @@ function App() {
         user={viewAsRep?Object.assign({},currentUser,{name:viewAsRep.repName,role:"rep",_impersonating:currentUser.name}):currentUser}
         onLogout={handleLogout} theme={theme}
         onToggleTheme={function(){setTheme(theme==="dark"?"light":"dark");}}
-        taskCount={isAdmin?(reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length+applications.filter(function(a){return !a.status||a.status==="pending";}).length+(termsRequests||[]).filter(function(r){return r.status==="pending";}).length):0}
+        taskCount={isAdmin?(reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length+applications.filter(function(a){return !a.status||a.status==="pending";}).length+(termsRequests||[]).filter(function(r){return r.status==="pending";}).length+orders.filter(function(o){return o.status==="Submitted";}).length):0}
         legalBadge={isAdmin?reps.filter(function(r){
           return r.status==="active"&&legalDocs.filter(function(d){return d.active&&d.requiresResign;}).some(function(d){
             return !signatures.some(function(s){return s.docId===d.id&&s.version===d.version&&s.repId===r.id;});
@@ -6897,6 +7481,7 @@ function App() {
             applications={applications} setApplications={setApplications}
             termsRequests={termsRequests} setTermsRequests={setTermsRequests}
             customers={customers} setCustomers={setCustomers}
+            orders={orders} setOrders={setOrders} products={products}
             addToast={addToast} showResult={showResult}/>
         )}
         {isAdmin&&activeTab==="settings"&&(
@@ -6956,7 +7541,7 @@ function App() {
 </script>
 
 <script>
-var N=14;
+var N=15;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
