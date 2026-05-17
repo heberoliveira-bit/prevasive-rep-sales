@@ -5236,6 +5236,27 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
     });
     newPayouts.forEach(function(p){dbSave("crm_commission_payouts",p.id,p);});
     setCommissions(function(prev){return newPayouts.concat(prev);});
+
+    // Attempt Stripe transfers if Edge Function configured
+    var cfg = JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");
+    var fn  = cfg.edgeFnUrl;
+    if(fn) {
+      newPayouts.forEach(function(p){
+        var rep3 = reps.find(function(r){return r.id===p.repId;})||{};
+        if(rep3.stripeConnectId) {
+          fetch(fn,{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"transfer",repId:p.repId,amount:p.amount,stripeAccountId:rep3.stripeConnectId})})
+          .then(function(r){return r.json();})
+          .then(function(d){
+            if(d.transferId){
+              var upd=Object.assign({},p,{stripeTransferId:d.transferId,transferStatus:"sent"});
+              dbSave("crm_commission_payouts",p.id,upd);
+            }
+          }).catch(function(){});
+        }
+      });
+    }
+
     setTimeout(function(){
       setReleasingAll(false);
       addToast(newPayouts.length+" commission"+(newPayouts.length!==1?"s":"")+" released — "+fmtMoney(newPayouts.reduce(function(s,p){return s+p.amount;},0)),"success");
@@ -5425,7 +5446,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,orders,customers,commissions,reps,addToast}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,setStripeAccountA,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -5533,6 +5554,113 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
             hint="Edge Function only — never expose in browser"/>
           {stripeMsg&&<div style={{padding:"9px 12px",borderRadius:8,fontSize:12,fontWeight:600,marginBottom:14,background:C.success+"12",color:C.success}}>{stripeMsg}</div>}
           <Btn onClick={function(){localStorage.setItem("__stripe_pk__",stripeKey.trim());localStorage.setItem("__stripe_sk__",stripeSec.trim());addToast("Stripe keys saved","success");setStripeMsg("Saved!");setTimeout(function(){setStripeMsg("");},3000);}}>Save Keys</Btn>
+
+          <div style={{height:1,background:C.border,margin:"20px 0"}}/>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Account A — Business Payments & Rep Payouts</div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.6}}>
+            This account collects customer payments and funds rep commission payouts via Stripe Connect. Deploy the Edge Function below to enable automatic transfers.
+          </div>
+          <Field label="Publishable Key (Account A)" value={stripeAccountA&&stripeAccountA.publishableKey||""}
+            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{publishableKey:v});});}}
+            placeholder="pk_live_…" hint="Used in CustomerPaymentPage for card collection"/>
+          <Field label="Secret Key (Account A)" value={stripeAccountA&&stripeAccountA.secretKey||""}
+            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{secretKey:v});});}}
+            type="password" placeholder="sk_live_…" hint="Edge Function only — never exposed in browser"/>
+          <Field label="Webhook Secret (Account A)" value={stripeAccountA&&stripeAccountA.webhookSecret||""}
+            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{webhookSecret:v});});}}
+            type="password" placeholder="whsec_…" hint="From Stripe Dashboard → Webhooks → Signing secret"/>
+          <Field label="Edge Function URL" value={stripeAccountA&&stripeAccountA.edgeFnUrl||""}
+            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
+            placeholder="https://PROJECT.supabase.co/functions/v1/stripe-payouts"
+            hint="Deploy the Edge Function below, then paste its URL here"/>
+          <Btn onClick={function(){addToast("Account A settings saved","success");}}>Save Account A</Btn>
+
+          <div style={{marginTop:20,padding:"14px 16px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10}}>
+            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:8}}>Stripe Connect Setup Checklist</div>
+            {[
+              ["Enable Stripe Connect in your Stripe Dashboard","Dashboard → Connect → Get started"],
+              ["Set your platform name and branding","Dashboard → Connect → Settings → Branding"],
+              ["Deploy the Supabase Edge Function","See code below → copy to /supabase/functions/stripe-payouts/index.ts"],
+              ["Paste the Edge Function URL above","After deploy: supabase functions deploy stripe-payouts"],
+              ["Each rep clicks Connect Bank Account in their profile","Rep Profile → Subscription tab → Bank Account section"],
+            ].map(function(item,i){return (
+              <div key={i} style={{display:"flex",gap:8,marginBottom:6,fontSize:11}}>
+                <span style={{color:C.dim,flexShrink:0}}>{i+1}.</span>
+                <div><div style={{color:C.text,fontWeight:600}}>{item[0]}</div><div style={{color:C.dim}}>{item[1]}</div></div>
+              </div>
+            );})}
+          </div>
+
+          <div style={{marginTop:14}}>
+            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:8}}>Edge Function Code</div>
+            <div style={{fontWeight:600,fontSize:11,color:C.muted,marginBottom:6}}>/supabase/functions/stripe-payouts/index.ts</div>
+            <div style={{background:"#0d1117",borderRadius:8,padding:"14px",fontSize:10,fontFamily:"monospace",color:"#c9d1d9",lineHeight:1.7,overflowX:"auto",whiteSpace:"pre",maxHeight:220,overflowY:"auto"}}>
+              {["import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';",
+                "import Stripe from 'https://esm.sh/stripe@12.0.0?target=deno';",
+                "",
+                "const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, { apiVersion: '2023-10-16' });",
+                "",
+                "serve(async (req) => {",
+                "  const { action, repId, amount, currency, stripeAccountId, returnUrl } = await req.json();",
+                "  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };",
+                "",
+                "  if (action === 'create_account_link') {",
+                "    const account = await stripe.accounts.create({ type: 'express' });",
+                "    const link = await stripe.accountLinks.create({",
+                "      account: account.id, refresh_url: returnUrl,",
+                "      return_url: returnUrl + '?connected=true&account=' + account.id,",
+                "      type: 'account_onboarding',",
+                "    });",
+                "    return new Response(JSON.stringify({ url: link.url, accountId: account.id }), { headers });",
+                "  }",
+                "",
+                "  if (action === 'transfer') {",
+                "    const transfer = await stripe.transfers.create({",
+                "      amount: Math.round(amount * 100), currency: currency || 'usd',",
+                "      destination: stripeAccountId,",
+                "      metadata: { repId },",
+                "    });",
+                "    return new Response(JSON.stringify({ transferId: transfer.id, status: transfer.object }), { headers });",
+                "  }",
+                "",
+                "  if (action === 'account_status') {",
+                "    const account = await stripe.accounts.retrieve(stripeAccountId);",
+                "    return new Response(JSON.stringify({",
+                "      payoutsEnabled: account.payouts_enabled,",
+                "      chargesEnabled: account.charges_enabled,",
+                "      country: account.country,",
+                "    }), { headers });",
+                "  }",
+                "",
+                "  return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers });",
+                "});",
+              ].join("\n")}
+            </div>
+            <Btn small variant="ghost" onClick={function(){
+              var code=["import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';",
+                "import Stripe from 'https://esm.sh/stripe@12.0.0?target=deno';",
+                "const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, { apiVersion: '2023-10-16' });",
+                "serve(async (req) => {",
+                "  const { action, repId, amount, currency, stripeAccountId, returnUrl } = await req.json();",
+                "  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };",
+                "  if (action === 'create_account_link') {",
+                "    const account = await stripe.accounts.create({ type: 'express' });",
+                "    const link = await stripe.accountLinks.create({ account: account.id, refresh_url: returnUrl, return_url: returnUrl + '?connected=true&account=' + account.id, type: 'account_onboarding' });",
+                "    return new Response(JSON.stringify({ url: link.url, accountId: account.id }), { headers });",
+                "  }",
+                "  if (action === 'transfer') {",
+                "    const transfer = await stripe.transfers.create({ amount: Math.round(amount * 100), currency: currency || 'usd', destination: stripeAccountId, metadata: { repId } });",
+                "    return new Response(JSON.stringify({ transferId: transfer.id }), { headers });",
+                "  }",
+                "  if (action === 'account_status') {",
+                "    const account = await stripe.accounts.retrieve(stripeAccountId);",
+                "    return new Response(JSON.stringify({ payoutsEnabled: account.payouts_enabled, chargesEnabled: account.charges_enabled }), { headers });",
+                "  }",
+                "  return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers });",
+                "});"].join("\n");
+              navigator.clipboard.writeText(code).then(function(){addToast("Edge Function code copied!","success");});
+            }}>📋 Copy Edge Function Code</Btn>
+          </div>
 
           <div style={{height:1,background:C.border,margin:"20px 0"}}/>
           <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Rep Subscription Payment Links</div>
@@ -5987,6 +6115,21 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [cardExpiry,   setCardExpiry]   = useState("");
   const [cardHolder,   setCardHolder]   = useState("");
   const [cardZip,      setCardZip]      = useState("");
+  const [sendInvAuto,  setSendInvAuto]  = useState(true);
+  const [showPostInv,  setShowPostInv]  = useState(false);
+  const [placedOrder,  setPlacedOrder]  = useState(null);
+
+  // Auto-set payment method when customer changes
+  useEffect(function(){
+    if(!custId) return;
+    var cust2 = customers.find(function(x){return x.id===custId;});
+    if(!cust2) return;
+    if(cust2.termsStatus==="active"&&cust2.termsType) {
+      setPayMethod(cust2.termsType);
+    } else if(payMethod&&(payMethod==="net_15"||payMethod==="net_30"||payMethod==="net_45")) {
+      setPayMethod("due_receipt"); // reset if switching to non-terms customer
+    }
+  }, [custId]);
 
   function applyDiscount() {
     if(!discCode.trim()) return;
@@ -6063,14 +6206,24 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       return isEdit?prev.map(function(o){return o.id===id?order:o;}): [order].concat(prev);
     });
     dbSave("crm_orders",id,order);
+    var isNetOrder = selCust&&selCust.termsStatus==="active"&&selCust.termsType&&selCust.termsType!=="due_receipt";
     setTimeout(function(){
       setPlacing(false);
       addToast((isEdit?"Order updated":"Order placed")+" — "+id,"success");
-      showResult({type:"order",title:isEdit?"Order Updated!":"Order Placed!",
-        subtitle:isEdit?"Changes saved.":"Your order has been submitted for processing.",
-        rows:[["Order #",id],["Customer",cname],["Total",fmtMoney(totals.grand)],["Commission",fmtMoney(totals.commission)]],
-        cta:"Done"});
-      onClose();
+      if(!isEdit && isNetOrder && sendInvAuto) {
+        setPlacedOrder(order);
+        setShowPostInv(true);
+        showResult({type:"order",title:"Order Placed!",
+          subtitle:"Invoice ready to send to "+cname+".",
+          rows:[["Order #",id],["Customer",cname],["Terms",fmtTerms(selCust.termsType)],["Total",fmtMoney(totals.grand)]],
+          cta:"Send Invoice Now"});
+      } else {
+        showResult({type:"order",title:isEdit?"Order Updated!":"Order Placed!",
+          subtitle:isEdit?"Changes saved.":"Submitted for processing.",
+          rows:[["Order #",id],["Customer",cname],["Total",fmtMoney(totals.grand)],["Commission",fmtMoney(totals.commission)]],
+          cta:"Done"});
+        onClose();
+      }
     },600);
   }
 
@@ -6183,44 +6336,79 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               <div style={{marginBottom:20}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Payment Method</div>
                 {(function(){
-                  var custTerms = selCust ? selCust.termsStatus : null;
-                  var termsApproved = custTerms==="approved";
-                  var termsLimit = selCust ? (selCust.termsLimit||0) : 0;
-                  var opts = [
-                    {v:"credit_card",  l:"Credit Card",      sub:"Charge customer card at time of order"},
-                    {v:"check",        l:"Check",            sub:"Customer pays by check on delivery"},
-                    {v:"pay_later",    l:"Invoice / Pay Later",sub:"Send invoice after delivery"},
-                  ];
-                  if(termsApproved) {
-                    var approvedType = selCust?selCust.termsType:"net_30";
-                    opts.push({v:approvedType,l:fmtTerms(approvedType)+" (Approved ✓)",sub:"Credit limit: $"+termsLimit.toLocaleString()+". "+fmtTerms(approvedType)+" from invoice date",credit:true});
-                  } else if(custTerms==="pending") {
-                    opts.push({v:"__terms_pending",l:"Net Terms — Pending Approval",sub:"Terms request is being reviewed by admin",credit:true,disabled:true});
-                  }
-                  return opts.map(function(opt){
-                    var sel=payMethod===opt.v; var dis=!!opt.disabled;
+                  var custTerms    = selCust ? selCust.termsStatus : null;
+                  var termsActive  = custTerms==="active";
+                  var termsPending = custTerms==="pending";
+                  var approvedType = selCust ? (selCust.termsType||"net_30") : null;
+                  var termsLimit   = selCust ? (selCust.termsLimit||0) : 0;
+                  var isNetTerms   = payMethod&&(payMethod==="net_15"||payMethod==="net_30"||payMethod==="net_45"||payMethod==="due_receipt"===false);
+                  isNetTerms = approvedType&&payMethod===approvedType&&termsActive;
+
+                  if(termsActive && approvedType) {
+                    // Customer has approved terms — locked to their term type
                     return (
-                      <div key={opt.v} onClick={function(){if(!dis)setPayMethod(opt.v);}}
-                        style={{padding:"12px 14px",borderRadius:10,marginBottom:8,cursor:dis?"not-allowed":"pointer",
-                                border:"2px solid "+(sel?C.accent:opt.credit?C.success:C.border),
-                                background:sel?C.accent+"08":opt.credit?C.success+"05":C.surface2,
-                                opacity:dis?.6:1,
-                                display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                        <div>
-                          <div style={{fontWeight:700,fontSize:13,color:sel?C.accent:opt.credit?C.success:C.text}}>{opt.l}</div>
-                          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{opt.sub}</div>
+                      <div>
+                        <div style={{padding:"14px 16px",borderRadius:10,border:"2px solid "+C.success,
+                                     background:C.success+"08",marginBottom:8}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div>
+                              <div style={{fontWeight:800,fontSize:14,color:C.success}}>✓ {fmtTerms(approvedType)}</div>
+                              <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+                                Approved credit account · ${termsLimit.toLocaleString()} limit · Invoice will be sent
+                              </div>
+                            </div>
+                            <span style={{fontSize:10,fontWeight:700,padding:"3px 8px",borderRadius:20,background:C.success+"15",color:C.success}}>AUTO</span>
+                          </div>
                         </div>
-                        <div style={{width:18,height:18,borderRadius:"50%",border:"2px solid "+(sel?C.accent:opt.credit?C.success:C.border),
-                                     background:sel?C.accent:"none",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                          {sel&&<div style={{width:8,height:8,borderRadius:"50%",background:"#fff"}}/>}
+                        <div style={{padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.6}}>
+                          📧 Invoice will be generated after order is placed. Payment is due {fmtTerms(approvedType)} from delivery.
                         </div>
                       </div>
                     );
-                  });
+                  }
+
+                  // No approved terms — show manual options
+                  var opts = [
+                    {v:"due_receipt", l:"Due on Receipt",       sub:"Collect card on delivery · Card details required",  card:true},
+                    {v:"credit_card", l:"Credit Card (charge now)", sub:"Charge card immediately · Card details required", card:true},
+                    {v:"check",       l:"Check / ACH",          sub:"Customer pays by check — no card needed",          card:false},
+                  ];
+                  if(termsPending) opts.push({v:"__pending",l:"Net Terms — Pending Admin Approval",sub:"Submit request from customer profile first",card:false,disabled:true});
+
+                  return (
+                    <div>
+                      {termsPending&&(
+                        <div style={{padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:10,fontSize:11,color:C.warning,fontWeight:600}}>
+                          ⏳ Terms request is pending — using standard payment until approved
+                        </div>
+                      )}
+                      {opts.map(function(opt){
+                        var sel=payMethod===opt.v; var dis=!!opt.disabled;
+                        return (
+                          <div key={opt.v} onClick={function(){if(!dis)setPayMethod(opt.v);}}
+                            style={{padding:"12px 14px",borderRadius:10,marginBottom:8,
+                                    cursor:dis?"not-allowed":"pointer",opacity:dis?.5:1,
+                                    border:"2px solid "+(sel?C.accent:C.border),
+                                    background:sel?C.accent+"08":C.surface2,
+                                    display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <div>
+                              <div style={{fontWeight:700,fontSize:13,color:sel?C.accent:dis?C.dim:C.text}}>{opt.l}</div>
+                              <div style={{fontSize:11,color:C.muted,marginTop:2}}>{opt.sub}</div>
+                            </div>
+                            {!dis&&<div style={{width:18,height:18,borderRadius:"50%",flexShrink:0,
+                                     border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent:"none",
+                                     display:"flex",alignItems:"center",justifyContent:"center"}}>
+                              {sel&&<div style={{width:8,height:8,borderRadius:"50%",background:"#fff"}}/>}
+                            </div>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
                 })()}
 
-              {/* Credit card reference fields */}
-              {payMethod==="credit_card"&&(
+              {/* Card fields — only for Due on Receipt or Credit Card */}
+              {(payMethod==="credit_card"||payMethod==="due_receipt")&&(
                 <div style={{marginTop:4,padding:"14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>💳 Card Reference</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -6379,6 +6567,23 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 ⚠ Once placed, this order will be submitted for processing.
               </div>
 
+              {/* Invoice auto-send for net terms */}
+              {(function(){
+                var isNet = selCust&&selCust.termsStatus==="active"&&selCust.termsType&&selCust.termsType!=="due_receipt";
+                return isNet ? (
+                  <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:12}}>
+                    <div style={{fontWeight:700,fontSize:12,color:C.accent,marginBottom:6}}>📧 Invoice Ready to Send</div>
+                    <div style={{fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:8}}>
+                      Customer has approved <strong style={{color:C.text}}>{fmtTerms(selCust.termsType)}</strong> terms. 
+                      After placing, you can send the invoice with a payment link directly to <strong style={{color:C.text}}>{selCust.email||"customer"}</strong>.
+                    </div>
+                    <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                      <input type="checkbox" checked={sendInvAuto} onChange={function(e){setSendInvAuto(e.target.checked);}} style={{accentColor:C.accent}}/>
+                      Show invoice send dialog after placing order
+                    </label>
+                  </div>
+                ) : null;
+              })()}
               <div style={{display:"flex",flexDirection:"column",gap:6}}>
                 <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
                   <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{accentColor:C.accent}}/>
@@ -6411,6 +6616,16 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           )}
         </div>
       </div>
+      {showPostInv&&placedOrder&&(
+        <SendInvoiceModal
+          order={placedOrder}
+          customers={customers}
+          products={products}
+          currentUser={{name:repName}}
+          addToast={addToast}
+          showResult={showResult}
+          onClose={function(){setShowPostInv(false);onClose();}}/>
+      )}
     </div>
   );
 }
@@ -7155,7 +7370,30 @@ function App() {
   const [inviteToken,  setInviteToken]  = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]invite=([^&]+)/);return m?m[1]:null;})());
   const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
   const [payToken,     setPayToken]     = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]pay=([^&]+)/);return m?m[1]:null;})());
+
+  // Handle Stripe Connect return — update rep stripeConnectId
+  useEffect(function(){
+    var params = new URLSearchParams(window.location.search);
+    var connected = params.get("connected");
+    var accountId = params.get("account");
+    if(connected==="true"&&accountId&&currentUser&&currentUser.role==="rep") {
+      var repId2 = currentUser.rep_id||currentUser.id;
+      setReps(function(prev){return prev.map(function(r){
+        if(r.id===repId2) {
+          var upd=Object.assign({},r,{stripeConnectId:accountId,stripePayoutsEnabled:false});
+          dbSave("crm_reps",r.id,upd);
+          return upd;
+        }
+        return r;
+      });});
+      addToast("Bank account connected! Payouts will be sent to your Stripe account.","success");
+      window.history.replaceState(null,"",window.location.pathname);
+    }
+  }, []);
   const [creditAgreementTemplate,setCreditAgreementTemplate] = useLS("creditAgreementTemplate","");
+  const [stripeAccountA, setStripeAccountA] = useLS("stripeAccountA",{
+    publishableKey:"", secretKey:"", webhookSecret:"", edgeFnUrl:"",
+  });
   const [stripeLinks, setStripeLinks] = useLS("stripeLinks",{
     starter:"", pro:"", portal:"",
     starterPriceId:"", proPriceId:"",
@@ -7494,6 +7732,7 @@ function App() {
             googleCfg={googleCfg} onSaveGoogle={setGoogleCfg}
             creditAgreementTemplate={creditAgreementTemplate} setCreditAgreementTemplate={setCreditAgreementTemplate}
             stripeLinks={stripeLinks} setStripeLinks={setStripeLinks}
+            stripeAccountA={stripeAccountA} setStripeAccountA={setStripeAccountA}
             orders={orders} customers={customers} commissions={commissions}
             reps={reps} addToast={addToast}/>
         )}
