@@ -4433,7 +4433,6 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     setViewOrder(withAudit);
     dbSave("crm_orders",order.id,withAudit);
     addToast("Order "+order.id+" → "+next,"info");
-    addNotification("Order "+order.id+" moved to "+next);
   }
 
   function cancel(order) {
