@@ -1933,6 +1933,38 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
       {tab==="overview"&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
           <div>
+            {/* Credit Terms */}
+            {customer.termsStatus&&(
+              <div style={{background:C.surface,border:"1px solid "+(customer.termsStatus==="active"?C.success:customer.termsStatus==="awaiting_signature"?C.accent:C.warning)+"35",borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                  <span style={{fontWeight:700,fontSize:12,color:C.text}}>Credit Terms</span>
+                  <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,
+                    background:customer.termsStatus==="active"?C.success+"15":customer.termsStatus==="awaiting_signature"?C.accent+"15":C.warning+"15",
+                    color:customer.termsStatus==="active"?C.success:customer.termsStatus==="awaiting_signature"?C.accent:C.warning}}>
+                    {customer.termsStatus==="active"?"✓ Active":customer.termsStatus==="awaiting_signature"?"✍ Awaiting Signature":"⏳ Pending"}
+                  </span>
+                </div>
+                {customer.termsStatus==="active"&&(
+                  <div>
+                    {[["Type",(customer.termsType||"net_30").replace(/_/g," ").toUpperCase()],
+                      ["Limit","$"+(customer.termsLimit||0).toLocaleString()],
+                      ["Approved",customer.termsApprovedAt?fmtDate(customer.termsApprovedAt):"—"],
+                      ["Signed By",customer.termsSignerName||"—"],
+                    ].map(function(row,i){return (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",borderTop:"1px solid "+C.border}}>
+                        <span style={{color:C.muted}}>{row[0]}</span>
+                        <span style={{fontWeight:700,color:i<2?C.success:C.text}}>{row[1]}</span>
+                      </div>
+                    );})}
+                  </div>
+                )}
+                {customer.termsStatus!=="active"&&(
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>
+                    {customer.termsStatus==="awaiting_signature"?"Agreement sent — awaiting signature.":"Under admin review."}
+                  </div>
+                )}
+              </div>
+            )}
             <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Contact Info</div>
             <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
               {[["Name",customer.name],["Email",customer.email||"—"],["Phone",customer.phone||"—"],
@@ -2012,7 +2044,10 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 
 
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,addToast,showResult}) {
-  var pendingW9 = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
+  const [tasksTab, setTasksTab] = useState("active");
+  var pendingW9       = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
+  var historyTerms     = (termsRequests||[]).filter(function(r){return r.status==="approved"||r.status==="denied"||r.status==="approved_awaiting_signature";});
+  var pendingTermsAll  = (termsRequests||[]).filter(function(r){return r.status==="pending"||r.status==="approved_awaiting_signature";});
   var pendingApps = applications.filter(function(a){return !a.status||a.status==="pending";});
   var pendingReps = reps.filter(function(r){return r.status==="pending";});
   var total = pendingW9.length+pendingApps.length+pendingReps.length;
@@ -2056,11 +2091,70 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
     <div>
       <PageHeader title="Tasks" subtitle={total+" item"+(total!==1?"s":"")+" need your attention"}/>
 
-      {total===0&&(
+      {/* Tab switcher */}
+      <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.border,marginBottom:20}}>
+        {[["active","Active Tasks",total],["history","Approval History",historyTerms.length]].map(function(t){
+          var act=tasksTab===t[0];
+          return (
+            <button key={t[0]} onClick={function(){setTasksTab(t[0]);}}
+              style={{padding:"8px 16px",background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",
+                      fontSize:13,fontWeight:act?600:400,color:act?C.text:C.dim,
+                      borderBottom:"2px solid "+(act?C.accent:"transparent"),marginBottom:-1,
+                      display:"flex",alignItems:"center",gap:6}}>
+              {t[1]}
+              {t[2]>0&&<span style={{padding:"1px 6px",borderRadius:10,background:act?C.accent+"18":C.surface2,color:act?C.accent:C.dim,fontSize:10,fontWeight:700}}>{t[2]}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {tasksTab==="history"&&(
+        <div>
+          {historyTerms.length===0?(
+            <EmptyState icon="📋" title="No history yet" subtitle="Approved and denied terms requests will appear here."/>
+          ):(
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:C.surface2}}>
+                  {["Customer","Rep","Terms","Limit","Decision","Date"].map(function(h){return (
+                    <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                  );})}
+                </tr></thead>
+                <tbody>
+                  {historyTerms.sort(function(a,b){return new Date(b.approvedAt||b.submittedAt)-new Date(a.approvedAt||a.submittedAt);}).map(function(req){
+                    var approved = req.status==="approved"||req.status==="approved_awaiting_signature";
+                    var sc = approved?C.success:C.danger;
+                    var cust = customers&&customers.find(function(x){return x.id===req.custId;});
+                    return (
+                      <tr key={req.id} style={{borderTop:"1px solid "+C.border}}>
+                        <td style={{padding:"10px 14px"}}>
+                          <div style={{fontWeight:600,fontSize:13,color:C.text}}>{req.custName}</div>
+                          {cust&&cust.termsStatus==="active"&&<div style={{fontSize:10,color:C.success,fontWeight:600}}>✓ Signed & Active</div>}
+                          {cust&&cust.termsStatus==="awaiting_signature"&&<div style={{fontSize:10,color:C.accent}}>✍ Awaiting signature</div>}
+                        </td>
+                        <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{req.repName}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,fontWeight:700,color:C.text}}>{(req.approvedTerms||req.requestedTerms||"").replace("_"," ").toUpperCase()}</td>
+                        <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>${(req.approvedLimit||req.requestedLimit||0).toLocaleString()}</td>
+                        <td style={{padding:"10px 14px"}}>
+                          <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"15",color:sc}}>
+                            {approved?"✓ Approved":"✗ Denied"}
+                          </span>
+                        </td>
+                        <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(req.approvedAt||req.deniedAt||req.submittedAt)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
         <EmptyState icon="✅" title="All caught up!" subtitle="No pending tasks. New items appear here when reps submit forms or apply to join."/>
       )}
 
-      {pendingReps.length>0&&(
+      {tasksTab==="active"&&pendingReps.length>0&&(
         <div style={{marginBottom:24}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
             <span style={{fontSize:13,fontWeight:700,color:C.text}}>Rep Approvals</span>
@@ -2092,7 +2186,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
         </div>
       )}
 
-      {pendingW9.length>0&&(
+      {tasksTab==="active"&&pendingW9.length>0&&(
         <div style={{marginBottom:24}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
             <span style={{fontSize:13,fontWeight:700,color:C.text}}>W-9 Reviews</span>
@@ -2128,8 +2222,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
         </div>
       )}
 
-      {/* Credit Terms Requests */}
-      {(function(){
+      {tasksTab==="active"&&(function(){
         var pendingTerms=(termsRequests||[]).filter(function(r){return r.status==="pending"||r.status==="approved_awaiting_signature";});
         if(!pendingTerms.length) return null;
         return (
@@ -2229,7 +2322,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
         );
       })()}
 
-      {pendingApps.length>0&&(
+      {tasksTab==="active"&&pendingApps.length>0&&(
         <div style={{marginBottom:24}}>
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
             <span style={{fontSize:13,fontWeight:700,color:C.text}}>New Applications</span>
@@ -5955,7 +6048,10 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
   function save(){
     if(!name.trim()) return;
     var id=editCust?editCust.id:genId("cust");
-    var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),paymentTerms:payTerms,updatedAt:new Date().toISOString()};
+    var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),updatedAt:new Date().toISOString()};
+    if(editCust&&editCust.termsStatus) data.termsStatus=editCust.termsStatus;
+    if(editCust&&editCust.termsType) data.termsType=editCust.termsType;
+    if(editCust&&editCust.termsLimit) data.termsLimit=editCust.termsLimit;
     if(!editCust) data.createdAt=new Date().toISOString();
     setCustomers(function(prev){return editCust?prev.map(function(c2){return c2.id===editCust.id?data:c2;}):[data].concat(prev);});
     dbSave("crm_customers",id,data); addToast(editCust?"Customer updated":"Customer added","success"); setShowForm(false);
@@ -6010,8 +6106,11 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <Btn small variant="outline" onClick={function(){setViewCust2(c2);}} fullWidth={true}>View Profile</Btn>
                   <Btn small variant="ghost" onClick={function(){openEdit(c2);}} fullWidth={true}>Edit</Btn>
-                  {c2.termsStatus!=="approved"&&(
-                    <Btn small variant="ghost" onClick={function(){setTermsReqCust(c2);}} fullWidth={true}>
+                  {c2.termsStatus!=="active"&&c2.termsStatus!=="awaiting_signature"&&(
+                    <Btn small variant="ghost"
+                      onClick={function(){if(c2.termsStatus!=="pending")setTermsReqCust(c2);}}
+                      fullWidth={true}
+                      disabled={c2.termsStatus==="pending"}>
                       {c2.termsStatus==="pending"?"⏳ Terms Pending":"+ Request Terms"}
                     </Btn>
                   )}
@@ -6030,8 +6129,23 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
             <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="jane@practice.com"/>
             <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
             <div style={{gridColumn:"1/-1"}}><Field label="Company" value={company} onChange={setCompany} placeholder="Smith Medical Group"/></div>
-            <Drop label="Payment Terms" value={payTerms} onChange={setPayTerms} opts={[{v:"",label:"Not specified"},{v:"due_receipt",label:"Due on Receipt"},{v:"net_15",label:"Net 15"},{v:"net_30",label:"Net 30"},{v:"net_45",label:"Net 45"},{v:"net_60",label:"Net 60"}]}/>
-            <div/>
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Payment Terms</div>
+              <div style={{padding:"10px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  {editCust&&editCust.termsStatus==="active"?(
+                    <span style={{fontSize:12,fontWeight:700,color:C.success}}>✓ {(editCust.termsType||"net_30").replace("_"," ").toUpperCase()} · ${(editCust.termsLimit||0).toLocaleString()} limit</span>
+                  ):editCust&&editCust.termsStatus==="awaiting_signature"?(
+                    <span style={{fontSize:12,fontWeight:600,color:C.accent}}>✍ Awaiting customer signature</span>
+                  ):editCust&&editCust.termsStatus==="pending"?(
+                    <span style={{fontSize:12,fontWeight:600,color:C.warning}}>⏳ Terms request pending admin review</span>
+                  ):(
+                    <span style={{fontSize:12,color:C.dim}}>No credit terms — use "Request Terms" from customer card</span>
+                  )}
+                </div>
+                <span style={{fontSize:10,color:C.dim,fontStyle:"italic"}}>Set by admin only</span>
+              </div>
+            </div>
             <div style={{gridColumn:"1/-1"}}><Field label="Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/></div>
             <Field label="City" value={city} onChange={setCity}/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
@@ -6063,6 +6177,9 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
 }
 
 /* ─── Rep Commissions ────────────────────────────────────────────────────── */
+
+</script>
+<script id="c12" type="text/plain">
 function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -6215,9 +6332,6 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
 }
 
 /* ─── Rep Profile ────────────────────────────────────────────────────────── */
-
-</script>
-<script id="c12" type="text/plain">
 function RepProfile({user,repData,setReps,commissions,addToast}) {
   const [tab,   setTab]   = useState("profile");
   const [name,  setName]  = useState(user&&user.name||"");
@@ -6436,6 +6550,9 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
 
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
+
+</script>
+<script id="c13" type="text/plain">
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -6839,7 +6956,7 @@ function App() {
 </script>
 
 <script>
-var N=13;
+var N=14;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
