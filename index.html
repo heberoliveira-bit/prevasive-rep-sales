@@ -3343,15 +3343,34 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
               <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px"}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Change Plan</div>
                 <div style={{display:"flex",gap:8}}>
-                  {REP_PLANS.map(function(p){var sel=rep.planId===p.id;return (
-                    <button key={p.id} onClick={function(){changePlan(p.id);}}
-                      style={{flex:1,padding:"8px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",
+                  {REP_PLANS.map(function(p){var sel=rep.planId===p.id;
+                    var planLinks=JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
+                    var link=p.id==="pro"?planLinks.pro:planLinks.starter;
+                    return (
+                      <div key={p.id} style={{flex:1,padding:"10px",borderRadius:8,
                               border:"2px solid "+(sel?C.accent:C.border),
                               background:sel?C.accent+"10":C.surface2,textAlign:"left"}}>
-                      <div style={{fontWeight:700,fontSize:12,color:sel?C.accent:C.text}}>{p.name}</div>
-                      <div style={{fontSize:10,color:C.dim}}>${p.price}/mo · {fmtMoney(p.ceiling)} cap</div>
-                    </button>
-                  );})}
+                        <div style={{fontWeight:700,fontSize:12,color:sel?C.accent:C.text,marginBottom:2}}>{p.name}</div>
+                        <div style={{fontSize:10,color:C.dim,marginBottom:6}}>${p.price}/mo · {fmtMoney(p.ceiling)}/mo cap</div>
+                        {sel?(
+                          <div style={{fontSize:10,fontWeight:700,color:C.accent}}>✓ Current Plan</div>
+                        ):(
+                          <button onClick={function(){changePlan(p.id);}}
+                            style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:10,fontWeight:600,padding:0}}>
+                            Switch Plan
+                          </button>
+                        )}
+                        {link&&sel&&!rep.stripeSubscriptionId&&(
+                          <a href={link} target="_blank"
+                            style={{display:"block",marginTop:8,padding:"5px 8px",borderRadius:6,
+                                    background:C.accent,color:"#fff",textDecoration:"none",
+                                    fontSize:10,fontWeight:700,textAlign:"center"}}>
+                            ⚡ Subscribe via Stripe →
+                          </a>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -4549,8 +4568,44 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 
 </script>
 <script id="c9" type="text/plain">
-function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult}) {
-  const [payTarget, setPayTarget] = useState(null); // {order, rep}
+function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests}) {
+  const [payTarget,    setPayTarget]    = useState(null);
+  const [releasingAll, setReleasingAll] = useState(false);
+
+  var now2 = Date.now();
+  var paidOrderIds = (commissions||[]).map(function(cp){return cp.orderId;});
+
+  function getReadyOrders() {
+    return orders.filter(function(o){
+      if(!o.deliveredAt) return false;
+      if(o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
+      if(paidOrderIds.indexOf(o.id)>=0) return false;
+      return (now2-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
+    });
+  }
+
+  function releaseAll() {
+    var ready = getReadyOrders();
+    if(!ready.length) return;
+    setReleasingAll(true);
+    var newPayouts = ready.map(function(o){
+      var rep2 = reps.find(function(r){return r.id===o.repId;})||{name:"Rep"};
+      return {id:genId("pay"),repId:o.repId,repName:rep2.name||o.repName,
+              orderId:o.id,amount:o.totals&&o.totals.commission||0,
+              method:"auto_release",note:"Auto-released after "+RETURN_WINDOW_DAYS+"-day return window",
+              paidAt:new Date().toISOString()};
+    });
+    newPayouts.forEach(function(p){dbSave("crm_commission_payouts",p.id,p);});
+    setCommissions(function(prev){return newPayouts.concat(prev);});
+    setTimeout(function(){
+      setReleasingAll(false);
+      addToast(newPayouts.length+" commission"+(newPayouts.length!==1?"s":"")+" released — "+fmtMoney(newPayouts.reduce(function(s,p){return s+p.amount;},0)),"success");
+      showResult({type:"order",title:"Commissions Released!",
+        subtitle:newPayouts.length+" payments processed.",
+        rows:[["Orders Released",newPayouts.length],["Total Amount",fmtMoney(newPayouts.reduce(function(s,p){return s+p.amount;},0))],["Method","Return window cleared"],["Date",fmtDate(new Date().toISOString())]],
+        cta:"Done"});
+    },400);
+  }
   var now = Date.now();
   var releasedOrds = orders.filter(function(o){
     if(!o.deliveredAt||!o.repId) return false;
@@ -4578,7 +4633,75 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
   return (
     <div>
       <PageHeader title="Commissions" subtitle="Track and release rep commission payments"
-        action={<Btn small variant="ghost" onClick={function(){exportCommissions(commissions,orders);}}>⬇ Export CSV</Btn>}/>
+        action={<div style={{display:"flex",gap:8}}>
+          {getReadyOrders().length>0&&(
+            <Btn onClick={releaseAll} disabled={releasingAll}
+              variant="success">
+              {releasingAll?"Releasing…":"⚡ Release All Ready ("+getReadyOrders().length+")"}
+            </Btn>
+          )}
+          <Btn small variant="ghost" onClick={function(){exportCommissions(commissions,orders);}}>⬇ Export CSV</Btn>
+        </div>}/>
+
+      {/* Ready to release banner */}
+      {getReadyOrders().length>0&&(
+        <div style={{padding:"12px 16px",background:C.success+"10",border:"1px solid "+C.success+"25",
+                     borderRadius:10,marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontWeight:700,fontSize:13,color:C.success}}>
+              ✓ {getReadyOrders().length} commission{getReadyOrders().length!==1?"s":""} ready to release
+            </div>
+            <div style={{fontSize:11,color:C.muted,marginTop:2}}>
+              Return window closed · Total: {fmtMoney(getReadyOrders().reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0))}
+            </div>
+          </div>
+          <Btn small onClick={releaseAll} disabled={releasingAll}>
+            {releasingAll?"Releasing…":"Release All →"}
+          </Btn>
+        </div>
+      )}
+
+      {/* Payout requests from reps */}
+      {(payoutRequests||[]).filter(function(r){return r.status==="pending";}).length>0&&(
+        <div style={{background:C.surface,border:"1px solid "+C.warning+"30",borderRadius:12,overflow:"hidden",marginBottom:16}}>
+          <div style={{padding:"10px 16px",borderBottom:"1px solid "+C.border,fontWeight:700,fontSize:13,color:C.text,display:"flex",alignItems:"center",gap:8}}>
+            Rep Payout Requests
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>{(payoutRequests||[]).filter(function(r){return r.status==="pending";}).length}</span>
+          </div>
+          {(payoutRequests||[]).filter(function(r){return r.status==="pending";}).map(function(req){
+            var o = orders.find(function(x){return x.id===req.orderId;})||{};
+            var rep2 = reps.find(function(r){return r.id===req.repId;})||{name:req.repName||"Rep"};
+            return (
+              <div key={req.id} style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+                                         display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                <div>
+                  <div style={{fontWeight:600,fontSize:13,color:C.text}}>{rep2.name}</div>
+                  <div style={{fontSize:11,color:C.muted}}>Order {req.orderId} · {fmtMoney(req.amount)} · Requested {fmtDate(req.requestedAt)}</div>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <Btn small variant="success" onClick={function(){
+                    var pay={id:genId("pay"),repId:req.repId,repName:rep2.name,
+                             orderId:req.orderId,amount:req.amount,
+                             method:"manual",note:"Rep-requested payout",paidAt:new Date().toISOString()};
+                    dbSave("crm_commission_payouts",pay.id,pay);
+                    setCommissions(function(prev){return [pay].concat(prev);});
+                    var upReq=Object.assign({},req,{status:"approved",approvedAt:new Date().toISOString()});
+                    setPayoutRequests(function(prev){return prev.map(function(r){return r.id===req.id?upReq:r;});});
+                    dbSave("crm_payout_requests",req.id,upReq);
+                    addToast("Payout approved for "+rep2.name,"success");
+                  }}>✓ Approve & Pay</Btn>
+                  <Btn small variant="ghost" onClick={function(){
+                    var upReq=Object.assign({},req,{status:"denied"});
+                    setPayoutRequests(function(prev){return prev.map(function(r){return r.id===req.id?upReq:r;});});
+                    dbSave("crm_payout_requests",req.id,upReq);
+                    addToast("Payout request denied","warning");
+                  }}>Deny</Btn>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
         <KpiCard label="Ready to Pay" value={fmtMoney(totalUnpaid)} sub={unpaid.length+" orders"} color={C.gold}/>
         <KpiCard label="Total Paid Out" value={fmtMoney(totalPaid)} sub={(commissions||[]).length+" payments"} color={C.success}/>
@@ -4663,7 +4786,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,orders,customers,commissions,reps,addToast}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -4760,154 +4883,49 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
       {tab==="stripe"&&(
         <div style={{maxWidth:520}}>
           <div style={{padding:"14px 16px",background:"rgba(99,91,255,.08)",border:"1px solid rgba(99,91,255,.2)",borderRadius:10,marginBottom:20}}>
-            <div style={{fontWeight:700,fontSize:13,color:C.accent,marginBottom:4}}>⚡ Stripe Payments</div>
-            <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>Live card charging requires a Supabase Edge Function to create Payment Intents securely. Find keys at <strong style={{color:C.text}}>dashboard.stripe.com → Developers → API Keys</strong></div>
+            <div style={{fontWeight:700,fontSize:13,color:C.accent,marginBottom:4}}>⚡ Stripe Integration</div>
+            <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>Configure API keys and Payment Links for rep subscription plans.</div>
           </div>
+
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>API Keys</div>
           <Field label="Publishable Key" value={stripeKey} onChange={setStripeKey} placeholder="pk_live_…"
-            hint="Safe to store — used client-side for Stripe.js Elements"/>
+            hint="Used client-side for Stripe.js Elements"/>
           <Field label="Secret Key" value={stripeSec} onChange={setStripeSec} type="password" placeholder="sk_live_…"
-            hint="Keep this secret. For Edge Function only — never expose client-side"/>
+            hint="Edge Function only — never expose in browser"/>
           {stripeMsg&&<div style={{padding:"9px 12px",borderRadius:8,fontSize:12,fontWeight:600,marginBottom:14,background:C.success+"12",color:C.success}}>{stripeMsg}</div>}
-          <Btn onClick={function(){localStorage.setItem("__stripe_pk__",stripeKey.trim());localStorage.setItem("__stripe_sk__",stripeSec.trim());addToast("Stripe keys saved","success");setStripeMsg("Saved! Stripe.js will use your publishable key for card inputs.");setTimeout(function(){setStripeMsg("");},4000);}}>Save Stripe Keys</Btn>
-          <div style={{marginTop:24,padding:"14px 16px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
-            <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Integration Checklist</div>
-            {[["Set up Supabase Edge Function for payment intents","Deploy a Deno function at /functions/stripe-charge"],["Add webhook endpoint in Stripe dashboard","Route to your Edge Function URL"],["Enable Stripe Connect for rep payouts","Allows direct transfers to rep bank accounts"],["Test with Stripe test keys first","pk_test_ / sk_test_ before going live"]].map(function(item,i){return (
+          <Btn onClick={function(){localStorage.setItem("__stripe_pk__",stripeKey.trim());localStorage.setItem("__stripe_sk__",stripeSec.trim());addToast("Stripe keys saved","success");setStripeMsg("Saved!");setTimeout(function(){setStripeMsg("");},3000);}}>Save Keys</Btn>
+
+          <div style={{height:1,background:C.border,margin:"20px 0"}}/>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Rep Subscription Payment Links</div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.6}}>
+            Create in <strong style={{color:C.text}}>Stripe Dashboard → Payment Links → New</strong>. Set as recurring monthly subscriptions. Paste URLs here — reps see these in their Profile → Subscription tab.
+          </div>
+          <Field label="Starter Plan Link ($100/mo)" value={stripeLinks&&stripeLinks.starter||""}
+            onChange={function(v){setStripeLinks(function(prev){return Object.assign({},prev,{starter:v});});}}
+            placeholder="https://buy.stripe.com/…" hint="Starter — $1,000/mo commission ceiling"/>
+          <Field label="Pro Plan Link ($200/mo)" value={stripeLinks&&stripeLinks.pro||""}
+            onChange={function(v){setStripeLinks(function(prev){return Object.assign({},prev,{pro:v});});}}
+            placeholder="https://buy.stripe.com/…" hint="Pro — $10,000/mo commission ceiling"/>
+          <Field label="Customer Portal Link" value={stripeLinks&&stripeLinks.portal||""}
+            onChange={function(v){setStripeLinks(function(prev){return Object.assign({},prev,{portal:v});});}}
+            placeholder="https://billing.stripe.com/p/…" hint="Reps click this to manage card, view invoices, cancel"/>
+          <Btn onClick={function(){addToast("Stripe links saved","success");}}>Save Links</Btn>
+
+          <div style={{height:1,background:C.border,margin:"20px 0"}}/>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Setup Checklist</div>
+          <div style={{background:C.surface2,borderRadius:10,border:"1px solid "+C.border,padding:"14px 16px"}}>
+            {[
+              ["Create two Stripe Products (Starter & Pro)","Products → Add product → Recurring"],
+              ["Create Payment Links for each plan","Payment Links → Create link → select product"],
+              ["Enable Customer Portal","Settings → Billing → Customer portal → Activate"],
+              ["Paste all three links above","Starter link, Pro link, Portal link"],
+              ["Test with a Stripe test mode key first","pk_test_ / sk_test_"],
+            ].map(function(item,i){return (
               <div key={i} style={{display:"flex",gap:10,marginBottom:8,fontSize:12}}>
                 <span style={{color:C.dim,flexShrink:0}}>□</span>
-                <div>
-                  <div style={{color:C.text,fontWeight:600}}>{item[0]}</div>
-                  <div style={{color:C.dim,fontSize:11}}>{item[1]}</div>
-                </div>
+                <div><div style={{color:C.text,fontWeight:600}}>{item[0]}</div><div style={{color:C.dim,fontSize:11}}>{item[1]}</div></div>
               </div>
             );})}
-          </div>
-        </div>
-      )}
-
-      {tab==="discounts"&&(
-        <div style={{maxWidth:560}}>
-          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:20}}>
-            <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,fontWeight:700,fontSize:13,color:C.text}}>Add Discount Code</div>
-            <div style={{padding:"16px",display:"grid",gridTemplateColumns:"1fr 140px 100px auto",gap:10,alignItems:"flex-end"}}>
-              <div>
-                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Code</div>
-                <input value={newCode} onChange={function(e){setNewCode(e.target.value.toUpperCase());}}
-                  placeholder="PREVA10" maxLength={20}
-                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
-                          padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"monospace",
-                          letterSpacing:".05em",boxSizing:"border-box",outline:"none"}}/>
-              </div>
-              <div>
-                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Type</div>
-                <select value={newType} onChange={function(e){setNewType(e.target.value);}}
-                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                  <option value="percent">% Off</option>
-                  <option value="fixed">$ Off</option>
-                </select>
-              </div>
-              <div>
-                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Value</div>
-                <input value={newVal} onChange={function(e){setNewVal(e.target.value);}} type="number" placeholder={newType==="percent"?"10":"50"}
-                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-              </div>
-              <div style={{paddingBottom:2}}><Btn small onClick={addCode} disabled={!newCode.trim()||!newVal}>Add</Btn></div>
-            </div>
-          </div>
-
-          {(discountCodes||[]).length===0 ? (
-            <EmptyState icon="🏷" title="No discount codes" subtitle="Add your first promo code above."/>
-          ) : (
-            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-              <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead><tr style={{background:C.surface2}}>
-                  {["Code","Type","Discount","Status","Uses",""].map(function(h){return (
-                    <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
-                  );})}
-                </tr></thead>
-                <tbody>
-                  {(discountCodes||[]).map(function(d){return (
-                    <tr key={d.id} style={{borderTop:"1px solid "+C.border}}>
-                      <td style={{padding:"10px 14px",fontFamily:"monospace",fontWeight:700,fontSize:13,color:C.accent,letterSpacing:".05em"}}>{d.code}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,color:C.muted,textTransform:"capitalize"}}>{d.type}</td>
-                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:700,fontFamily:"monospace",color:C.text}}>{d.type==="percent"?d.value+"%":"$"+d.value}</td>
-                      <td style={{padding:"10px 14px"}}>
-                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:d.active?C.success+"18":C.surface2,color:d.active?C.success:C.dim}}>{d.active?"Active":"Inactive"}</span>
-                      </td>
-                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.muted}}>{d.uses||0}</td>
-                      <td style={{padding:"10px 14px"}}>
-                        <div style={{display:"flex",gap:6}}>
-                          <Btn small variant="ghost" onClick={function(){toggleCode(d.id);}}>{d.active?"Disable":"Enable"}</Btn>
-                          <Btn small variant="danger" onClick={function(){removeCode(d.id);}}>Delete</Btn>
-                        </div>
-                      </td>
-                    </tr>
-                  );})}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {tab==="shipping"&&(
-        <div style={{maxWidth:560}}>
-          <div style={{padding:"12px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:20,fontSize:12,color:C.muted,lineHeight:1.6}}>
-            Flat-rate shipping tiers auto-apply at checkout based on order subtotal. Reps can override per order.
-          </div>
-          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:20}}>
-            <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,fontWeight:700,fontSize:13,color:C.text}}>Add Shipping Rule</div>
-            <div style={{padding:"16px",display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:10,alignItems:"flex-end"}}>
-              {[["Label",newSrLabel,setNewSrLabel,"text","e.g. Standard"],["Max Order ($)",newSrMax,setNewSrMax,"number","500"],["Rate ($)",newSrRate,setNewSrRate,"number","0 = Free"]].map(function(f){return (
-                <div key={f[0]}>
-                  <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>{f[0]}</div>
-                  <input value={f[1]} onChange={function(e){f[2](e.target.value);}} type={f[3]} placeholder={f[4]}
-                    style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-                </div>
-              );})}
-              <div style={{paddingBottom:2}}>
-                <Btn small onClick={function(){
-                  if(!newSrLabel.trim()||!newSrMax) return;
-                  var rule={id:genId("sr"),label:newSrLabel.trim(),maxOrder:parseFloat(newSrMax)||0,rate:parseFloat(newSrRate)||0,active:true};
-                  onSaveShippingRules(function(prev){return prev.concat([rule]).sort(function(a,b){return a.maxOrder-b.maxOrder;});});
-                  setNewSrLabel(""); setNewSrMax(""); setNewSrRate("");
-                  addToast("Shipping rule added","success");
-                }}>Add</Btn>
-              </div>
-            </div>
-          </div>
-          {(shippingRules||[]).length===0 ? (
-            <EmptyState icon="📦" title="No shipping rules" subtitle="Add rules above. Orders default to free shipping when no rules match."/>
-          ) : (
-            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-              <table style={{width:"100%",borderCollapse:"collapse"}}>
-                <thead><tr style={{background:C.surface2}}>
-                  {["Label","Max Order","Rate","Status",""].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
-                </tr></thead>
-                <tbody>
-                  {(shippingRules||[]).sort(function(a,b){return a.maxOrder-b.maxOrder;}).map(function(r){return (
-                    <tr key={r.id} style={{borderTop:"1px solid "+C.border}}>
-                      <td style={{padding:"10px 14px",fontWeight:600,fontSize:13,color:C.text}}>{r.label}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.muted}}>{"≤ $"+r.maxOrder}</td>
-                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:700,fontFamily:"monospace",color:r.rate===0?C.success:C.text}}>{r.rate===0?"Free":"$"+r.rate}</td>
-                      <td style={{padding:"10px 14px"}}>
-                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:r.active!==false?C.success+"18":C.surface2,color:r.active!==false?C.success:C.dim}}>{r.active!==false?"Active":"Off"}</span>
-                      </td>
-                      <td style={{padding:"10px 14px"}}>
-                        <div style={{display:"flex",gap:6}}>
-                          <Btn small variant="ghost" onClick={function(){onSaveShippingRules(function(prev){return prev.map(function(x){return x.id===r.id?Object.assign({},x,{active:x.active===false}):x;});});}}>
-                            {r.active!==false?"Disable":"Enable"}
-                          </Btn>
-                          <Btn small variant="danger" onClick={function(){onSaveShippingRules(function(prev){return prev.filter(function(x){return x.id!==r.id;});});}}>Delete</Btn>
-                        </div>
-                      </td>
-                    </tr>
-                  );})}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div style={{marginTop:16,padding:"12px 14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border,fontSize:12,color:C.muted,lineHeight:1.7}}>
-            <strong style={{color:C.text}}>How it works:</strong> Rules apply in order by max order value. When a customer's subtotal falls under a tier's max, that rate applies. For free shipping on large orders, set the highest tier's rate to $0.
           </div>
         </div>
       )}
@@ -6045,7 +6063,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
 }
 
 /* ─── Rep Commissions ────────────────────────────────────────────────────── */
-function RepCommissions({repId,orders,commissions,repName}) {
+function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
   var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
@@ -6130,6 +6148,68 @@ function RepCommissions({repId,orders,commissions,repName}) {
         </div>
       )}
       {myOrds.length===0&&myComm.length===0&&<EmptyState icon="💰" title="No commissions yet" subtitle="Commissions appear here after you place orders that are delivered."/>}
+
+      {/* Request payout for ready orders */}
+      {released.length>0&&(
+        <div style={{background:C.surface,border:"1px solid "+C.gold+"30",borderRadius:12,overflow:"hidden",marginTop:20}}>
+          <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,fontWeight:700,fontSize:13,color:C.text}}>
+            Request Payout
+          </div>
+          {released.map(function(o){
+            var alreadyRequested=(payoutRequests||[]).some(function(r){return r.orderId===o.id&&r.status==="pending";});
+            return (
+              <div key={o.id} style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,
+                                       display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                <div>
+                  <div style={{fontWeight:600,fontSize:12,color:C.text}}>{o.id} · {o.custName||"Customer"}</div>
+                  <div style={{fontSize:11,color:C.muted}}>Delivered {fmtDate(o.deliveredAt)} · Return window closed ✓</div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontFamily:"monospace",fontWeight:800,color:C.gold,fontSize:14}}>{fmtMoney(o.totals&&o.totals.commission||0)}</span>
+                  {alreadyRequested?(
+                    <span style={{fontSize:11,color:C.accent,fontWeight:600}}>⏳ Requested</span>
+                  ):(
+                    <Btn small onClick={function(){
+                      var id=genId("pr");
+                      var req={id:id,repId:repId,repName:repName,orderId:o.id,
+                               amount:o.totals&&o.totals.commission||0,
+                               status:"pending",requestedAt:new Date().toISOString()};
+                      if(setPayoutRequests) setPayoutRequests(function(prev){return [req].concat(prev);});
+                      dbSave("crm_payout_requests",id,req);
+                      if(addToast) addToast("Payout requested for "+o.id,"success");
+                    }}>Request Payout</Btn>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          <div style={{padding:"10px 16px",fontSize:11,color:C.dim}}>
+            Admin will review and process payment. Typical processing: 1–3 business days.
+          </div>
+        </div>
+      )}
+
+      {/* Stripe billing section */}
+      {(function(){
+        var links=JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
+        var portalLink=links.portal;
+        if(!portalLink) return null;
+        return (
+          <div style={{marginTop:20,background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 18px"}}>
+            <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:8}}>My Subscription</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,marginBottom:12}}>
+              <span style={{color:C.muted}}>Plan</span>
+              <span style={{fontWeight:700,color:C.accent}}>{repData&&repData.planId==="pro"?"Pro":"Starter"} · ${repData&&repData.planId==="pro"?200:100}/mo</span>
+            </div>
+            <a href={portalLink} target="_blank"
+              style={{display:"block",textAlign:"center",padding:"10px",borderRadius:8,
+                      border:"1px solid "+C.border,background:C.surface2,color:C.text,
+                      textDecoration:"none",fontWeight:600,fontSize:13}}>
+              Manage Billing & Invoices (Stripe) →
+            </a>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -6238,17 +6318,105 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
       )}
 
       {tab==="subscription"&&(
-        <div style={{maxWidth:480}}>
+        <div style={{maxWidth:520}}>
           {repData&&(
             <div>
-              <div style={{background:C.surface2,borderRadius:12,padding:"18px 20px",marginBottom:16,border:"1px solid "+C.border}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Current Plan</div>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-                  <div><div style={{fontSize:20,fontWeight:800,color:C.accent}}>{plan?plan.name:"No Plan"}</div>{plan&&<div style={{fontSize:12,color:C.muted,marginTop:2}}>{plan.desc}</div>}</div>
-                  <div style={{textAlign:"right"}}>{plan&&<div style={{fontSize:24,fontWeight:900,fontFamily:"monospace",color:C.text}}>${plan.price}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>}<span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:repData.subscriptionStatus==="active"?C.success+"18":C.warning+"18",color:repData.subscriptionStatus==="active"?C.success:C.warning,textTransform:"capitalize"}}>{repData.subscriptionStatus}</span></div>
+              {/* Current plan card */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"20px 22px",marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14}}>
+                  <div>
+                    <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>Current Plan</div>
+                    <div style={{fontSize:22,fontWeight:800,color:C.accent,letterSpacing:"-.02em"}}>{plan?plan.name:"No Plan"}</div>
+                    {plan&&<div style={{fontSize:12,color:C.muted,marginTop:3}}>{plan.desc}</div>}
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    {plan&&<div style={{fontSize:28,fontWeight:900,fontFamily:"monospace",color:C.text}}>${plan.price}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>}
+                    <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,
+                      background:repData.subscriptionStatus==="active"?C.success+"18":repData.subscriptionStatus==="trial"?C.accent+"18":C.warning+"18",
+                      color:repData.subscriptionStatus==="active"?C.success:repData.subscriptionStatus==="trial"?C.accent:C.warning,
+                      textTransform:"capitalize"}}>{repData.subscriptionStatus||"inactive"}</span>
+                  </div>
+                </div>
+                {/* Plan details */}
+                {[
+                  ["Commission Ceiling", plan?fmtMoney(plan.ceiling)+"/mo":"—"],
+                  ["Billing", repData.subscriptionStatus==="trial"?"Trial period (free)":"$"+(plan?plan.price:0)+"/month"],
+                  ["Trial Started", repData.trialStartedAt?fmtDate(repData.trialStartedAt):"—"],
+                  ["Trial Ends", repData.trialStartedAt?fmtDate(new Date(new Date(repData.trialStartedAt).getTime()+TRIAL_DAYS*24*60*60*1000).toISOString()):"—"],
+                ].map(function(row,i){return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                       padding:"6px 0",borderTop:"1px solid "+C.border}}>
+                    <span style={{color:C.muted}}>{row[0]}</span>
+                    <span style={{fontWeight:600,color:C.text}}>{row[1]}</span>
+                  </div>
+                );})}
+              </div>
+
+              {/* Stripe subscription action */}
+              {(function(){
+                var links = JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
+                var planLink = repData.planId==="pro"?links.pro:links.starter;
+                var portalLink = links.portal;
+                var hasStripe = !!repData.stripeSubscriptionId;
+                return (
+                  <div>
+                    {!hasStripe&&planLink&&(
+                      <div style={{marginBottom:14}}>
+                        <a href={planLink} target="_blank"
+                          style={{display:"block",textAlign:"center",padding:"13px",borderRadius:10,
+                                  background:"linear-gradient(135deg,#635bff,#8b5cf6)",color:"#fff",
+                                  textDecoration:"none",fontWeight:800,fontSize:15,
+                                  boxShadow:"0 4px 14px rgba(99,91,255,.35)"}}>
+                          ⚡ Activate {plan?plan.name:"Plan"} — ${plan?plan.price:0}/month →
+                        </a>
+                        <div style={{fontSize:10,color:C.dim,textAlign:"center",marginTop:8}}>
+                          Secure checkout powered by Stripe. Your card is charged monthly.
+                        </div>
+                      </div>
+                    )}
+                    {hasStripe&&(
+                      <div style={{marginBottom:14,padding:"12px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:10}}>
+                        <div style={{fontWeight:700,fontSize:12,color:C.success,marginBottom:2}}>✓ Stripe subscription active</div>
+                        <div style={{fontSize:11,color:C.muted}}>Billing ID: {repData.stripeSubscriptionId}</div>
+                      </div>
+                    )}
+                    {portalLink&&(
+                      <a href={portalLink} target="_blank"
+                        style={{display:"block",textAlign:"center",padding:"10px",borderRadius:8,
+                                border:"1px solid "+C.border,background:C.surface2,color:C.text,
+                                textDecoration:"none",fontWeight:600,fontSize:13}}>
+                        Manage Billing & Invoices →
+                      </a>
+                    )}
+                    {!planLink&&!hasStripe&&(
+                      <div style={{padding:"12px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:10,fontSize:12,color:C.warning}}>
+                        ⚠ Stripe payment link not configured yet. Contact your admin to set up billing.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Plan comparison */}
+              <div style={{marginTop:4}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:10}}>Available Plans</div>
+                <div style={{display:"flex",gap:10}}>
+                  {REP_PLANS.map(function(p){
+                    var cur = repData.planId===p.id;
+                    return (
+                      <div key={p.id} style={{flex:1,padding:"14px",borderRadius:10,
+                                              border:"2px solid "+(cur?C.accent:C.border),
+                                              background:cur?C.accent+"08":C.surface2}}>
+                        <div style={{fontWeight:800,fontSize:14,color:cur?C.accent:C.text}}>{p.name}</div>
+                        <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:C.text,margin:"6px 0"}}>${p.price}<span style={{fontSize:11,color:C.dim,fontWeight:400}}>/mo</span></div>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:8}}>{p.desc}</div>
+                        <div style={{fontSize:11,fontWeight:700,color:cur?C.accent:C.muted}}>Commission ceiling: {fmtMoney(p.ceiling)}/mo</div>
+                        {cur&&<div style={{marginTop:8,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.accent+"18",color:C.accent,textAlign:"center"}}>Current Plan</div>}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>To change your plan, contact your admin at PreVasive.</div>
             </div>
           )}
         </div>
@@ -6308,6 +6476,11 @@ function App() {
   const [inviteToken,  setInviteToken]  = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]invite=([^&]+)/);return m?m[1]:null;})());
   const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
   const [creditAgreementTemplate,setCreditAgreementTemplate] = useLS("creditAgreementTemplate","");
+  const [stripeLinks, setStripeLinks] = useLS("stripeLinks",{
+    starter:"", pro:"", portal:"",
+    starterPriceId:"", proPriceId:"",
+  });
+  const [payoutRequests,setPayoutRequests] = useState([]);
 
   // Apply theme
   Object.assign(C, THEMES[theme]||THEMES.dark);
@@ -6594,7 +6767,8 @@ function App() {
         )}
         {isAdmin&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} reps={reps} commissions={commissions}
-            setCommissions={setCommissions} addToast={addToast} showResult={showResult}/>
+            setCommissions={setCommissions} addToast={addToast} showResult={showResult}
+            payoutRequests={payoutRequests} setPayoutRequests={setPayoutRequests}/>
         )}
         {isAdmin&&activeTab==="legal"&&(
           <AdminLegal legalDocs={legalDocs} setLegalDocs={setLegalDocs}
@@ -6617,6 +6791,7 @@ function App() {
             taxCfg={taxCfg} onSaveTax={setTaxCfg}
             googleCfg={googleCfg} onSaveGoogle={setGoogleCfg}
             creditAgreementTemplate={creditAgreementTemplate} setCreditAgreementTemplate={setCreditAgreementTemplate}
+            stripeLinks={stripeLinks} setStripeLinks={setStripeLinks}
             orders={orders} customers={customers} commissions={commissions}
             reps={reps} addToast={addToast}/>
         )}
@@ -6642,7 +6817,9 @@ function App() {
         )}
         {!isAdmin&&activeTab==="commissions"&&(
           <RepCommissions repId={effectiveUser.rep_id||effectiveUser.id}
-            orders={orders} commissions={commissions} repName={effectiveUser.name}/>
+            orders={orders} commissions={commissions} repName={effectiveUser.name}
+            payoutRequests={payoutRequests} setPayoutRequests={setPayoutRequests}
+            addToast={addToast} repData={myRepData}/>
         )}
         {!isAdmin&&activeTab==="profile"&&(
           <RepProfile user={effectiveUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast}/>
