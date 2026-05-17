@@ -5278,10 +5278,14 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 }
 
 /* ─── Rep Orders ─────────────────────────────────────────────────────────── */
-function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules}) {
+function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,autoOpen}) {
   const [showForm, setShowForm] = useState(false);
   const [filter,   setFilter]   = useState("all");
   const [viewOrd,  setViewOrd]  = useState(null);
+
+  useEffect(function(){
+    if(autoOpen) setShowForm(true);
+  }, [autoOpen]);
   var myOrds = orders.filter(function(o){return o.repId===repId;});
   var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
 
@@ -6003,7 +6007,8 @@ function App() {
             currentUser={effectiveUser} repData={myRepData} orders={orders} customers={customers} products={products}
             setOrders={setOrders} setCustomers={setCustomers}
             addToast={addToast} showResult={showResult} discountCodes={discountCodes}
-            shippingRules={shippingRules}/>
+            shippingRules={shippingRules}
+            autoOpen={activeTab==="new_order"}/>
         )}
         {!isAdmin&&activeTab==="customers"&&(
           <RepCustomers repId={effectiveUser.rep_id||effectiveUser.id}
