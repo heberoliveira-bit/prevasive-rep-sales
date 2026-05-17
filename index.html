@@ -5631,6 +5631,23 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
           </div>
         </Modal>
       )}
+      {termsReqCust&&(
+        <TermsRequestModal
+          customer={termsReqCust}
+          repId={repId}
+          repName=""
+          onSubmit={function(req){
+            var id=genId("tr");
+            var newReq=Object.assign({},req,{id:id});
+            setTermsRequests(function(prev){return [newReq].concat(prev);});
+            dbSave("crm_terms_requests",id,newReq);
+            var updated=Object.assign({},termsReqCust,{termsStatus:"pending",termsRequestedAt:new Date().toISOString()});
+            setCustomers(function(prev){return prev.map(function(x){return x.id===termsReqCust.id?updated:x;});});
+            dbSave("crm_customers",termsReqCust.id,updated);
+          }}
+          onClose={function(){setTermsReqCust(null);}}
+          addToast={addToast}/>
+      )}
     </div>
   );
 }
