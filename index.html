@@ -6372,6 +6372,64 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 )}
               </div>
 
+              {/* Shipping & Billing Address */}
+              {selCust&&(
+                <div style={{marginBottom:16}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+
+                    {/* Ship To */}
+                    <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:8,display:"flex",justifyContent:"space-between"}}>
+                        <span>📦 Ship To</span>
+                        {!selCust.address&&<span style={{color:C.warning,fontSize:9}}>⚠ No address</span>}
+                      </div>
+                      {selCust.address?(
+                        <div style={{fontSize:12,color:C.text,lineHeight:1.8}}>
+                          <div style={{fontWeight:700}}>{selCust.name}</div>
+                          {selCust.company&&<div style={{color:C.muted,fontSize:11}}>{selCust.company}</div>}
+                          <div>{selCust.address}</div>
+                          <div>{[selCust.city,selCust.state,selCust.zip].filter(Boolean).join(", ")}</div>
+                          {selCust.phone&&<div style={{color:C.muted,marginTop:2,fontSize:11}}>📞 {selCust.phone}</div>}
+                        </div>
+                      ):(
+                        <div style={{fontSize:11,color:C.dim,lineHeight:1.6}}>No address on file — edit customer profile to add.</div>
+                      )}
+                    </div>
+
+                    {/* Bill To */}
+                    <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>
+                        💳 Bill To
+                      </div>
+                      <div style={{fontSize:12,color:C.text,lineHeight:1.8}}>
+                        <div style={{fontWeight:700}}>{selCust.name}</div>
+                        {selCust.company&&<div style={{color:C.muted,fontSize:11}}>{selCust.company}</div>}
+                        {selCust.address?(
+                          <div>
+                            <div>{selCust.address}</div>
+                            <div>{[selCust.city,selCust.state,selCust.zip].filter(Boolean).join(", ")}</div>
+                          </div>
+                        ):(
+                          <div style={{color:C.dim,fontSize:11}}>Same as shipping</div>
+                        )}
+                        {selCust.email&&<div style={{color:C.muted,marginTop:2,fontSize:11}}>✉ {selCust.email}</div>}
+                      </div>
+                      {selCust.termsStatus==="active"&&(
+                        <div style={{marginTop:8,padding:"3px 8px",background:C.success+"12",borderRadius:6,fontSize:10,fontWeight:700,color:C.success,display:"inline-block"}}>
+                          ✓ {fmtTerms(selCust.termsType||"net_30")} Terms Active
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {selCust.zip&&getGaTaxRate(selCust.zip)&&(
+                    <div style={{marginTop:8,padding:"6px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:7,fontSize:11,color:C.muted,display:"flex",justifyContent:"space-between"}}>
+                      <span>📍 {getGaTaxRate(selCust.zip).county} County, Georgia</span>
+                      <span style={{fontWeight:700,color:C.accent}}>{((getGaTaxRate(selCust.zip).rate||0)*100).toFixed(1)}% sales tax</span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Items */}
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Products</div>
