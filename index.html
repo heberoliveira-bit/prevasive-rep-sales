@@ -1409,6 +1409,314 @@ function OrderDupModal({order,products,customers,reps,setOrders,addToast,showRes
 }
 
 
+function CustomerSigningPage({signingData,onSigned,onDecline}) {
+  var customer = signingData.customer||{};
+  var req      = signingData.req||{};
+  var agreementHtml = signingData.agreementHtml||"";
+  var company  = signingData.company||"PreVasive USA";
+  const [signerName,  setSignerName]  = useState("");
+  const [signerTitle, setSignerTitle] = useState("");
+  const [scrolled,    setScrolled]    = useState(false);
+  const [agreed,      setAgreed]      = useState(false);
+  const [done,        setDone]        = useState(false);
+
+  var termsLabel = (req.approvedTerms||"net_30").replace("_"," ").toUpperCase();
+  var limit = "$"+(req.approvedLimit||0).toLocaleString();
+  var nameMatch = signerName.trim().length>=3;
+  var canSign = scrolled && nameMatch && agreed;
+
+  function handleScroll(e){
+    var el=e.target;
+    if(el.scrollTop+el.clientHeight>=el.scrollHeight-30) setScrolled(true);
+  }
+
+  if(done) return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
+      <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:14,padding:"48px 40px",maxWidth:480,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
+        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",border:"2px solid #1ea67230",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
+        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Agreement Signed</div>
+        <div style={{fontSize:13,color:"#6b7c93",marginBottom:6,lineHeight:1.6}}>
+          Thank you, <strong>{signerName}</strong>. Your credit account agreement has been signed and recorded.
+        </div>
+        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",marginTop:20,textAlign:"left"}}>
+          {[["Customer",customer.name||""],["Terms",termsLabel],["Credit Limit",limit],["Signed",new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})]].map(function(row,i){return (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:i<3?"1px solid #e8ecef":"none"}}>
+              <span style={{color:"#6b7c93"}}>{row[0]}</span><span style={{fontWeight:700,color:"#1a1a2e"}}>{row[1]}</span>
+            </div>
+          );})}
+        </div>
+        <div style={{marginTop:20,fontSize:11,color:"#a0aec0"}}>You may close this page. Your rep will be notified.</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"'Inter',system-ui,sans-serif"}}>
+      {/* Header */}
+      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:28,height:28,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:"#fff"}}>P</div>
+          <span style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</span>
+        </div>
+        <div style={{fontSize:11,color:"#6b7c93"}}>Credit Account Agreement — {termsLabel} · {limit}</div>
+      </div>
+
+      <div style={{maxWidth:760,margin:"0 auto",padding:"28px 20px"}}>
+        {/* Customer info banner */}
+        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,padding:"16px 20px",marginBottom:20,
+                     display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:17,color:"#1a1a2e"}}>{customer.name}</div>
+            <div style={{fontSize:12,color:"#6b7c93",marginTop:2}}>{customer.company||customer.email||""}</div>
+          </div>
+          <div style={{display:"flex",gap:16}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em"}}>Terms</div>
+              <div style={{fontWeight:800,color:"#635bff",fontSize:15}}>{termsLabel}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em"}}>Credit Limit</div>
+              <div style={{fontWeight:800,color:"#1a1a2e",fontSize:15}}>{limit}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Agreement document */}
+        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,overflow:"hidden",marginBottom:20}}>
+          <div style={{padding:"12px 20px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc",
+                       display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:700,fontSize:13,color:"#1a1a2e"}}>Credit Account Agreement</span>
+            {!scrolled&&<span style={{fontSize:11,color:"#f6ab2f",fontWeight:600}}>↓ Scroll to bottom to sign</span>}
+            {scrolled&&<span style={{fontSize:11,color:"#1ea672",fontWeight:600}}>✓ Document read</span>}
+          </div>
+          <div onScroll={handleScroll}
+            style={{maxHeight:420,overflowY:"auto",padding:"24px 28px"}}>
+            <div style={{fontSize:13,color:"#1a1a2e",lineHeight:1.9,whiteSpace:"pre-wrap",fontFamily:"Georgia,serif"}}>
+              {generateCreditAgreement(customer, req, signingData.template, company)}
+            </div>
+            {!scrolled&&<div style={{height:60,background:"linear-gradient(transparent,#fff)",position:"sticky",bottom:0,display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:8}}>
+              <span style={{fontSize:11,color:"#6b7c93"}}>↓ Continue scrolling to read the full agreement</span>
+            </div>}
+          </div>
+        </div>
+
+        {/* Signature block */}
+        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,padding:"24px 28px",marginBottom:20}}>
+          <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:16}}>Sign this Agreement</div>
+          {!scrolled&&(
+            <div style={{padding:"10px 14px",background:"#f6ab2f12",border:"1px solid #f6ab2f25",borderRadius:8,fontSize:12,color:"#f6ab2f",fontWeight:600,marginBottom:16}}>
+              Please scroll through the entire document above before signing.
+            </div>
+          )}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Full Legal Name *</div>
+              <input value={signerName} onChange={function(e){setSignerName(e.target.value);}}
+                placeholder="Your full legal name" disabled={!scrolled}
+                style={{width:"100%",border:"1px solid "+(signerName.trim().length>=3&&scrolled?"#1ea672":"#e8ecef"),
+                        borderRadius:7,padding:"9px 12px",color:"#1a1a2e",fontSize:14,
+                        fontFamily:"Georgia,serif",fontStyle:"italic",boxSizing:"border-box",outline:"none",
+                        background:scrolled?"#fff":"#f6f9fc",opacity:scrolled?1:.6}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Title / Position</div>
+              <input value={signerTitle} onChange={function(e){setSignerTitle(e.target.value);}}
+                placeholder="e.g. Owner, CFO, Manager" disabled={!scrolled}
+                style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"9px 12px",
+                        color:"#1a1a2e",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",
+                        background:scrolled?"#fff":"#f6f9fc",opacity:scrolled?1:.6}}/>
+            </div>
+          </div>
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:20,cursor:"pointer"}}>
+            <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}}
+              disabled={!scrolled} style={{marginTop:2,width:14,height:14,accentColor:"#635bff"}}/>
+            <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6,opacity:scrolled?1:.6}}>
+              I have read and fully understand this Credit Account Agreement. I agree to all terms and conditions, and personally guarantee all obligations. I am authorized to sign on behalf of {customer.name||"the business"}.
+            </span>
+          </label>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={onDecline}
+              style={{flex:1,padding:"12px",borderRadius:7,border:"1px solid #e8ecef",background:"#fff",
+                      color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>
+              Decline
+            </button>
+            <button onClick={function(){
+                if(!canSign) return;
+                onSigned({signerName:signerName.trim(),signerTitle:signerTitle.trim(),signedAt:new Date().toISOString()});
+                setDone(true);
+              }}
+              disabled={!canSign}
+              style={{flex:2,padding:"12px",borderRadius:7,border:"none",
+                      background:canSign?"#635bff":"#e8ecef",
+                      color:canSign?"#fff":"#a0aec0",cursor:canSign?"pointer":"not-allowed",
+                      fontFamily:"inherit",fontWeight:800,fontSize:15,
+                      boxShadow:canSign?"0 4px 14px rgba(99,91,255,.3)":"none"}}>
+              {canSign?"Sign Agreement →":"Complete all steps above"}
+            </button>
+          </div>
+          <div style={{marginTop:12,fontSize:10,color:"#a0aec0",textAlign:"center",lineHeight:1.5}}>
+            By signing, you agree this digital signature is legally binding · {new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+function generateCreditAgreement(customer, req, template, company) {
+  var co   = company||"PreVasive USA";
+  var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+  var termsLabel = (req.approvedTerms||req.requestedTerms||"net_30").replace("_"," ").toUpperCase();
+  var limit = "$"+(req.approvedLimit||req.requestedLimit||0).toLocaleString();
+
+  var defaultTemplate = "CREDIT ACCOUNT AGREEMENT\n\n"
+    +"This Credit Account Agreement is entered into as of {{date}} between {{company_name}} (the Company) and {{customer_name}} (the Customer).\n\n"
+    +"1. CREDIT TERMS\n"
+    +"The Company hereby grants Customer a credit account with the following terms:\n"
+    +"   Payment Terms: {{terms_type}}\n"
+    +"   Credit Limit:  {{credit_limit}}\n\n"
+    +"2. PAYMENT OBLIGATIONS\n"
+    +"Customer agrees to pay all invoices in full within the approved payment terms from invoice date. "
+    +"Late payments accrue interest at 1.5% per month (18% per annum) on outstanding balances.\n\n"
+    +"3. CREDIT LIMIT\n"
+    +"The credit limit of {{credit_limit}} may not be exceeded without prior written approval. "
+    +"The Company reserves the right to reduce or revoke credit at any time based on payment history or business standing.\n\n"
+    +"4. PERSONAL GUARANTEE\n"
+    +"By signing, the authorized signer personally guarantees payment of all amounts owed by Customer under this agreement. "
+    +"This guarantee is unconditional and survives any dissolution or restructuring of the Customer business.\n\n"
+    +"5. BUSINESS STANDING\n"
+    +"Customer agrees to maintain good business standing, provide updated financial information upon request, "
+    +"and notify Company of any material changes to ownership, structure, or financial condition within 30 days.\n\n"
+    +"6. DEFAULT\n"
+    +"Failure to pay within terms, exceeding the credit limit, or material misrepresentation constitutes default. "
+    +"Company may suspend credit privileges, accelerate all outstanding balances, and pursue collection at Customer's expense.\n\n"
+    +"7. GOVERNING LAW\n"
+    +"This agreement is governed by the laws of the State of Georgia.";
+
+  var body = (template||defaultTemplate)
+    .replace(/\{\{date\}\}/g, date)
+    .replace(/\{\{company_name\}\}/g, co)
+    .replace(/\{\{customer_name\}\}/g, customer.name||"Customer")
+    .replace(/\{\{terms_type\}\}/g, termsLabel)
+    .replace(/\{\{credit_limit\}\}/g, limit)
+    .replace(/\{\{business_type\}\}/g, req.bizType||"Business")
+    .replace(/\{\{rep_name\}\}/g, req.repName||"Sales Representative");
+
+  return body;
+}
+
+function generateCreditAgreementHtml(customer, req, template, company) {
+  var body = generateCreditAgreement(customer, req, template, company);
+  var co   = company||"PreVasive USA";
+  var termsLabel = (req.approvedTerms||req.requestedTerms||"net_30").replace("_"," ").toUpperCase();
+  var limit = "$"+(req.approvedLimit||req.requestedLimit||0).toLocaleString();
+  var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+
+  return "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>"
+    +"body{font-family:-apple-system,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;font-size:13px;color:#1a1a2e;line-height:1.8}"
+    +"h1{font-size:22px;font-weight:800;color:#635bff;margin-bottom:4px}h2{font-size:13px;font-weight:700;color:#1a1a2e;margin-top:20px;margin-bottom:6px}"
+    +".meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f6f9fc;padding:16px;border-radius:8px;margin:16px 0}"
+    +".meta-item{font-size:12px}.meta-label{color:#6b7c93;font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}"
+    +".meta-value{font-weight:700;color:#1a1a2e}"
+    +".body-text{white-space:pre-wrap;font-size:13px;line-height:1.9}"
+    +".sig-block{margin-top:40px;padding:24px;border:2px solid #e8ecef;border-radius:10px;background:#fafbff}"
+    +".sig-line{border-bottom:1px solid #1a1a2e;margin:16px 0 4px;min-height:32px}"
+    +".footer{margin-top:32px;font-size:10px;color:#a0aec0;border-top:1px solid #e8ecef;padding-top:12px}"
+    +"</style></head><body>"
+    +"<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px'>"
+    +"<div><h1>"+co+"</h1><div style='font-size:11px;color:#6b7c93'>Credit Account Agreement</div></div>"
+    +"<div style='text-align:right;font-size:11px;color:#6b7c93'>Date: "+date+"<br>Ref: "+customer.id+"</div>"
+    +"</div>"
+    +"<div class='meta'>"
+    +"<div class='meta-item'><div class='meta-label'>Customer</div><div class='meta-value'>"+customer.name+"</div></div>"
+    +"<div class='meta-item'><div class='meta-label'>Business</div><div class='meta-value'>"+(req.bizType||"—")+"</div></div>"
+    +"<div class='meta-item'><div class='meta-label'>Payment Terms</div><div class='meta-value'>"+termsLabel+"</div></div>"
+    +"<div class='meta-item'><div class='meta-label'>Credit Limit</div><div class='meta-value'>"+limit+"</div></div>"
+    +"</div>"
+    +"<div class='body-text'>"+body.replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>"
+    +"<div class='sig-block'>"
+    +"<div style='font-weight:800;font-size:14px;color:#1a1a2e;margin-bottom:16px'>Digital Signatures</div>"
+    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px'>"
+    +"<div><div style='font-size:11px;color:#6b7c93;margin-bottom:4px'>Authorized Signer — Customer</div>"
+    +"<div class='sig-line'></div><div style='font-size:10px;color:#6b7c93'>Signature / Date</div></div>"
+    +"<div><div style='font-size:11px;color:#6b7c93;margin-bottom:4px'>Authorized — "+co+"</div>"
+    +"<div class='sig-line'></div><div style='font-size:10px;color:#6b7c93'>Signature / Date</div></div>"
+    +"</div></div>"
+    +"<div class='footer'>This agreement is legally binding. Generated by "+co+" CRM on "+date+".</div>"
+    +"</body></html>";
+}
+
+
+function FileUpload({files,onChange,maxFiles,accept,label}) {
+  var MAX = maxFiles||5;
+  var inputRef = {current:null};
+
+  function handleFiles(newFiles) {
+    var arr = Array.prototype.slice.call(newFiles);
+    arr = arr.filter(function(f){return f.size < 5*1024*1024;});
+    arr.slice(0,MAX-files.length).forEach(function(file){
+      var reader = new FileReader();
+      reader.onload = function(e){
+        onChange(function(prev){
+          return prev.concat([{name:file.name,size:file.size,type:file.type,dataUrl:e.target.result,addedAt:new Date().toISOString()}]).slice(0,MAX);
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function handleDrop(e){e.preventDefault();handleFiles(e.dataTransfer.files);}
+  function handleDrag(e){e.preventDefault();}
+
+  return (
+    <div>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>{label}</div>}
+      <div onDrop={handleDrop} onDragOver={handleDrag}
+        style={{border:"2px dashed "+C.border,borderRadius:10,padding:"20px",textAlign:"center",
+                cursor:"pointer",background:C.surface2,transition:"border-color .15s"}}
+        onMouseEnter={function(e){e.currentTarget.style.borderColor=C.accent;}}
+        onMouseLeave={function(e){e.currentTarget.style.borderColor=C.border;}}
+        onClick={function(){document.getElementById("fu-input").click();}}>
+        <input id="fu-input" type="file" multiple accept={accept||".pdf,.jpg,.jpeg,.png,.doc,.docx"}
+          style={{display:"none"}}
+          onChange={function(e){handleFiles(e.target.files);e.target.value="";}}/>
+        <div style={{fontSize:22,marginBottom:6}}>📎</div>
+        <div style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:3}}>
+          Drop files or click to upload
+        </div>
+        <div style={{fontSize:10,color:C.dim}}>
+          PDF, JPG, PNG, DOC · Max 5MB each · Up to {MAX} files
+        </div>
+      </div>
+      {files.length>0&&(
+        <div style={{marginTop:10}}>
+          {files.map(function(f,i){return (
+            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",
+                                 background:C.surface,border:"1px solid "+C.border,
+                                 borderRadius:8,marginBottom:6}}>
+              <span style={{fontSize:16}}>{f.type&&f.type.indexOf("pdf")>=0?"📄":f.type&&f.type.indexOf("image")>=0?"🖼":"📎"}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</div>
+                <div style={{fontSize:10,color:C.dim}}>{(f.size/1024).toFixed(0)}KB</div>
+              </div>
+              {f.dataUrl&&f.type&&f.type.indexOf("image")>=0&&(
+                <img src={f.dataUrl} alt="" style={{width:32,height:32,objectFit:"cover",borderRadius:4,border:"1px solid "+C.border}}/>
+              )}
+              <button onClick={function(e){e.stopPropagation();onChange(function(prev){return prev.filter(function(_,j){return j!==i;});});}}
+                style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 4px"}}>×</button>
+            </div>
+          );})}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+</script>
+<script id="c3" type="text/plain">
 function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
   const [reqLimit,  setReqLimit]  = useState("5000");
   const [reqTerms,  setReqTerms]  = useState("net_30");
@@ -1416,6 +1724,7 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
   const [bizType,   setBizType]   = useState("");
   const [annualRev, setAnnualRev] = useState("");
   const [err,       setErr]       = useState("");
+  const [docs,      setDocs]      = useState([]);
 
   function submit() {
     if(!reason.trim()){setErr("Please provide a reason for the terms request.");return;}
@@ -1423,6 +1732,7 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
       custId:customer.id, custName:customer.name, repId:repId, repName:repName,
       requestedLimit:parseFloat(reqLimit)||0, requestedTerms:reqTerms,
       reason:reason.trim(), bizType:bizType.trim(), annualRevenue:annualRev.trim(),
+      documents:docs.map(function(d){return {name:d.name,size:d.size,type:d.type,dataUrl:d.dataUrl};}),
       submittedAt:new Date().toISOString(), status:"pending",
     });
     addToast("Terms request submitted for "+customer.name,"success");
@@ -1448,6 +1758,11 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
         </div>
         <div style={{gridColumn:"1/-1"}}>
           <Field label="Estimated Annual Revenue ($)" value={annualRev} onChange={setAnnualRev} placeholder="e.g. 500000"/>
+        </div>
+        <div style={{gridColumn:"1/-1"}}>
+          <FileUpload files={docs} onChange={setDocs} label="Supporting Documents (optional)"
+            maxFiles={5} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"/>
+          <div style={{fontSize:10,color:C.dim,marginTop:4,marginBottom:10}}>Upload: business license, tax ID, financial statements, bank letter, etc.</div>
         </div>
         <div style={{gridColumn:"1/-1"}}>
           <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Reason for Terms Request *</div>
@@ -1696,9 +2011,6 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
-
-</script>
-<script id="c3" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,addToast,showResult}) {
   var pendingW9 = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
   var pendingApps = applications.filter(function(a){return !a.status||a.status==="pending";});
@@ -1818,7 +2130,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 
       {/* Credit Terms Requests */}
       {(function(){
-        var pendingTerms=(termsRequests||[]).filter(function(r){return r.status==="pending";});
+        var pendingTerms=(termsRequests||[]).filter(function(r){return r.status==="pending"||r.status==="approved_awaiting_signature";});
         if(!pendingTerms.length) return null;
         return (
           <div style={{marginBottom:24}}>
@@ -1841,20 +2153,46 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     <div style={{fontSize:10,color:C.dim,whiteSpace:"nowrap"}}>{fmtDate(req.submittedAt)}</div>
                   </div>
                   <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                    {/* Document viewer */}
+                    {req.documents&&req.documents.length>0&&(
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+                        {req.documents.map(function(doc,di){return (
+                          <a key={di} href={doc.dataUrl} download={doc.name} target="_blank"
+                            style={{padding:"3px 10px",borderRadius:6,border:"1px solid "+C.border,
+                                    background:C.surface2,color:C.accent,fontSize:11,fontWeight:600,
+                                    textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>
+                            📎 {doc.name}
+                          </a>
+                        );})}
+                      </div>
+                    )}
                     <Btn small variant="success" onClick={function(){
-                      var updated=Object.assign({},req,{status:"approved",approvedAt:new Date().toISOString(),approvedLimit:req.requestedLimit,approvedTerms:req.requestedTerms});
+                      var updated=Object.assign({},req,{status:"approved_awaiting_signature",
+                        approvedAt:new Date().toISOString(),
+                        approvedLimit:req.requestedLimit,approvedTerms:req.requestedTerms});
                       setTermsRequests(function(prev){return prev.map(function(r){return r.id===req.id?updated:r;});});
                       dbSave("crm_terms_requests",req.id,updated);
                       if(customers&&setCustomers) {
                         var cust=customers.find(function(x){return x.id===req.custId;});
                         if(cust){
-                          var updCust=Object.assign({},cust,{termsStatus:"approved",termsType:req.requestedTerms,termsLimit:req.requestedLimit,termsApprovedAt:new Date().toISOString()});
+                          var token=cust.id+"_"+Math.random().toString(36).slice(2,9);
+                          var co=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+                          var sigData={
+                            token:token,status:"pending",customer:cust,req:updated,
+                            company:co,template:localStorage.getItem("__pv__creditAgreementTemplate")||"",
+                            agreementHtml:generateCreditAgreementHtml(cust,updated,"",co),
+                            createdAt:new Date().toISOString()
+                          };
+                          localStorage.setItem("__pv__sign_"+token,JSON.stringify(sigData));
+                          var updCust=Object.assign({},cust,{termsStatus:"awaiting_signature",
+                            termsType:req.requestedTerms,termsLimit:req.requestedLimit,
+                            termsApprovedAt:new Date().toISOString(),termsSigningToken:token});
                           setCustomers(function(prev){return prev.map(function(x){return x.id===cust.id?updCust:x;});});
                           dbSave("crm_customers",cust.id,updCust);
                         }
                       }
-                      addToast("Terms approved for "+req.custName,"success");
-                    }}>✓ Approve {(req.requestedTerms||"").replace("_"," ").toUpperCase()} · ${(req.requestedLimit||0).toLocaleString()}</Btn>
+                      addToast("Approved — send signing link to customer","success");
+                    }}>✓ Approve & Generate Agreement</Btn>
                     <Btn small variant="ghost" onClick={function(){
                       var updated=Object.assign({},req,{status:"denied",deniedAt:new Date().toISOString()});
                       setTermsRequests(function(prev){return prev.map(function(r){return r.id===req.id?updated:r;});});
@@ -1865,6 +2203,24 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                       }
                       addToast("Terms denied for "+req.custName,"warning");
                     }}>Deny</Btn>
+                  {req.status==="approved_awaiting_signature"&&(
+                      <div style={{marginTop:10,padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"25",borderRadius:8}}>
+                        <div style={{fontSize:11,fontWeight:700,color:C.accent,marginBottom:6}}>
+                          ✓ Approved — Awaiting Customer Signature
+                        </div>
+                        <Btn small onClick={function(){
+                          var cust=customers&&customers.find(function(x){return x.id===req.custId;});
+                          var token=cust&&cust.termsSigningToken;
+                          if(token){
+                            var link=window.location.origin+window.location.pathname+"#sign="+token;
+                            navigator.clipboard.writeText(link).then(function(){addToast("Signing link copied! Send to customer.","success");});
+                          }
+                        }}>📋 Copy Customer Signing Link</Btn>
+                        <div style={{fontSize:10,color:C.dim,marginTop:6}}>
+                          Send this link to the customer to review and digitally sign the credit agreement.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );})}
@@ -1908,6 +2264,9 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 }
 
 
+
+</script>
+<script id="c4" type="text/plain">
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
   const [tab,      setTab]      = useState("docs");
   const [showForm, setShowForm] = useState(false);
@@ -2158,9 +2517,6 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
 }
 
 
-
-</script>
-<script id="c4" type="text/plain">
 function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
   const [tab, setTab] = useState("tiers");
   const [tiers, setTiers] = useLS("pricingTiers", [
@@ -2259,6 +2615,9 @@ function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
 }
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders,
                        currentUser,isAdmin,addToast,showResult}) {
   const [showForm,  setShowForm]  = useState(false);
@@ -2603,9 +2962,6 @@ function CSVImportModal({repId,onImport,onClose,addToast}) {
 }
 
 
-
-</script>
-<script id="c5" type="text/plain">
 function GlobalSearch({orders,customers,reps,quotes,products,isAdmin,onNav,onClose}) {
   const [q, setQ] = useState("");
   var s = q.trim().toLowerCase();
@@ -2736,6 +3092,9 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
   );
 }
 
+
+</script>
+<script id="c6" type="text/plain">
 function HelpModal({isAdmin,onClose}) {
   const [tab, setTab] = useState(isAdmin?"admin":"rep");
   var ADMIN_FAQ = [
@@ -3251,7 +3610,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c6" type="text/plain">
+<script id="c7" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   const [range, setRange] = useState("month");
   var now2 = new Date();
@@ -3700,7 +4059,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c7" type="text/plain">
+<script id="c8" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -4189,7 +4548,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
 
 </script>
-<script id="c8" type="text/plain">
+<script id="c9" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult}) {
   const [payTarget, setPayTarget] = useState(null); // {order, rep}
   var now = Date.now();
@@ -4304,7 +4663,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,orders,customers,commissions,reps,addToast}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -4318,7 +4677,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"export",l:"Export Data"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
   const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
@@ -4647,6 +5006,29 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
         </div>
       )}
 
+      {tab==="agreement"&&(
+        <div style={{maxWidth:700}}>
+          <div style={{padding:"12px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:16,fontSize:12,color:C.muted,lineHeight:1.6}}>
+            Customize the credit account agreement template. Use these placeholders: <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3}}>{"{{customer_name}}"}</code> <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3}}>{"{{terms_type}}"}</code> <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3}}>{"{{credit_limit}}"}</code> <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3}}>{"{{company_name}}"}</code> <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3}}>{"{{date}}"}</code> <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3}}>{"{{business_type}}"}</code>
+          </div>
+          <div style={{marginBottom:10}}>
+            <textarea value={creditAgreementTemplate||""} onChange={function(e){setCreditAgreementTemplate(e.target.value);}} rows={18}
+              placeholder={"Leave blank to use the default template with T&C, personal guarantee, and business accountability clauses."}
+              style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"12px 14px",
+                      color:C.text,fontSize:12,fontFamily:"Georgia,serif",lineHeight:1.8,
+                      boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <Btn onClick={function(){localStorage.setItem("__pv__creditAgreementTemplate",creditAgreementTemplate);addToast("Agreement template saved","success");}}>Save Template</Btn>
+            <Btn variant="ghost" onClick={function(){setCreditAgreementTemplate("");localStorage.removeItem("__pv__creditAgreementTemplate");addToast("Restored default template","info");}}>Restore Default</Btn>
+            <Btn variant="ghost" onClick={function(){
+              var html=generateCreditAgreementHtml({id:"PREVIEW",name:"Sample Customer",company:"Sample Medical Group"},{approvedTerms:"net_30",approvedLimit:5000,bizType:"Medical Clinic",repName:"Sales Rep"},"","PreVasive USA");
+              var w=window.open("","_blank");w.document.write(html);w.document.close();
+            }}>Preview Agreement</Btn>
+          </div>
+        </div>
+      )}
+
       {tab==="export"&&(
         <div style={{maxWidth:520}}>
           <div style={{marginBottom:8,fontSize:13,color:C.muted,lineHeight:1.7}}>Export your data as CSV files. Open in Excel, Google Sheets, or any spreadsheet app.</div>
@@ -4720,7 +5102,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
 /* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
-<script id="c9" type="text/plain">
+<script id="c10" type="text/plain">
 function CommissionStatement({repId,orders,commissions,repName}) {
   var now3 = new Date();
   var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -5380,7 +5762,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c10" type="text/plain">
+<script id="c11" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -5584,7 +5966,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 {c2.email&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>✉ {c2.email}</div>}
                 {c2.phone&&<div style={{fontSize:11,color:C.muted,marginBottom:4}}>📞 {c2.phone}</div>}
                 {c2.paymentTerms&&<div style={{fontSize:10,fontWeight:600,padding:"1px 7px",borderRadius:20,background:C.accent+"12",color:C.accent,display:"inline-block",marginBottom:4}}>{c2.paymentTerms.replace(/_/g," ")}</div>}
-                {c2.termsStatus==="approved"&&(
+                {(c2.termsStatus==="approved"||c2.termsStatus==="active")&&(
                   <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.success+"15",color:C.success,display:"inline-block",marginBottom:4,marginLeft:4}}>
                     ✓ {(c2.termsType||"Net 30").replace("_"," ")} · ${(c2.termsLimit||0).toLocaleString()} limit
                   </div>
@@ -5592,6 +5974,16 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 {c2.termsStatus==="pending"&&(
                   <div style={{fontSize:10,fontWeight:600,padding:"2px 8px",borderRadius:20,background:C.warning+"15",color:C.warning,display:"inline-block",marginBottom:4,marginLeft:4}}>
                     ⏳ Terms Pending
+                  </div>
+                )}
+                {c2.termsStatus==="awaiting_signature"&&(
+                  <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.accent+"15",color:C.accent,display:"inline-block",marginBottom:4,marginLeft:4}}>
+                    ✍ Awaiting Signature
+                  </div>
+                )}
+                {c2.termsStatus==="active"&&(
+                  <div style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.success+"15",color:C.success,display:"inline-block",marginBottom:4,marginLeft:4}}>
+                    ✓ Active · {(c2.termsType||"net_30").replace("_"," ")}
                   </div>
                 )}
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.dim,padding:"8px 0",borderTop:"1px solid "+C.border,marginBottom:10}}>
@@ -5745,7 +6137,7 @@ function RepCommissions({repId,orders,commissions,repName}) {
 /* ─── Rep Profile ────────────────────────────────────────────────────────── */
 
 </script>
-<script id="c11" type="text/plain">
+<script id="c12" type="text/plain">
 function RepProfile({user,repData,setReps,commissions,addToast}) {
   const [tab,   setTab]   = useState("profile");
   const [name,  setName]  = useState(user&&user.name||"");
@@ -5914,6 +6306,8 @@ function App() {
   const [resultModal, setResultModal] = useState(null);
   const [viewAsRep,   setViewAsRep]   = useState(null);
   const [inviteToken,  setInviteToken]  = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]invite=([^&]+)/);return m?m[1]:null;})());
+  const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
+  const [creditAgreementTemplate,setCreditAgreementTemplate] = useLS("creditAgreementTemplate","");
 
   // Apply theme
   Object.assign(C, THEMES[theme]||THEMES.dark);
@@ -5980,6 +6374,32 @@ function App() {
     var sb = getSB();
     if(sb) sb.auth.signOut();
     setCurrentUser(null); setActiveTab("dashboard");
+  }
+
+  // Credit agreement signing page — no auth required
+  if(signingToken) {
+    var sigData = null;
+    try { sigData = JSON.parse(localStorage.getItem("__pv__sign_"+signingToken)||"null"); } catch(e){}
+    if(sigData && sigData.status!=="signed") {
+      return React.createElement(CustomerSigningPage, {
+        signingData: sigData,
+        onSigned: function(sig) {
+          var updated = Object.assign({},sigData,{status:"signed",
+            signerName:sig.signerName,signerTitle:sig.signerTitle,signedAt:sig.signedAt});
+          localStorage.setItem("__pv__sign_"+signingToken, JSON.stringify(updated));
+          // Update customer in Supabase
+          var sb = getSB();
+          if(sb && sigData.customer && sigData.customer.id) {
+            var custPatch = {termsStatus:"active",termsSigned:true,termsSignedAt:sig.signedAt,termsSignerName:sig.signerName};
+            sb.from("crm_customers").update({data:custPatch,updated_at:new Date().toISOString()}).eq("id",sigData.customer.id);
+          }
+        },
+        onDecline: function() {
+          if(window.history) window.history.replaceState(null,"",window.location.pathname);
+          setSigningToken(null);
+        },
+      });
+    }
   }
 
   if(inviteToken) return React.createElement(InviteRegistration,{
@@ -6196,6 +6616,7 @@ function App() {
             shipStationCfg={shipStationCfg} onSaveShipStation={setShipStationCfg}
             taxCfg={taxCfg} onSaveTax={setTaxCfg}
             googleCfg={googleCfg} onSaveGoogle={setGoogleCfg}
+            creditAgreementTemplate={creditAgreementTemplate} setCreditAgreementTemplate={setCreditAgreementTemplate}
             orders={orders} customers={customers} commissions={commissions}
             reps={reps} addToast={addToast}/>
         )}
@@ -6241,7 +6662,7 @@ function App() {
 </script>
 
 <script>
-var N=12;
+var N=13;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
