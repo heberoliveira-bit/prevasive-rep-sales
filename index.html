@@ -6244,7 +6244,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var taxRate  = taxInfo ? taxInfo.rate : 0;
     var tax      = Math.round(discounted*taxRate*100)/100;
     var grand    = discounted + shipping + tax;
-    var commission = grand*(parseFloat(commRate)||0)/100;
+    var commission = discounted*(parseFloat(commRate)||0)/100; // on product subtotal only, not shipping or tax
     return {subtotal:subtotal,discount:discount,shipping:shipping,tax:tax,taxRate:taxRate,taxInfo:taxInfo,grand:grand,commission:commission};
   }
 
