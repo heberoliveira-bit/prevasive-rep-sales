@@ -129,6 +129,81 @@ var THEMES = {
 };
 var C = Object.assign({}, THEMES.dark);
 
+/* ─── Georgia Tax Rates by ZIP ─────────────────────────────────────────── */
+var GA_ZIP_TAX = (function(){
+  var f={state:0.04};
+  // Fulton (8.9%) — Atlanta, Alpharetta, Sandy Springs, Roswell, Johns Creek
+  var fulton=["30301","30302","30303","30304","30305","30306","30307","30308","30309",
+    "30310","30311","30312","30313","30314","30315","30316","30317","30318","30319",
+    "30324","30326","30327","30331","30336","30337","30338","30339","30340","30341",
+    "30342","30345","30349","30350","30360","30363","30004","30005","30009","30022",
+    "30023","30076","30077","30092","30097","30098","30328"];
+  // DeKalb (8%) — Decatur, Tucker, Stone Mountain, Lithonia
+  var dekalb=["30002","30021","30030","30031","30032","30033","30034","30035","30036",
+    "30037","30058","30071","30079","30083","30084","30085","30086","30087","30088"];
+  // Cobb (6%) — Marietta, Smyrna, Kennesaw, Acworth
+  var cobb=["30006","30007","30008","30060","30061","30062","30063","30064","30065",
+    "30075","30080","30081","30082","30101","30102","30106","30111","30126","30127",
+    "30144","30152","30160","30168","30188","30189"];
+  // Gwinnett (7%) — Lawrenceville, Duluth, Norcross, Suwanee, Buford
+  var gwinnett=["30010","30011","30017","30019","30024","30039","30042","30043","30044",
+    "30045","30046","30047","30048","30049","30052","30066","30072","30074","30078",
+    "30091","30093","30095","30096","30099"];
+  // Cherokee (7%) — Canton, Holly Springs
+  var cherokee=["30103","30107","30114","30115","30142","30143","30145","30171"];
+  // Forsyth (7%) — Cumming
+  var forsyth=["30028","30040","30041"];
+  // Clayton (8%) — Jonesboro, Riverdale, College Park
+  var clayton=["30213","30236","30237","30238","30248","30260","30273","30274","30281","30296","30297"];
+  // Clarke/Athens (8%)
+  var clarke=["30601","30602","30603","30604","30605","30606","30607","30608","30609"];
+  // Muscogee/Columbus (8%)
+  var muscogee=["31901","31902","31903","31904","31906","31907","31908","31909"];
+  // Richmond/Augusta (8%)
+  var richmond=["30901","30904","30905","30906","30907","30909","30912"];
+  // Bibb/Macon (7%)
+  var bibb=["31201","31202","31203","31204","31206","31207","31210","31211","31213","31216","31217","31220"];
+  // Chatham/Savannah (7%)
+  var chatham=["31401","31402","31403","31404","31405","31406","31407","31408","31409",
+    "31410","31411","31412","31415","31416","31418","31419","31420","31421"];
+  // Henry, Fayette, Douglas, Paulding, Newton, Rockdale (7%)
+  var other7=["30228","30253","30014","30016","30054","30012","30013","30215","30269",
+    "30290","30291","30134","30135","30137","30141","30157"];
+  // Lowndes/Valdosta, Houston/Warner Robins, Dougherty/Albany, Tift/Tifton, Glynn/Brunswick (7%)
+  var south7=["31601","31602","31603","31604","31605","31606","31088","31093","31095","31098",
+    "31701","31702","31703","31705","31707","31750","31793",
+    "31520","31521","31522","31523","31524","31525"];
+
+  var m={};
+  fulton.forEach(function(z){m[z]={rate:0.089,county:"Fulton",breakdown:"4%+4%+0.5%+0.4%"};});
+  dekalb.forEach(function(z){m[z]={rate:0.08,county:"DeKalb",breakdown:"4%+3%+1%"};});
+  cobb.forEach(function(z){m[z]={rate:0.06,county:"Cobb",breakdown:"4%+2%"};});
+  gwinnett.forEach(function(z){m[z]={rate:0.07,county:"Gwinnett",breakdown:"4%+3%"};});
+  cherokee.forEach(function(z){m[z]={rate:0.07,county:"Cherokee",breakdown:"4%+3%"};});
+  forsyth.forEach(function(z){m[z]={rate:0.07,county:"Forsyth",breakdown:"4%+3%"};});
+  clayton.forEach(function(z){m[z]={rate:0.08,county:"Clayton",breakdown:"4%+3%+1%"};});
+  clarke.forEach(function(z){m[z]={rate:0.08,county:"Clarke",breakdown:"4%+4%"};});
+  muscogee.forEach(function(z){m[z]={rate:0.08,county:"Muscogee",breakdown:"4%+4%"};});
+  richmond.forEach(function(z){m[z]={rate:0.08,county:"Richmond",breakdown:"4%+4%"};});
+  bibb.forEach(function(z){m[z]={rate:0.07,county:"Bibb",breakdown:"4%+3%"};});
+  chatham.forEach(function(z){m[z]={rate:0.07,county:"Chatham",breakdown:"4%+3%"};});
+  other7.forEach(function(z){m[z]={rate:0.07,county:"",breakdown:"4%+3%"};});
+  south7.forEach(function(z){m[z]={rate:0.07,county:"",breakdown:"4%+3%"};});
+  return m;
+})();
+
+function getGaTaxRate(zip) {
+  if(!zip) return null;
+  var clean = (zip||"").replace(/\D/g,"").slice(0,5);
+  var entry = GA_ZIP_TAX[clean];
+  if(entry) return entry;
+  // Georgia ZIPs: 30001-31999
+  var num = parseInt(clean,10);
+  if(num>=30001&&num<=31999) return {rate:0.07,county:"Georgia",breakdown:"4%+3% (default)"};
+  return null; // not in Georgia
+}
+
+
 /* ─── Order Status Flow ───────────────────────────────────────────────── */
 var CARRIER_URLS = {
   UPS:   "https://www.ups.com/track?tracknum=",
@@ -4423,9 +4498,8 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
   });
 
   function advance(order) {
-    var idx = ORDER_PIPELINE.indexOf(order.status);
-    if(idx<0||idx>=ORDER_PIPELINE.length-1) return;
-    var next = ORDER_PIPELINE[idx+1];
+    var next = getNextOrderStatus(order);
+    if(!next) return;
     var patch = {status:next};
     if(next==="Delivered") patch.deliveredAt = new Date().toISOString();
     var withAudit = addAuditEntry(Object.assign({},order,patch),"Status → "+next,currentUser&&currentUser.name);
@@ -5445,7 +5519,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,setStripeAccountA,orders,customers,commissions,reps,addToast}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -5560,16 +5634,16 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
             This account collects customer payments and funds rep commission payouts via Stripe Connect. Deploy the Edge Function below to enable automatic transfers.
           </div>
           <Field label="Publishable Key (Account A)" value={stripeAccountA&&stripeAccountA.publishableKey||""}
-            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{publishableKey:v});});}}
+            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{publishableKey:v});});}}
             placeholder="pk_live_…" hint="Used in CustomerPaymentPage for card collection"/>
           <Field label="Secret Key (Account A)" value={stripeAccountA&&stripeAccountA.secretKey||""}
-            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{secretKey:v});});}}
+            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{secretKey:v});});}}
             type="password" placeholder="sk_live_…" hint="Edge Function only — never exposed in browser"/>
           <Field label="Webhook Secret (Account A)" value={stripeAccountA&&stripeAccountA.webhookSecret||""}
-            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{webhookSecret:v});});}}
+            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{webhookSecret:v});});}}
             type="password" placeholder="whsec_…" hint="From Stripe Dashboard → Webhooks → Signing secret"/>
           <Field label="Edge Function URL" value={stripeAccountA&&stripeAccountA.edgeFnUrl||""}
-            onChange={function(v){setStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
+            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
             placeholder="https://PROJECT.supabase.co/functions/v1/stripe-payouts"
             hint="Deploy the Edge Function below, then paste its URL here"/>
           <Btn onClick={function(){addToast("Account A settings saved","success");}}>Save Account A</Btn>
@@ -5870,6 +5944,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
     +"<tfoot>"
     +(totals.discount>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Discount</td><td class='mono' style='padding:8px 12px;text-align:right;color:#1ea672'>-"+fmtMoney(totals.discount||0)+"</td></tr>":"")
     +((totals.shipping||0)>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Shipping</td><td class='mono' style='padding:8px 12px;text-align:right'>"+fmtMoney(totals.shipping||0)+"</td></tr>":"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#1ea672'>Shipping</td><td class='mono' style='padding:8px 12px;text-align:right;color:#1ea672'>Free</td></tr>")
+    +((totals.tax||0)>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Sales Tax (GA "+((totals.taxRate||0)*100).toFixed(1)+"%)</td><td class='mono' style='padding:8px 12px;text-align:right'>"+fmtMoney(totals.tax||0)+"</td></tr>":"")
     +"<tr><td colspan='3' style='padding:12px;text-align:right;font-weight:800;font-size:15px'>Total Due</td><td class='mono' style='padding:12px;text-align:right;font-weight:900;font-size:18px;color:#635bff'>"+fmtMoney(totals.grand||0)+"</td></tr>"
     +"</tfoot></table>"
     +"<div style='margin-top:32px;padding-top:20px;border-top:1px solid #e8ecef;color:#6b7c93;font-size:11px;line-height:1.7'>"+(cfg.footer||"Thank you for your business.")+"</div>"
@@ -6164,9 +6239,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     }
     var discounted = subtotal - discount;
     var shipping   = calcShipping(subtotal);
-    var grand      = discounted + shipping;
+    // Georgia tax — lookup by customer zip
+    var taxInfo  = selCust ? getGaTaxRate(selCust.zip) : null;
+    var taxRate  = taxInfo ? taxInfo.rate : 0;
+    var tax      = Math.round(discounted*taxRate*100)/100;
+    var grand    = discounted + shipping + tax;
     var commission = grand*(parseFloat(commRate)||0)/100;
-    return {subtotal:subtotal,discount:discount,shipping:shipping,tax:0,grand:grand,commission:commission};
+    return {subtotal:subtotal,discount:discount,shipping:shipping,tax:tax,taxRate:taxRate,taxInfo:taxInfo,grand:grand,commission:commission};
   }
 
   function step1Valid() {
@@ -6515,6 +6594,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount)],
                   totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
                   totals.shipping===0&&["Shipping","Free ✓"],
+                  totals.tax>0&&["Tax ("+(totals.taxInfo&&totals.taxInfo.county?totals.taxInfo.county+" ":"")+(((totals.taxRate||0)*100).toFixed(1))+"%)","+ "+fmtMoney(totals.tax)],
                   ["Commission ("+commRate+"%)",fmtMoney(totals.commission)],
                 ].filter(Boolean).map(function(row,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
@@ -6553,6 +6633,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Order Summary</div>
                 {[["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
                   ["Shipping",totals.shipping===0?"Free ✓":"$"+totals.shipping.toFixed(2)],
+                  totals.tax>0&&["Tax",(((totals.taxRate||0)*100).toFixed(1))+"% = "+fmtMoney(totals.tax)],
                   ["Payment",payMethod.replace(/_/g," ")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
                   ["Grand Total",fmtMoney(totals.grand)]].map(function(row,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.border}}>
@@ -7455,6 +7536,8 @@ function App() {
     dbLoad("crm_legal_docs").then(function(d){if(alive) setLegalDocs(d);});
     dbLoad("crm_legal_signatures").then(function(d){if(alive) setSignatures(d);});
     dbLoad("crm_quotes").then(function(d){if(alive) setQuotes(d);});
+    dbLoad("crm_terms_requests").then(function(d){if(alive) setTermsRequests(d);});
+    dbLoad("crm_payout_requests").then(function(d){if(alive) setPayoutRequests(d);});
     Promise.all([]).then(function(){if(alive) setDataLoading(false);}); 
     return function(){alive=false;};
   }, [currentUser&&currentUser.id]);
