@@ -4832,6 +4832,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [discCode,   setDiscCode]   = useState("");
   const [discApplied,setDiscApplied]= useState(null);
   const [discErr,    setDiscErr]    = useState("");
+  const [shippingOverride,setShippingOverride] = useState(null);
 
   function applyDiscount() {
     if(!discCode.trim()) return;
