@@ -1,26 +1,12 @@
-<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>PreVasive Rep Sales</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PreVasive Rep Sales</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
-<style>
-  *{box-sizing:border-box;margin:0;padding:0}
-  body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;transition:background .2s,color .2s;}
-  #root{min-height:100vh}
-  #err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}
-  input,button,select,textarea,details,summary{font-family:"Inter",system-ui,-apple-system,sans-serif;}
-  ::-webkit-scrollbar{width:4px;height:4px}
-  ::-webkit-scrollbar-thumb{background:#1e2d40;border-radius:2px}
-  ::-webkit-scrollbar-thumb:hover{background:#635bff}
-  @keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
-  @keyframes spin{to{transform:rotate(360deg)}}
-</style>
-</head><body>
-<div id="err"></div><div id="root"></div>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;transition:background .2s,color .2s;}#root{min-height:100vh}#err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}input,button,select,textarea,details,summary{font-family:"Inter",system-ui,-apple-system,sans-serif;}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#1e2d40;border-radius:2px}::-webkit-scrollbar-thumb:hover{background:#635bff}@keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}</style>
+</head><body><div id="err"></div><div id="root"></div>
 <script id="c0" type="text/plain">
 /* PreVasive Rep Sales CRM — v1 */
 
@@ -40,6 +26,7 @@ var STATUS_COLOR = {
   Paid:{c:"#1ea672",bg:"rgba(30,166,114,.22)"},
   Cancelled:{c:"#df1b41",bg:"rgba(223,27,65,.12)"},
   Refunded:{c:"#df1b41",bg:"rgba(223,27,65,.12)"},
+  Returned:{c:"#f6ab2f",bg:"rgba(246,171,47,.12)"},
 };
 
 /* ─── Supabase ───────────────────────────────────────────────────────────── */
@@ -4206,7 +4193,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,orders,customers,commissions,reps,addToast}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -4220,7 +4207,8 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"export",l:"Export Data"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"export",l:"Export Data"}];
+  const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
   const [invFooter,setInvFooter] = useState((invoiceCfg&&invoiceCfg.footer)||"Thank you for your business.");
@@ -4391,6 +4379,69 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
         </div>
       )}
 
+      {tab==="shipping"&&(
+        <div style={{maxWidth:560}}>
+          <div style={{padding:"12px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:20,fontSize:12,color:C.muted,lineHeight:1.6}}>
+            Flat-rate shipping tiers auto-apply at checkout based on order subtotal. Reps can override per order.
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:20}}>
+            <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,fontWeight:700,fontSize:13,color:C.text}}>Add Shipping Rule</div>
+            <div style={{padding:"16px",display:"grid",gridTemplateColumns:"2fr 1fr 1fr auto",gap:10,alignItems:"flex-end"}}>
+              {[["Label",newSrLabel,setNewSrLabel,"text","e.g. Standard"],["Max Order ($)",newSrMax,setNewSrMax,"number","500"],["Rate ($)",newSrRate,setNewSrRate,"number","0 = Free"]].map(function(f){return (
+                <div key={f[0]}>
+                  <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>{f[0]}</div>
+                  <input value={f[1]} onChange={function(e){f[2](e.target.value);}} type={f[3]} placeholder={f[4]}
+                    style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                </div>
+              );})}
+              <div style={{paddingBottom:2}}>
+                <Btn small onClick={function(){
+                  if(!newSrLabel.trim()||!newSrMax) return;
+                  var rule={id:genId("sr"),label:newSrLabel.trim(),maxOrder:parseFloat(newSrMax)||0,rate:parseFloat(newSrRate)||0,active:true};
+                  onSaveShippingRules(function(prev){return prev.concat([rule]).sort(function(a,b){return a.maxOrder-b.maxOrder;});});
+                  setNewSrLabel(""); setNewSrMax(""); setNewSrRate("");
+                  addToast("Shipping rule added","success");
+                }}>Add</Btn>
+              </div>
+            </div>
+          </div>
+          {(shippingRules||[]).length===0 ? (
+            <EmptyState icon="📦" title="No shipping rules" subtitle="Add rules above. Orders default to free shipping when no rules match."/>
+          ) : (
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead><tr style={{background:C.surface2}}>
+                  {["Label","Max Order","Rate","Status",""].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
+                </tr></thead>
+                <tbody>
+                  {(shippingRules||[]).sort(function(a,b){return a.maxOrder-b.maxOrder;}).map(function(r){return (
+                    <tr key={r.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 14px",fontWeight:600,fontSize:13,color:C.text}}>{r.label}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.muted}}>{"≤ $"+r.maxOrder}</td>
+                      <td style={{padding:"10px 14px",fontSize:13,fontWeight:700,fontFamily:"monospace",color:r.rate===0?C.success:C.text}}>{r.rate===0?"Free":"$"+r.rate}</td>
+                      <td style={{padding:"10px 14px"}}>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:r.active!==false?C.success+"18":C.surface2,color:r.active!==false?C.success:C.dim}}>{r.active!==false?"Active":"Off"}</span>
+                      </td>
+                      <td style={{padding:"10px 14px"}}>
+                        <div style={{display:"flex",gap:6}}>
+                          <Btn small variant="ghost" onClick={function(){onSaveShippingRules(function(prev){return prev.map(function(x){return x.id===r.id?Object.assign({},x,{active:x.active===false}):x;});});}}>
+                            {r.active!==false?"Disable":"Enable"}
+                          </Btn>
+                          <Btn small variant="danger" onClick={function(){onSaveShippingRules(function(prev){return prev.filter(function(x){return x.id!==r.id;});});}}>Delete</Btn>
+                        </div>
+                      </td>
+                    </tr>
+                  );})}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div style={{marginTop:16,padding:"12px 14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border,fontSize:12,color:C.muted,lineHeight:1.7}}>
+            <strong style={{color:C.text}}>How it works:</strong> Rules apply in order by max order value. When a customer's subtotal falls under a tier's max, that rate applies. For free shipping on large orders, set the highest tier's rate to $0.
+          </div>
+        </div>
+      )}
+
       {tab==="invoice"&&(
         <div style={{maxWidth:480}}>
           <div style={{padding:"12px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:20,fontSize:12,color:C.muted}}>
@@ -4541,6 +4592,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
     +"<table><thead><tr><th class='th' style='text-align:left'>Product</th><th class='th' style='text-align:center'>Qty</th><th class='th' style='text-align:right'>Unit Price</th><th class='th' style='text-align:right'>Total</th></tr></thead><tbody>"+rows+"</tbody>"
     +"<tfoot>"
     +(totals.discount>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Discount</td><td class='mono' style='padding:8px 12px;text-align:right;color:#1ea672'>-"+fmtMoney(totals.discount||0)+"</td></tr>":"")
+    +((totals.shipping||0)>0?"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#6b7c93'>Shipping</td><td class='mono' style='padding:8px 12px;text-align:right'>"+fmtMoney(totals.shipping||0)+"</td></tr>":"<tr><td colspan='3' style='padding:8px 12px;text-align:right;color:#1ea672'>Shipping</td><td class='mono' style='padding:8px 12px;text-align:right;color:#1ea672'>Free</td></tr>")
     +"<tr><td colspan='3' style='padding:12px;text-align:right;font-weight:800;font-size:15px'>Total Due</td><td class='mono' style='padding:12px;text-align:right;font-weight:900;font-size:18px;color:#635bff'>"+fmtMoney(totals.grand||0)+"</td></tr>"
     +"</tfoot></table>"
     +"<div style='margin-top:32px;padding-top:20px;border-top:1px solid #e8ecef;color:#6b7c93;font-size:11px;line-height:1.7'>"+(cfg.footer||"Thank you for your business.")+"</div>"
@@ -4762,7 +4814,7 @@ function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult})
 
 /* ─── Order Form (3-step) ────────────────────────────────────────────────── */
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
-                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate}) {
+                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules}) {
   const [step,       setStep]       = useState(1);
   const [custId,     setCustId]     = useState((editOrder&&editOrder.custId)||"");
   const [newCust,    setNewCust]    = useState(false);
@@ -4795,6 +4847,15 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   });
   var selCust = customers.find(function(c2){return c2.id===custId;})||null;
 
+  function calcShipping(subtotal) {
+    if(shippingOverride!==null) return parseFloat(shippingOverride)||0;
+    if(!shippingRules||!shippingRules.length) return 0;
+    var active = (shippingRules||[]).filter(function(r){return r.active!==false;})
+      .sort(function(a,b){return a.maxOrder-b.maxOrder;});
+    var rule = active.find(function(r){return subtotal<=r.maxOrder;});
+    return rule ? (rule.rate||0) : 0;
+  }
+
   function calcTotals() {
     var subtotal = items.reduce(function(s,it){
       var p=products.find(function(x){return x.id===it.prodId;});
@@ -4804,9 +4865,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(discApplied) {
       discount = discApplied.type==="percent" ? subtotal*(discApplied.value/100) : Math.min(discApplied.value,subtotal);
     }
-    var discounted = subtotal-discount;
-    var commission = discounted*(parseFloat(commRate)||0)/100;
-    return {subtotal:subtotal,discount:discount,shipping:0,tax:0,grand:discounted,commission:commission};
+    var discounted = subtotal - discount;
+    var shipping   = calcShipping(subtotal);
+    var grand      = discounted + shipping;
+    var commission = grand*(parseFloat(commRate)||0)/100;
+    return {subtotal:subtotal,discount:discount,shipping:shipping,tax:0,grand:grand,commission:commission};
   }
 
   function step1Valid() {
@@ -4994,14 +5057,78 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 </div>
               </div>
 
+              {/* Shipping */}
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Shipping</div>
+                {(function(){
+                  var active=(shippingRules||[]).filter(function(r){return r.active!==false;})
+                    .sort(function(a,b){return a.maxOrder-b.maxOrder;});
+                  var autoRule=active.find(function(r){return totals.subtotal<=(r.maxOrder||999999);});
+                  return (
+                    <div>
+                      {active.length>0&&(
+                        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                          {active.map(function(r){
+                            var isMatch=autoRule&&autoRule.id===r.id&&shippingOverride===null;
+                            return (
+                              <div key={r.id} style={{padding:"6px 10px",borderRadius:8,fontSize:11,
+                                background:isMatch?C.accent+"12":C.surface2,
+                                border:"1px solid "+(isMatch?C.accent:C.border),
+                                color:isMatch?C.accent:C.muted,fontWeight:isMatch?700:400}}>
+                                {r.label}: <strong>{r.rate===0?"Free":"$"+r.rate}</strong>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6,flex:1,
+                                     background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"7px 10px"}}>
+                          <span style={{fontSize:12,color:C.dim}}>$</span>
+                          <input type="number" min="0" step="0.01"
+                            value={shippingOverride!==null?shippingOverride:totals.shipping}
+                            onChange={function(e){setShippingOverride(e.target.value);}}
+                            placeholder={String(totals.shipping)}
+                            style={{flex:1,background:"none",border:"none",color:C.text,fontSize:13,
+                                    fontFamily:"monospace",outline:"none"}}/>
+                        </div>
+                        {shippingOverride!==null&&(
+                          <button onClick={function(){setShippingOverride(null);}}
+                            style={{padding:"7px 10px",borderRadius:7,border:"1px solid "+C.border,
+                                    background:"none",color:C.accent,cursor:"pointer",
+                                    fontFamily:"inherit",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+                            ↺ Auto
+                          </button>
+                        )}
+                      </div>
+                      {shippingOverride!==null&&(
+                        <div style={{fontSize:10,color:C.accent,marginTop:4}}>
+                          ✎ Manual override — click Auto to restore rule-based rate
+                        </div>
+                      )}
+                      {shippingOverride===null&&autoRule&&autoRule.rate===0&&(
+                        <div style={{fontSize:10,color:C.success,marginTop:4,fontWeight:600}}>
+                          ✓ Free shipping applies to this order
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
               {/* Totals */}
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",border:"1px solid "+C.border}}>
-                {[["Subtotal",fmtMoney(totals.subtotal),false],
-                  totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount),false],
-                  ["Commission ("+commRate+"%)",fmtMoney(totals.commission),false],
+                {[["Subtotal",fmtMoney(totals.subtotal)],
+                  totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount)],
+                  totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
+                  totals.shipping===0&&["Shipping","Free ✓"],
+                  ["Commission ("+commRate+"%)",fmtMoney(totals.commission)],
                 ].filter(Boolean).map(function(row,i){return (
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
-                    <span>{row[0]}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{row[1]}</span>
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                       color:row[0]==="Shipping"&&totals.shipping===0?C.success:C.muted,marginBottom:6}}>
+                    <span>{row[0]}</span>
+                    <span style={{fontFamily:"monospace",fontWeight:600,
+                                  color:row[0]==="Shipping"&&totals.shipping===0?C.success:"inherit"}}>{row[1]}</span>
                   </div>
                 );})}
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:900,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}>
@@ -5032,6 +5159,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid "+C.border}}>
                 <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Order Summary</div>
                 {[["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
+                  ["Shipping",totals.shipping===0?"Free ✓":"$"+totals.shipping.toFixed(2)],
                   ["Payment",payMethod.replace(/_/g," ")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
                   ["Grand Total",fmtMoney(totals.grand)]].map(function(row,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.border}}>
@@ -5150,7 +5278,7 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 }
 
 /* ─── Rep Orders ─────────────────────────────────────────────────────────── */
-function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes}) {
+function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules}) {
   const [showForm, setShowForm] = useState(false);
   const [filter,   setFilter]   = useState("all");
   const [viewOrd,  setViewOrd]  = useState(null);
@@ -5229,7 +5357,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
         repId:repId,repName:repName,products:products,customers:customers,
         setCustomers:setCustomers,setOrders:setOrders,
         editOrder:null,onClose:function(){setShowForm(false);},
-        addToast:addToast,showResult:showResult,discountCodes:discountCodes,repData:repData,
+        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,repData:repData,
       })}
     </div>
   );
@@ -5546,6 +5674,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
+  C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
   const [currentUser, setCurrentUser] = useState(null);
   const [loading,     setLoading]     = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
@@ -5565,6 +5694,11 @@ function App() {
     setNotifications(function(prev){return [{id:Date.now(),ts:new Date().toISOString(),msg:msg,type:type||"info",read:false}].concat(prev).slice(0,50);});
   }
   const [quotes,        setQuotes]        = useState([]);
+  const [shippingRules, setShippingRules] = useLS("shippingRules", [
+    {id:"sr1",label:"Under $500",maxOrder:500,rate:25,active:true},
+    {id:"sr2",label:"$500 – $2,000",maxOrder:2000,rate:15,active:true},
+    {id:"sr3",label:"Over $2,000",maxOrder:999999,rate:0,label2:"Free",active:true},
+  ]);
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",enabled:false});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
@@ -5595,20 +5729,27 @@ function App() {
   useEffect(function() {
     var sb = getSB();
     if(!sb) { setLoading(false); return; }
-    sb.auth.getSession()
-      .then(function(r){
-        var session = r.data&&r.data.session;
-        if(!session) { setLoading(false); return; }
-        return sb.from("crm_users").select("*").eq("id",session.user.id).single()
-          .then(function(ur){
-            if(ur.data) setCurrentUser(Object.assign({},ur.data,{email:session.user.email}));
-            setLoading(false);
-          });
-      })
-      .catch(function(e){
-        console.warn("Session restore error:",e.message);
-        setLoading(false);
-      });
+
+    function loadUser(session) {
+      if(!session) { setCurrentUser(null); setLoading(false); return; }
+      sb.from("crm_users").select("*").eq("id",session.user.id).single()
+        .then(function(ur){
+          if(ur.data) setCurrentUser(Object.assign({},ur.data,{email:session.user.email}));
+          else setCurrentUser(null);
+          setLoading(false);
+        }).catch(function(){ setLoading(false); });
+    }
+
+    sb.auth.getSession().then(function(r){
+      loadUser(r.data&&r.data.session);
+    }).catch(function(){ setLoading(false); });
+
+    var authListener = sb.auth.onAuthStateChange(function(event,session){
+      if(event==="SIGNED_IN")  loadUser(session);
+      if(event==="SIGNED_OUT") { setCurrentUser(null); setActiveTab("dashboard"); }
+      if(event==="TOKEN_REFRESHED") loadUser(session);
+    });
+    return function(){ authListener&&authListener.data&&authListener.data.subscription&&authListener.data.subscription.unsubscribe(); };
   }, []);
 
   // Load data when logged in
@@ -5844,6 +5985,7 @@ function App() {
           <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg}
             discountCodes={discountCodes} onSaveDiscountCodes={setDiscountCodes}
             invoiceCfg={invoiceCfg} onSaveInvoice={setInvoiceCfg}
+            shippingRules={shippingRules} onSaveShippingRules={setShippingRules}
             shipStationCfg={shipStationCfg} onSaveShipStation={setShipStationCfg}
             taxCfg={taxCfg} onSaveTax={setTaxCfg}
             googleCfg={googleCfg} onSaveGoogle={setGoogleCfg}
@@ -5860,7 +6002,8 @@ function App() {
           <RepOrders repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
             currentUser={effectiveUser} repData={myRepData} orders={orders} customers={customers} products={products}
             setOrders={setOrders} setCustomers={setCustomers}
-            addToast={addToast} showResult={showResult} discountCodes={discountCodes}/>
+            addToast={addToast} showResult={showResult} discountCodes={discountCodes}
+            shippingRules={shippingRules}/>
         )}
         {!isAdmin&&activeTab==="customers"&&(
           <RepCustomers repId={effectiveUser.rep_id||effectiveUser.id}
@@ -5895,13 +6038,9 @@ window.addEventListener('load',function(){
   function showErr(m){e.style.display='block';e.textContent=m;}
   try{
     var code='const {useState,useCallback,useRef,useEffect}=React;\n';
-    for(var i=0;i<N;i++){
-      var src=document.getElementById('c'+i).textContent;
-      code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';
-    }
+    for(var i=0;i<N;i++){var src=document.getElementById('c'+i).textContent;code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';}
     code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(App));';
     new Function('React','ReactDOM',code)(React,ReactDOM);
   }catch(ex){showErr('Error: '+ex.message+'\n\n'+(ex.stack||''));}
 });
-</script>
-</body></html>
+</script></body></html>
