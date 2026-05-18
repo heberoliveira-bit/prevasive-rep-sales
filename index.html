@@ -6271,7 +6271,7 @@ function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult})
 
 /* ─── Order Form (3-step) ────────────────────────────────────────────────── */
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
-                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules}) {
+                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules,currentUser}) {
   const [step,       setStep]       = useState(1);
   const [custId,     setCustId]     = useState((editOrder&&editOrder.custId)||"");
   const [newCust,    setNewCust]    = useState(false);
@@ -6619,7 +6619,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
                   // No approved terms — show manual options
                   var opts = [
-                    {v:"due_receipt", l:"Due on Receipt", sub:"Payment due upon delivery — invoice sent with shipment", card:false},
+                    {v:"due_receipt", l:"Due on Receipt", sub:"", card:false},
                   ];
                   if(termsPending) opts.push({v:"__pending",l:"Net Terms — Pending Admin Approval",sub:"Submit request from customer profile first",card:false,disabled:true});
 
@@ -7066,7 +7066,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
         repId:repId,repName:repName,products:products,customers:customers,
         setCustomers:setCustomers,setOrders:setOrders,
         editOrder:null,onClose:function(){setShowForm(false);},
-        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,repData:repData,
+        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,currentUser:currentUser,repData:repData,
       })}
     </div>
   );
