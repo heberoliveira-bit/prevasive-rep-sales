@@ -2668,7 +2668,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
   const [fulfillTarget, setFulfillTarget] = useState(null);
   var pendingW9       = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
   var submittedOrders = (orders||[]).filter(function(o){return o.status==="Submitted";});
-  var historyTerms     = (termsRequests||[]).filter(function(r){return r.status==="approved"||r.status==="denied"||r.status==="approved_awaiting_signature";});
+  var historyTerms     = (termsRequests||[]).filter(function(r){return r.status==="approved"||r.status==="denied"||r.status==="approved_awaiting_signature"||r.status==="signed";});
   var pendingTermsAll  = (termsRequests||[]).filter(function(r){return r.status==="pending"||r.status==="approved_awaiting_signature";});
   var pendingApps = applications.filter(function(a){return !a.status||a.status==="pending";});
   var pendingReps = reps.filter(function(r){return r.status==="pending";});
@@ -2744,8 +2744,9 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                 </tr></thead>
                 <tbody>
                   {historyTerms.sort(function(a,b){return new Date(b.approvedAt||b.submittedAt)-new Date(a.approvedAt||a.submittedAt);}).map(function(req){
-                    var approved = req.status==="approved"||req.status==="approved_awaiting_signature";
+                    var approved = req.status==="approved"||req.status==="approved_awaiting_signature"||req.status==="signed";
                     var sc = approved?C.success:C.danger;
+                    var statusLabel = req.status==="signed"?"✓ Signed & Active":req.status==="approved_awaiting_signature"?"✍ Awaiting Signature":approved?"✓ Approved":"✗ Denied";
                     var cust = customers&&customers.find(function(x){return x.id===req.custId;});
                     return (
                       <tr key={req.id} style={{borderTop:"1px solid "+C.border}}>
@@ -2759,7 +2760,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                         <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.gold}}>${(req.approvedLimit||req.requestedLimit||0).toLocaleString()}</td>
                         <td style={{padding:"10px 14px"}}>
                           <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"15",color:sc}}>
-                            {approved?"✓ Approved":"✗ Denied"}
+                            {statusLabel}
                           </span>
                         </td>
                         <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(req.approvedAt||req.deniedAt||req.submittedAt)}</td>
@@ -3006,19 +3007,40 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     }}>Deny</Btn>
                   {req.status==="approved_awaiting_signature"&&(
                       <div style={{marginTop:10,padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"25",borderRadius:8}}>
-                        <div style={{fontSize:11,fontWeight:700,color:C.accent,marginBottom:6}}>
+                        <div style={{fontSize:11,fontWeight:700,color:C.accent,marginBottom:8}}>
                           ✓ Approved — Awaiting Customer Signature
                         </div>
-                        <Btn small onClick={function(){
-                          var cust=customers&&customers.find(function(x){return x.id===req.custId;});
-                          var token=cust&&cust.termsSigningToken;
-                          if(token){
-                            var link=window.location.origin+window.location.pathname+"#sign="+token;
-                            navigator.clipboard.writeText(link).then(function(){addToast("Signing link copied! Send to customer.","success");});
-                          }
-                        }}>📋 Copy Customer Signing Link</Btn>
+                        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                          <Btn small onClick={function(){
+                            var cust=customers&&customers.find(function(x){return x.id===req.custId;});
+                            var token=cust&&cust.termsSigningToken;
+                            if(token){
+                              var link=window.location.origin+window.location.pathname+"#sign="+token;
+                              navigator.clipboard.writeText(link).then(function(){addToast("Signing link copied!","success");});
+                            }
+                          }}>📋 Copy Signing Link</Btn>
+                          <Btn small variant="ghost" onClick={function(){
+                            var sb=getSB();
+                            if(!sb){addToast("Supabase not connected","warning");return;}
+                            sb.from("crm_customers").select("data").eq("id",req.custId).single()
+                              .then(function(res){
+                                var d=res&&res.data&&res.data.data;
+                                if(d&&d.termsStatus==="active"){
+                                  setCustomers(function(prev){return prev.map(function(x){
+                                    return x.id===req.custId?Object.assign({},x,d):x;
+                                  });});
+                                  var upReq=Object.assign({},req,{status:"signed",signedAt:d.termsSignedAt});
+                                  setTermsRequests(function(prev){return prev.map(function(r){return r.id===req.id?upReq:r;});});
+                                  dbSave("crm_terms_requests",req.id,upReq);
+                                  addToast("✓ Agreement signed — terms now active!","success");
+                                } else {
+                                  addToast("Not signed yet — customer has not completed the agreement.","info");
+                                }
+                              }).catch(function(){addToast("Could not reach Supabase","danger");});
+                          }}>🔄 Check if Signed</Btn>
+                        </div>
                         <div style={{fontSize:10,color:C.dim,marginTop:6}}>
-                          Send this link to the customer to review and digitally sign the credit agreement.
+                          Send the signing link to your customer. Click "Check if Signed" after they complete it.
                         </div>
                       </div>
                     )}
@@ -7766,14 +7788,44 @@ function App() {
       return React.createElement(CustomerSigningPage, {
         signingData: sigData,
         onSigned: function(sig) {
-          var updated = Object.assign({},sigData,{status:"signed",
+          var updatedSig = Object.assign({},sigData,{status:"signed",
             signerName:sig.signerName,signerTitle:sig.signerTitle,signedAt:sig.signedAt});
-          localStorage.setItem("__pv__sign_"+signingToken, JSON.stringify(updated));
-          // Update customer in Supabase
+          localStorage.setItem("__pv__sign_"+signingToken, JSON.stringify(updatedSig));
           var sb = getSB();
           if(sb && sigData.customer && sigData.customer.id) {
-            var custPatch = {termsStatus:"active",termsSigned:true,termsSignedAt:sig.signedAt,termsSignerName:sig.signerName};
-            sb.from("crm_customers").update({data:custPatch,updated_at:new Date().toISOString()}).eq("id",sigData.customer.id);
+            // Merge signing data INTO existing customer — do NOT overwrite entire record
+            var updatedCust = Object.assign({},sigData.customer,{
+              termsStatus:"active",
+              termsSigned:true,
+              termsSignedAt:sig.signedAt,
+              termsSignerName:sig.signerName,
+              termsSignerTitle:sig.signerTitle||"",
+            });
+            sb.from("crm_customers")
+              .update({data:updatedCust,updated_at:new Date().toISOString()})
+              .eq("id",sigData.customer.id)
+              .then(function(){
+                // Update in-memory customers state so admin sees change immediately
+                setCustomers(function(prev){return prev.map(function(x){
+                  return x.id===sigData.customer.id?updatedCust:x;
+                });});
+              });
+            // Also update the terms request record to "signed"
+            if(sigData.req&&sigData.req.id) {
+              var updatedReq = Object.assign({},sigData.req,{
+                status:"signed",
+                signedAt:sig.signedAt,
+                signerName:sig.signerName,
+              });
+              sb.from("crm_terms_requests")
+                .update({data:updatedReq,updated_at:new Date().toISOString()})
+                .eq("id",sigData.req.id)
+                .then(function(){
+                  setTermsRequests(function(prev){return prev.map(function(x){
+                    return x.id===sigData.req.id?updatedReq:x;
+                  });});
+                });
+            }
           }
         },
         onDecline: function() {
