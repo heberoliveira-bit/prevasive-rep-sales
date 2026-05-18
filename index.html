@@ -1717,6 +1717,7 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
             <tbody>
               {items.map(function(it,i){
                 var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+                var cup=it.customerPrice||p.price||0;
                 return (
                   <tr key={i} style={{borderTop:"1px solid #e8ecef"}}>
                     <td style={{padding:"10px 14px",fontSize:13,color:"#1a1a2e",fontWeight:600}}>{p.name}</td>
@@ -2123,6 +2124,100 @@ function FileUpload({files,onChange,maxFiles,accept,label}) {
 }
 
 
+function CustomerEditModal({customer,onSave,onClose,addToast}) {
+  var approved = customer.termsStatus==="active"||customer.termsStatus==="awaiting_signature"||customer.termsStatus==="approved";
+  const [email,   setEmail]   = useState(customer.email||"");
+  const [phone,   setPhone]   = useState(customer.phone||"");
+  const [company, setCompany] = useState(customer.company||"");
+  const [addr,    setAddr]    = useState(customer.address||"");
+  const [city,    setCity]    = useState(customer.city||"");
+  const [state2,  setState2]  = useState(customer.state||"");
+  const [zip,     setZip]     = useState(customer.zip||"");
+  // Name only editable if NOT approved
+  const [name,    setName]    = useState(customer.name||"");
+
+  function save() {
+    if(!name.trim()){return;}
+    var updated = Object.assign({},customer,{
+      name:approved?customer.name:name.trim(), // lock name if approved
+      email:email.trim(), phone:phone.trim(),
+      company:company.trim(), address:addr.trim(),
+      city:city.trim(), state:state2.trim(), zip:zip.trim(),
+      updatedAt:new Date().toISOString(),
+    });
+    onSave(updated);
+    addToast("Customer updated","success");
+    onClose();
+  }
+
+  return (
+    <Modal title={"Edit Customer — "+customer.name} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={save}>Save Changes</Btn>
+      </div>}>
+
+      {approved&&(
+        <div style={{padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:16,fontSize:12,color:C.warning,fontWeight:600}}>
+          ⚠ This customer has an approved credit account. Name cannot be changed.
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        {/* Name — locked if approved */}
+        <div style={{gridColumn:"1/-1"}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>
+            Full Name {approved&&<span style={{color:C.warning,fontSize:10}}>🔒 Locked</span>}
+          </div>
+          <input value={approved?customer.name:name}
+            onChange={function(e){if(!approved)setName(e.target.value);}}
+            disabled={approved}
+            style={{width:"100%",background:approved?C.surface2:C.bg,border:"1px solid "+C.border,
+                    borderRadius:7,padding:"8px 12px",color:approved?C.dim:C.text,
+                    fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",
+                    opacity:approved?0.7:1,cursor:approved?"not-allowed":"text"}}/>
+        </div>
+
+        <div style={{gridColumn:"1/-1"}}>
+          <Field label="Company / Practice Name" value={company} onChange={setCompany}
+            placeholder="e.g. Atlanta Medical Group"/>
+        </div>
+
+        <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
+
+        <div style={{gridColumn:"1/-1",fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em"}}>Contact</div>
+
+        <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="email@practice.com"/>
+        <Field label="Phone" value={phone} onChange={setPhone} placeholder="(404) 555-0100"/>
+
+        <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
+
+        <div style={{gridColumn:"1/-1",fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em"}}>Address</div>
+
+        <div style={{gridColumn:"1/-1"}}>
+          <Field label="Street Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/>
+        </div>
+        <Field label="City" value={city} onChange={setCity}/>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+          <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
+          <Field label="ZIP" value={zip} onChange={setZip} placeholder="30309"/>
+        </div>
+
+        {zip&&getGaTaxRate(zip)&&(
+          <div style={{gridColumn:"1/-1",padding:"8px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:7,fontSize:11,color:C.muted,display:"flex",justifyContent:"space-between"}}>
+            <span>📍 {getGaTaxRate(zip).county} County, Georgia</span>
+            <span style={{fontWeight:700,color:C.accent}}>{((getGaTaxRate(zip).rate||0)*100).toFixed(1)}% sales tax</span>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+
+
+</script>
+<script id="c4" type="text/plain">
 function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
   const [reqLimit,  setReqLimit]  = useState("5000");
   const [reqTerms,  setReqTerms]  = useState("net_30");
@@ -2282,9 +2377,118 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
 }
 
 
+function CollectPaymentModal({order,onCollect,onClose,addToast}) {
+  var totals = order.totals||{};
+  const [method,     setMethod]     = useState("card");
+  const [cardHolder, setCardHolder] = useState(order.custName||"");
+  const [cardLast4,  setCardLast4]  = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [cardZip,    setCardZip]    = useState("");
+  const [ref,        setRef]        = useState("");
+  const [collecting, setCollecting] = useState(false);
 
-</script>
-<script id="c4" type="text/plain">
+  var canCollect = method==="card" ? cardLast4.length===4&&cardExpiry.length===5 : ref.trim().length>0;
+
+  function collect() {
+    if(!canCollect) return;
+    setCollecting(true);
+    var payRef = method==="card"
+      ? {type:"card",holder:cardHolder,last4:cardLast4,expiry:cardExpiry,zip:cardZip}
+      : {type:method,ref:ref.trim()};
+    setTimeout(function(){
+      setCollecting(false);
+      onCollect(payRef);
+      addToast("Payment of "+fmtMoney(totals.grand||0)+" collected","success");
+      onClose();
+    },400);
+  }
+
+  return (
+    <Modal title={"Collect Payment — "+order.id} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={collect} disabled={!canCollect||collecting}>
+          {collecting?"Processing…":"✓ Confirm Payment Collected"}
+        </Btn>
+      </div>}>
+
+      <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:12,color:C.muted}}>Amount to collect</div>
+        <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:C.success}}>{fmtMoney(totals.grand||0)}</div>
+      </div>
+
+      {/* Payment method */}
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Payment Method</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+          {[["card","💳 Credit Card"],["cash","💵 Cash"],["check","📝 Check"]].map(function(opt){
+            var sel=method===opt[0];
+            return (
+              <div key={opt[0]} onClick={function(){setMethod(opt[0]);}}
+                style={{padding:"10px",borderRadius:8,border:"2px solid "+(sel?C.accent:C.border),
+                        background:sel?C.accent+"08":C.surface2,cursor:"pointer",textAlign:"center"}}>
+                <div style={{fontSize:16,marginBottom:3}}>{opt[1].split(" ")[0]}</div>
+                <div style={{fontSize:11,fontWeight:sel?700:400,color:sel?C.accent:C.muted}}>{opt[1].split(" ").slice(1).join(" ")}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Card reference fields */}
+      {method==="card"&&(
+        <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Card Reference</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div style={{gridColumn:"1/-1"}}>
+              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
+              <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
+              <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}}
+                placeholder="4242" maxLength={4}
+                style={{width:"100%",background:C.bg,border:"1px solid "+(cardLast4.length===4?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
+              <input value={cardExpiry}
+                onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}}
+                placeholder="12/27" maxLength={5}
+                style={{width:"100%",background:C.bg,border:"1px solid "+(cardExpiry.length===5?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Billing ZIP</div>
+              <input value={cardZip} onChange={function(e){setCardZip(e.target.value.slice(0,10));}} placeholder="30309"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+          </div>
+          <div style={{marginTop:10,fontSize:10,color:C.dim}}>
+            For reference only — process through your card terminal separately.
+          </div>
+        </div>
+      )}
+
+      {/* Cash / Check reference */}
+      {(method==="cash"||method==="check")&&(
+        <div style={{marginBottom:14}}>
+          <Field
+            label={method==="check"?"Check Number / Reference":"Cash Receipt Reference"}
+            value={ref} onChange={setRef}
+            placeholder={method==="check"?"e.g. Check #1042":"e.g. Cash receipt #005"}
+            hint="Optional but recommended for recordkeeping"/>
+        </div>
+      )}
+
+      <div style={{padding:"8px 12px",background:C.surface2,borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.7}}>
+        Confirming marks this order as <strong style={{color:C.success}}>Paid</strong> and unlocks fulfillment.
+      </div>
+    </Modal>
+  );
+}
+
+
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
   const [carrier,   setCarrier]   = useState("UPS");
   const [trackNum,  setTrackNum]  = useState(order.trackingNumber||"");
@@ -2395,6 +2599,9 @@ function FulfillmentModal({order,customers,products,onSend,onClose}) {
 }
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function RepPayModal({order,rep,onConfirm,onClose}) {
   var comm = order.totals&&order.totals.commission||0;
   const [method, setMethod] = useState("manual");
@@ -2660,12 +2867,10 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
-
-</script>
-<script id="c5" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
+  const [collectTarget, setCollectTarget] = useState(null);
   var pendingW9       = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
   var submittedOrders = (orders||[]).filter(function(o){return o.status==="Submitted";});
   var historyTerms     = (termsRequests||[]).filter(function(r){return r.status==="approved"||r.status==="denied"||r.status==="approved_awaiting_signature"||r.status==="signed";});
@@ -2777,6 +2982,20 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
         <EmptyState icon="✅" title="All caught up!" subtitle="No pending tasks. New items appear here when reps submit forms or apply to join."/>
       )}
 
+      {/* CollectPaymentModal */}
+      {collectTarget&&(
+        <CollectPaymentModal order={collectTarget} addToast={addToast}
+          onCollect={function(payRef){
+            var updated=addAuditEntry(Object.assign({},collectTarget,{
+              status:"Paid",paidAt:new Date().toISOString(),
+              paymentRef:payRef,paymentType:payRef.type,
+            }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
+            setOrders(function(prev){return prev.map(function(x){return x.id===collectTarget.id?updated:x;});});
+            dbSave("crm_orders",collectTarget.id,updated);
+            setCollectTarget(null);
+          }}
+          onClose={function(){setCollectTarget(null);}}/>
+      )}
       {/* FulfillmentModal */}
       {fulfillTarget&&(
         <FulfillmentModal order={fulfillTarget} customers={customers||[]} products={products||[]}
@@ -2832,12 +3051,9 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                     {payFirst&&o.status==="Submitted"&&(
-                      <Btn small variant="success" onClick={function(){
-                        var updated=addAuditEntry(Object.assign({},o,{status:"Paid",paidAt:new Date().toISOString()}), "Marked Paid","Admin");
-                        setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
-                        dbSave("crm_orders",o.id,updated);
-                        addToast("Order "+o.id+" marked Paid","success");
-                      }}>✓ Mark as Paid</Btn>
+                      <Btn small variant="success" onClick={function(){setCollectTarget(o);}}>
+                        💳 Collect Payment
+                      </Btn>
                     )}
                     {(!payFirst||(payFirst&&o.status==="Paid"))&&(
                       <Btn small onClick={function(){setFulfillTarget(o);}}>
@@ -3020,6 +3236,23 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                             }
                           }}>📋 Copy Signing Link</Btn>
                           <Btn small variant="ghost" onClick={function(){
+                            // MARK AS SIGNED (TEST) — bypass customer signing for testing
+                            var cust=customers&&customers.find(function(x){return x.id===req.custId;});
+                            if(!cust){addToast("Customer not found","warning");return;}
+                            var now=new Date().toISOString();
+                            var updatedCust=Object.assign({},cust,{
+                              termsStatus:"active",termsSigned:true,
+                              termsSignedAt:now,termsSignerName:"[Admin Test Bypass]",
+                              termsSignerTitle:"Test",
+                            });
+                            setCustomers(function(prev){return prev.map(function(x){return x.id===cust.id?updatedCust:x;});});
+                            dbSave("crm_customers",cust.id,updatedCust);
+                            var upReq=Object.assign({},req,{status:"signed",signedAt:now,signerName:"[Admin Test Bypass]"});
+                            setTermsRequests(function(prev){return prev.map(function(r){return r.id===req.id?upReq:r;});});
+                            dbSave("crm_terms_requests",req.id,upReq);
+                            addToast("✓ Terms marked active (test bypass)","success");
+                          }}>✓ Mark as Signed (Test)</Btn>
+                          <Btn small variant="ghost" onClick={function(){
                             var sb=getSB();
                             if(!sb){addToast("Supabase not connected","warning");return;}
                             sb.from("crm_customers").select("data").eq("id",req.custId).single()
@@ -3087,6 +3320,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 }
 
 
+/* CustomerEditModal also rendered in AdminCustomers — see wiring below */
 
 </script>
 <script id="c6" type="text/plain">
@@ -3495,8 +3729,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     if(!commR&&quote.repId) { var repForComm=reps.find(function(r){return r.id===quote.repId;}); commR=(repForComm&&repForComm.defaultCommissionRate)||10; }
     var order = Object.assign({},quote,{id:id,status:"Submitted",
       createdAt:new Date().toISOString(),commissionRate:commR,
-      totals:{subtotal:quote.total,shipping:0,tax:0,grand:quote.total,
-              commission:quote.total*(commR/100)},
+      totals:{baseSubtotal:quote.total,subtotal:Math.round(quote.total*(1+commR/100)*100)/100,shipping:0,tax:0,
+              grand:Math.round(quote.total*(1+commR/100)*100)/100,
+              commission:Math.round(quote.total*(commR/100)*100)/100,commRate:commR},
       quoteId:quote.id,payMethod:"pay_later"});
     setOrders(function(prev){return [order].concat(prev);});
     dbSave("crm_orders",id,order);
@@ -4612,6 +4847,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
   const [dupTarget,      setDupTarget]     = useState(null);
   const [selected,       setSelected]      = useState({});
   const [fulfillTarget2, setFulfillTarget2] = useState(null);
+  const [collectTarget2,  setCollectTarget2]  = useState(null);
 
   var filtered = orders.filter(function(o){
     if(filter!=="all" && o.status!==filter) return false;
@@ -4728,6 +4964,20 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
         </div>
       )}
 
+      {collectTarget2&&(
+        <CollectPaymentModal order={collectTarget2} addToast={addToast}
+          onCollect={function(payRef){
+            var updated=addAuditEntry(Object.assign({},collectTarget2,{
+              status:"Paid",paidAt:new Date().toISOString(),
+              paymentRef:payRef,paymentType:payRef.type,
+            }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
+            onUpdate(updated); setViewOrder(updated);
+            dbSave("crm_orders",collectTarget2.id,updated);
+            setCollectTarget2(null);
+            addToast("Payment collected — order marked Paid","success");
+          }}
+          onClose={function(){setCollectTarget2(null);}}/>
+      )}
       {fulfillTarget2&&(
         <FulfillmentModal order={fulfillTarget2} customers={customers} products={products}
           onSend={function(result){
@@ -4787,7 +5037,8 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Items</div>
               <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
                 {(viewOrder.items||[]).map(function(it,i){
-                  var p = products.find(function(x){return x.id===it.prodId;})||{name:"Unknown"};
+                  var p   = products.find(function(x){return x.id===it.prodId;})||{name:"Unknown"};
+                  var cup = it.customerPrice||p.price||0;
                   return (
                     <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
                                          padding:"4px 0",borderBottom:i<(viewOrder.items||[]).length-1?"1px solid "+C.border:"none"}}>
@@ -5026,6 +5277,7 @@ function AdminProducts({products,setProducts,addToast}) {
 
 /* ─── Admin Customers ────────────────────────────────────────────────────── */
 function AdminCustomers({customers,setCustomers,reps,orders,addToast}) {
+  const [editCustModal2,setEditCustModal2] = useState(null);
   const [search,     setSearch]     = useState("");
   const [viewCust,   setViewCust]   = useState(null);
   const [showImport, setShowImport] = useState(false);
@@ -5088,7 +5340,19 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast}) {
       )}
       {showImport&&<CSVImportModal repId={null} onImport={function(imported){setCustomers(function(prev){return imported.concat(prev);});}} onClose={function(){setShowImport(false);}} addToast={addToast}/>}
       {viewCust&&(
-        <CustomerProfile customer={viewCust} orders={orders} onClose={function(){setViewCust(null);}}/>
+        <CustomerProfile customer={viewCust} orders={orders}
+          onEdit={function(cust){setViewCust(null);setEditCustModal2(cust);}}
+          onClose={function(){setViewCust(null);}}/>
+      )}
+      {editCustModal2&&(
+        <CustomerEditModal
+          customer={editCustModal2}
+          onSave={function(updated){
+            setCustomers(function(prev){return prev.map(function(x){return x.id===updated.id?updated:x;});});
+            dbSave("crm_customers",updated.id,updated);
+          }}
+          onClose={function(){setEditCustModal2(null);}}
+          addToast={addToast}/>
       )}
     </div>
   );
@@ -6050,9 +6314,10 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
   var cfg = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||'{"prefix":"INV","company":"PreVasive USA","footer":"Thank you for your business.","paymentTerms":"Net 30"}');
   var dueDate = fmtDate(new Date(new Date(order.createdAt).getTime()+30*24*60*60*1000).toISOString());
   var rows = (order.items||[]).map(function(it){
-    var p = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-    var line = (p.price||0)*it.qty;
-    return "<tr><td style='padding:8px 12px;border-bottom:1px solid #e8ecef'>"+p.name+"</td><td style='padding:8px 12px;text-align:center;border-bottom:1px solid #e8ecef'>"+it.qty+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef'>"+fmtMoney(p.price||0)+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef;font-weight:600'>"+fmtMoney(line)+"</td></tr>";
+    var p    = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+    var cup  = it.customerPrice||p.price||0; // marked-up customer price
+    var line = cup*it.qty;
+    return "<tr><td style='padding:8px 12px;border-bottom:1px solid #e8ecef'>"+p.name+"</td><td style='padding:8px 12px;text-align:center;border-bottom:1px solid #e8ecef'>"+it.qty+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef'>"+fmtMoney(cup)+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef;font-weight:600'>"+fmtMoney(line)+"</td></tr>";
   }).join("");
   var totals = order.totals||{};
   var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;color:#1a1a2e;max-width:720px;margin:0 auto;padding:40px 24px;font-size:13px}h1{font-size:28px;font-weight:800;letter-spacing:-.03em}.muted{color:#6b7c93}.mono{font-family:monospace}table{width:100%;border-collapse:collapse}.th{padding:8px 12px;background:#f6f9fc;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600}</style></head><body>"
@@ -7100,6 +7365,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
   const [editCust, setEditCust] = useState(null);
   const [viewCust2,setViewCust2] = useState(null);
   const [termsReqCust,setTermsReqCust] = useState(null);
+  const [editCustModal,setEditCustModal] = useState(null);
   const [name,   setName]   = useState(""); const [email,   setEmail]   = useState("");
   const [company,setCompany] = useState(""); const [phone,   setPhone]   = useState("");
   const [addr,   setAddr]   = useState(""); const [city,    setCity]    = useState("");
@@ -7172,7 +7438,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <Btn small variant="outline" onClick={function(){setViewCust2(c2);}} fullWidth={true}>View Profile</Btn>
-                  <Btn small variant="ghost" onClick={function(){openEdit(c2);}} fullWidth={true}>Edit</Btn>
+                  <Btn small variant="ghost" onClick={function(){setEditCustModal(c2);}} fullWidth={true}>Edit</Btn>
                   {c2.termsStatus!=="active"&&c2.termsStatus!=="awaiting_signature"&&(
                     <Btn small variant="ghost"
                       onClick={function(){if(c2.termsStatus!=="pending")setTermsReqCust(c2);}}
