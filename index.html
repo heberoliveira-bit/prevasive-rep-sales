@@ -1743,17 +1743,17 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
             {/* Payment method */}
             <div style={{marginBottom:16}}>
               <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:8}}>Payment Method</div>
-              {[
-                ["credit_card","💳 Credit Card","Charge card now"],
-                ["check","🏦 Check / ACH","Pay by check or bank transfer"],
-                ...(customer.termsStatus==="active"?[[customer.termsType||"net_30","📋 "+fmtTerms(customer.termsType||"net_30"),"Credit account · $"+(customer.termsLimit||0).toLocaleString()+" limit"]]:[]),
-              ].map(function(opt){
-                var sel=method===opt[0];
+              {(function(){
+                var payOpts=[{v:"due_receipt",l:"💵 Due on Receipt",sub:"Payment due upon delivery"}];
+                if(customer.termsStatus==="active") payOpts.push({v:customer.termsType||"net_30",l:"📋 "+fmtTerms(customer.termsType||"net_30"),sub:"Credit account · $"+(customer.termsLimit||0).toLocaleString()+" limit"});
+                return payOpts;
+              })().map(function(opt){
+                var sel=method===(opt.v||opt[0]);
                 return (
-                  <div key={opt[0]} onClick={function(){setMethod(opt[0]);}}
+                  <div key={opt.v||opt[0]} onClick={function(){setMethod(opt.v||opt[0]);}}
                     style={{padding:"10px 12px",borderRadius:8,border:"2px solid "+(sel?"#635bff":"#e8ecef"),background:sel?"rgba(99,91,255,.05)":"#fff",cursor:"pointer",marginBottom:8}}>
-                    <div style={{fontWeight:700,fontSize:12,color:sel?"#635bff":"#1a1a2e"}}>{opt[1]}</div>
-                    <div style={{fontSize:10,color:"#6b7c93",marginTop:1}}>{opt[2]}</div>
+                    <div style={{fontWeight:700,fontSize:12,color:sel?"#635bff":"#1a1a2e"}}>{opt.l||opt[1]}</div>
+                    <div style={{fontSize:10,color:"#6b7c93",marginTop:1}}>{opt.sub||opt[2]}</div>
                   </div>
                 );
               })}
@@ -6274,7 +6274,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       items:items.filter(function(it){return it.prodId;}),
       totals:totals, commissionRate:parseFloat(commRate)||0,
       payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
-      cardRef:payMethod==="credit_card"&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null,
+      cardRef:payMethod==="credit_card"&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null, /* card only for credit_card method */
       notes:notes, status:isEdit?(editOrder.status||"Submitted"):"Submitted",
       createdAt:isEdit?(editOrder.createdAt||new Date().toISOString()):new Date().toISOString(),
       updatedAt:new Date().toISOString(),
@@ -6505,9 +6505,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
                   // No approved terms — show manual options
                   var opts = [
-                    {v:"due_receipt", l:"Due on Receipt",       sub:"Collect card on delivery · Card details required",  card:true},
-                    {v:"credit_card", l:"Credit Card (charge now)", sub:"Charge card immediately · Card details required", card:true},
-                    {v:"check",       l:"Check / ACH",          sub:"Customer pays by check — no card needed",          card:false},
+                    {v:"due_receipt", l:"Due on Receipt", sub:"Payment due upon delivery — invoice sent with shipment", card:false},
                   ];
                   if(termsPending) opts.push({v:"__pending",l:"Net Terms — Pending Admin Approval",sub:"Submit request from customer profile first",card:false,disabled:true});
 
@@ -6543,8 +6541,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   );
                 })()}
 
-              {/* Card fields — only for Due on Receipt or Credit Card */}
-              {(payMethod==="credit_card"||payMethod==="due_receipt")&&(
+              {/* Card fields — Credit Card only (not used currently) */}
+              {payMethod==="credit_card"&&(
                 <div style={{marginTop:4,padding:"14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>💳 Card Reference</div>
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
