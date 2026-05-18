@@ -2184,6 +2184,107 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
 }
 
 
+function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,commRate,payMethod,onClose}) {
+  var cust    = selCust||{name:custName||"Customer"};
+  var company = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+  var date    = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+  var rate2   = parseFloat(commRate)||0;
+
+  function openNewTab() {
+    var html = buildPreviewHtml();
+    var w = window.open("","_blank");
+    w.document.write(html);
+    w.document.close();
+  }
+
+  function buildPreviewHtml() {
+    var rows = items.filter(function(it){return it.prodId;}).map(function(it){
+      var p   = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+      var cup = Math.round(p.price*(1+rate2/100)*100)/100; // marked-up unit price
+      return "<tr><td style='padding:10px 14px;font-size:13px;font-weight:600;color:#1a1a2e'>"+p.name+"</td>"
+        +"<td style='padding:10px 14px;font-size:12px;color:#6b7c93;text-align:right'>"+it.qty+"</td>"
+        +"<td style='padding:10px 14px;font-size:12px;font-family:monospace;color:#6b7c93;text-align:right'>$"+cup.toFixed(2)+"</td>"
+        +"<td style='padding:10px 14px;font-size:13px;font-family:monospace;font-weight:700;color:#1a1a2e;text-align:right'>$"+(cup*it.qty).toFixed(2)+"</td></tr>";
+    }).join("");
+    return "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Invoice Preview</title>"
+      +"<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap' rel='stylesheet'>"
+      +"<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,system-ui,sans-serif;background:#f6f9fc;min-height:100vh;padding:32px 20px}"
+      +".card{background:#fff;max-width:740px;margin:0 auto;border-radius:14px;border:1px solid #e8ecef;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.06)}"
+      +".header{padding:24px 28px;border-bottom:1px solid #e8ecef;display:flex;justify-content:space-between;align-items:flex-start}"
+      +".badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#635bff12;color:#635bff}"
+      +".addr{padding:16px 28px;background:#f6f9fc;border-bottom:1px solid #e8ecef;display:grid;grid-template-columns:1fr 1fr;gap:20px}"
+      +".addr-block .label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7c93;margin-bottom:6px}"
+      +".addr-block p{font-size:12px;color:#374151;line-height:1.8}"
+      +".addr-block strong{color:#1a1a2e}"
+      +"table{width:100%;border-collapse:collapse}"
+      +"thead tr{background:#f6f9fc}"
+      +"thead th{padding:8px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600;text-align:left}"
+      +"thead th:last-child{text-align:right}"
+      +"tbody tr{border-top:1px solid #e8ecef}"
+      +".totals{padding:16px 28px;border-top:2px solid #e8ecef}"
+      +".total-row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:#6b7c93}"
+      +".total-row.grand{font-size:18px;font-weight:900;color:#635bff;padding-top:10px;margin-top:6px;border-top:1px solid #e8ecef}"
+      +".footer{padding:16px 28px;border-top:1px solid #e8ecef;font-size:11px;color:#a0aec0;text-align:center}"
+      +"</style></head><body>"
+      +"<div style='max-width:740px;margin:0 auto 16px;display:flex;justify-content:space-between;align-items:center'>"
+      +"<div style='font-size:12px;color:#6b7c93'>INVOICE PREVIEW — This is what your customer sees</div>"
+      +"<button onclick='window.print()' style='padding:6px 14px;border-radius:6px;border:1px solid #e8ecef;background:#fff;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;color:#635bff'>Print</button>"
+      +"</div>"
+      +"<div class='card'>"
+      +"<div class='header'><div><div style='font-size:13px;color:#6b7c93;margin-bottom:4px'>Invoice from</div>"
+      +"<div style='font-size:22px;font-weight:900;color:#1a1a2e'>"+company+"</div></div>"
+      +"<div style='text-align:right'><div style='font-size:24px;font-weight:900;font-family:monospace;color:#635bff'>$"+((totals.grand||0).toFixed(2))+"</div>"
+      +"<div style='font-size:11px;color:#6b7c93;margin-top:2px'>"+date+"</div>"
+      +"<div class='badge' style='margin-top:6px;display:inline-block'>"+fmtTerms(payMethod||"due_receipt")+"</div>"
+      +"</div></div>"
+      +"<div class='addr'>"
+      +"<div class='addr-block'><div class='label'>Billed To</div><p>"
+      +"<strong>"+cust.name+"</strong><br>"
+      +(cust.company?""+cust.company+"<br>":""  )
+      +(cust.address?""+cust.address+"<br>":"")
+      +([cust.city,cust.state,cust.zip].filter(Boolean).join(", "))
+      +"</p></div>"
+      +"<div class='addr-block'><div class='label'>Shipped To</div><p>"
+      +"<strong>"+cust.name+"</strong><br>"
+      +(cust.company?""+cust.company+"<br>":"")
+      +(cust.address?""+cust.address+"<br>":"No address on file")
+      +([cust.city,cust.state,cust.zip].filter(Boolean).join(", "))
+      +"</p></div></div>"
+      +"<table><thead><tr><th>Product</th><th style='text-align:right'>Qty</th><th style='text-align:right'>Unit Price</th><th style='text-align:right'>Total</th></tr></thead>"
+      +"<tbody>"+rows+"</tbody></table>"
+      +"<div class='totals'>"
+      +(totals.discount>0?"<div class='total-row'><span>Discount</span><span style='color:#1ea672'>-$"+(totals.discount.toFixed(2))+"</span></div>":"")
+      +(totals.shipping>0?"<div class='total-row'><span>Shipping</span><span>$"+totals.shipping.toFixed(2)+"</span></div>":"<div class='total-row'><span>Shipping</span><span style='color:#1ea672'>Free</span></div>")
+      +(totals.tax>0?"<div class='total-row'><span>Sales Tax (GA "+(((totals.taxRate||0)*100).toFixed(1))+"%)</span><span>$"+totals.tax.toFixed(2)+"</span></div>":"")
+      +"<div class='total-row grand'><span>Total Due</span><span>$"+((totals.grand||0).toFixed(2))+"</span></div>"
+      +"</div>"
+      +"<div class='footer'>"+company+" · Questions? Contact your sales representative.</div>"
+      +"</div></body></html>";
+  }
+
+  var previewHtml = buildPreviewHtml();
+
+  return (
+    <Modal title="Customer Invoice Preview" wide={true} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:11,color:C.muted}}>This is exactly what your customer sees — no markup or commission shown</div>
+        <div style={{display:"flex",gap:8}}>
+          <Btn variant="ghost" onClick={onClose}>Close</Btn>
+          <Btn onClick={openNewTab}>Open in New Tab ↗</Btn>
+        </div>
+      </div>}>
+      <iframe
+        srcDoc={previewHtml}
+        style={{width:"100%",height:520,border:"none",borderRadius:8,background:"#f6f9fc"}}
+        title="Invoice Preview"/>
+    </Modal>
+  );
+}
+
+
+
+</script>
+<script id="c4" type="text/plain">
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
   const [carrier,   setCarrier]   = useState("UPS");
   const [trackNum,  setTrackNum]  = useState(order.trackingNumber||"");
@@ -2294,9 +2395,6 @@ function FulfillmentModal({order,customers,products,onSend,onClose}) {
 }
 
 
-
-</script>
-<script id="c4" type="text/plain">
 function RepPayModal({order,rep,onConfirm,onClose}) {
   var comm = order.totals&&order.totals.commission||0;
   const [method, setMethod] = useState("manual");
@@ -2562,6 +2660,9 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
@@ -2966,7 +3067,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 
 
 </script>
-<script id="c5" type="text/plain">
+<script id="c6" type="text/plain">
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
   const [tab,      setTab]      = useState("docs");
   const [showForm, setShowForm] = useState(false);
@@ -3317,7 +3418,7 @@ function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
 
 
 </script>
-<script id="c6" type="text/plain">
+<script id="c7" type="text/plain">
 function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders,
                        currentUser,isAdmin,addToast,showResult}) {
   const [showForm,  setShowForm]  = useState(false);
@@ -3352,7 +3453,11 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
               repName:currentUser&&currentUser.name,
               custId:custId,custName:selCust?selCust.name:"",
-              items:items.filter(function(it){return it.prodId;}),
+              items:items.filter(function(it){return it.prodId;}).map(function(it){
+        var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
+        var rate3=parseFloat(commRate)||0;
+        return Object.assign({},it,{unitPrice:p.price,customerPrice:Math.round(p.price*(1+rate3/100)*100)/100});
+      }),
               total:total,commissionRate:commRate,
               notes:notes,validUntil:expiry,
               status:"draft",createdAt:new Date().toISOString()};
@@ -3794,7 +3899,7 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
 
 
 </script>
-<script id="c7" type="text/plain">
+<script id="c8" type="text/plain">
 function HelpModal({isAdmin,onClose}) {
   const [tab, setTab] = useState(isAdmin?"admin":"rep");
   var ADMIN_FAQ = [
@@ -4329,7 +4434,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c8" type="text/plain">
+<script id="c9" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   const [range, setRange] = useState("month");
   var now2 = new Date();
@@ -4790,7 +4895,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c9" type="text/plain">
+<script id="c10" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -5279,7 +5384,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
 
 </script>
-<script id="c10" type="text/plain">
+<script id="c11" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests}) {
   const [payTarget,    setPayTarget]    = useState(null);
   const [releasingAll, setReleasingAll] = useState(false);
@@ -5961,7 +6066,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
 /* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
-<script id="c11" type="text/plain">
+<script id="c12" type="text/plain">
 function CommissionStatement({repId,orders,commissions,repName}) {
   var now3 = new Date();
   var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -6192,6 +6297,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [sendInvAuto,  setSendInvAuto]  = useState(true);
   const [showPostInv,  setShowPostInv]  = useState(false);
   const [placedOrder,  setPlacedOrder]  = useState(null);
+  const [showPreview,  setShowPreview]  = useState(false);
 
   // Auto-set payment method when customer changes
   useEffect(function(){
@@ -6229,23 +6335,27 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   }
 
   function calcTotals() {
-    var subtotal = items.reduce(function(s,it){
+    var rate2 = parseFloat(commRate)||0;
+    // Base subtotal (catalog prices)
+    var baseSubtotal = items.reduce(function(s,it){
       var p=products.find(function(x){return x.id===it.prodId;});
       return s+(p?p.price:it.unitPrice||0)*it.qty;
     },0);
-    var discount = 0;
+    // Model B: commission = markup added to base price
+    var commission  = Math.round(baseSubtotal*(rate2/100)*100)/100;
+    var subtotal    = baseSubtotal + commission; // customer-facing subtotal
+    var discount    = 0;
     if(discApplied) {
       discount = discApplied.type==="percent" ? subtotal*(discApplied.value/100) : Math.min(discApplied.value,subtotal);
     }
     var discounted = subtotal - discount;
-    var shipping   = calcShipping(subtotal);
-    // Georgia tax — lookup by customer zip
+    var shipping   = calcShipping(baseSubtotal);
+    // Georgia tax — on customer price (post-markup, post-discount)
     var taxInfo  = selCust ? getGaTaxRate(selCust.zip) : null;
     var taxRate  = taxInfo ? taxInfo.rate : 0;
     var tax      = Math.round(discounted*taxRate*100)/100;
     var grand    = discounted + shipping + tax;
-    var commission = discounted*(parseFloat(commRate)||0)/100; // on product subtotal only, not shipping or tax
-    return {subtotal:subtotal,discount:discount,shipping:shipping,tax:tax,taxRate:taxRate,taxInfo:taxInfo,grand:grand,commission:commission};
+    return {baseSubtotal:baseSubtotal,subtotal:subtotal,discount:discount,shipping:shipping,tax:tax,taxRate:taxRate,taxInfo:taxInfo,grand:grand,commission:commission,commRate:rate2};
   }
 
   function step1Valid() {
@@ -6271,7 +6381,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var order = {
       id:id, repId:repId, repName:repName,
       custId:cid, custName:cname,
-      items:items.filter(function(it){return it.prodId;}),
+      items:items.filter(function(it){return it.prodId;}).map(function(it){
+        var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
+        var rate3=parseFloat(commRate)||0;
+        return Object.assign({},it,{unitPrice:p.price,customerPrice:Math.round(p.price*(1+rate3/100)*100)/100});
+      }),
       totals:totals, commissionRate:parseFloat(commRate)||0,
       payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
       cardRef:payMethod==="credit_card"&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null, /* card only for credit_card method */
@@ -6746,12 +6860,30 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               Next →
             </Btn>
           ):(
-            <Btn onClick={place} disabled={!agreed||placing}>
-              {placing?"Placing…":isEdit?"Save Changes":"Place Order"}
-            </Btn>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              <Btn variant="ghost" onClick={function(){setShowPreview(true);}}>
+                👁 Preview Invoice
+              </Btn>
+              <Btn onClick={place} disabled={!agreed||placing}>
+                {placing?"Placing…":isEdit?"Save Changes":"Place Order"}
+              </Btn>
+            </div>
           )}
         </div>
       </div>
+      {showPreview&&(
+        <PreviewOrderModal
+          items={items}
+          totals={totals}
+          customers={customers}
+          products={products}
+          currentUser={currentUser}
+          selCust={selCust}
+          custName={custName}
+          commRate={commRate}
+          payMethod={payMethod}
+          onClose={function(){setShowPreview(false);}}/>
+      )}
       {showPostInv&&placedOrder&&(
         <SendInvoiceModal
           order={placedOrder}
@@ -6770,7 +6902,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c12" type="text/plain">
+<script id="c13" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -7092,7 +7224,7 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
 /* ─── Rep Commissions ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c13" type="text/plain">
+<script id="c14" type="text/plain">
 function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -7465,7 +7597,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
 
 </script>
-<script id="c14" type="text/plain">
+<script id="c15" type="text/plain">
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -7918,7 +8050,7 @@ function App() {
 </script>
 
 <script>
-var N=15;
+var N=16;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
