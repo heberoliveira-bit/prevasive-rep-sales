@@ -5907,6 +5907,103 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
         </div>
       )}
 
+      {tab==="shipping"&&(
+        <div style={{maxWidth:640}}>
+          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Shipping Rules</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:16}}>Define free shipping thresholds and flat rates by order amount.</div>
+          {(shippingRules||[]).map(function(rule,i){return (
+            <div key={i} style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,flex:1}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Min Order ($)</div>
+                    <input type="number" value={rule.minOrder||0}
+                      onChange={function(e){var updated=(shippingRules||[]).map(function(r,j){return j===i?Object.assign({},r,{minOrder:parseFloat(e.target.value)||0}):r;});onSaveShippingRules(updated);}}
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Max Order ($)</div>
+                    <input type="number" value={rule.maxOrder||0}
+                      onChange={function(e){var updated=(shippingRules||[]).map(function(r,j){return j===i?Object.assign({},r,{maxOrder:parseFloat(e.target.value)||0}):r;});onSaveShippingRules(updated);}}
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Shipping Cost ($)</div>
+                    <input type="number" value={rule.cost||0}
+                      onChange={function(e){var updated=(shippingRules||[]).map(function(r,j){return j===i?Object.assign({},r,{cost:parseFloat(e.target.value)||0}):r;});onSaveShippingRules(updated);}}
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  </div>
+                </div>
+                <button onClick={function(){onSaveShippingRules((shippingRules||[]).filter(function(_,j){return j!==i;}));}}
+                  style={{padding:"6px 10px",borderRadius:6,border:"1px solid "+C.danger+"30",background:C.danger+"10",color:C.danger,cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>×</button>
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:6}}>
+                Orders {rule.minOrder>0?"$"+rule.minOrder+" –":"up"} to ${rule.maxOrder||"∞"}: {rule.cost===0?"Free shipping":"$"+rule.cost+" flat rate"}
+              </div>
+            </div>
+          );})}
+          <button onClick={function(){onSaveShippingRules((shippingRules||[]).concat([{minOrder:0,maxOrder:999999,cost:0}]));}}
+            style={{padding:"8px 16px",borderRadius:8,border:"1px dashed "+C.border,background:"transparent",color:C.accent,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",marginBottom:16}}>
+            + Add Shipping Rule
+          </button>
+          <div style={{padding:"10px 14px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.7}}>
+            Rules are applied by order subtotal. Set cost to 0 for free shipping. Lowest matching maxOrder wins.
+          </div>
+        </div>
+      )}
+
+      {tab==="discounts"&&(
+        <div style={{maxWidth:640}}>
+          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Discount Codes</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:16}}>Create codes reps can apply at checkout. Percentage or flat dollar off.</div>
+          {(discountCodes||[]).map(function(dc,i){return (
+            <div key={i} style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 80px",gap:10,flex:1}}>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Code</div>
+                    <input value={dc.code||""} placeholder="SAVE20"
+                      onChange={function(e){var updated=(discountCodes||[]).map(function(d,j){return j===i?Object.assign({},d,{code:e.target.value.toUpperCase()}):d;});onSaveDiscountCodes(updated);}}
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.accent,fontSize:12,fontFamily:"monospace",fontWeight:700,boxSizing:"border-box",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Type</div>
+                    <select value={dc.type||"percent"}
+                      onChange={function(e){var updated=(discountCodes||[]).map(function(d,j){return j===i?Object.assign({},d,{type:e.target.value}):d;});onSaveDiscountCodes(updated);}}
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}>
+                      <option value="percent">% Off</option>
+                      <option value="flat">$ Off</option>
+                    </select>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Value</div>
+                    <input type="number" value={dc.value||0} placeholder="20"
+                      onChange={function(e){var updated=(discountCodes||[]).map(function(d,j){return j===i?Object.assign({},d,{value:parseFloat(e.target.value)||0}):d;});onSaveDiscountCodes(updated);}}
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Active</div>
+                    <button onClick={function(){var updated=(discountCodes||[]).map(function(d,j){return j===i?Object.assign({},d,{active:!d.active}):d;});onSaveDiscountCodes(updated);}}
+                      style={{width:"100%",padding:"7px 6px",borderRadius:6,border:"1px solid "+(dc.active?C.success:C.border),background:dc.active?C.success+"15":"transparent",color:dc.active?C.success:C.dim,cursor:"pointer",fontSize:11,fontWeight:700,fontFamily:"inherit"}}>
+                      {dc.active?"✓ On":"Off"}
+                    </button>
+                  </div>
+                </div>
+                <button onClick={function(){onSaveDiscountCodes((discountCodes||[]).filter(function(_,j){return j!==i;}));}}
+                  style={{padding:"6px 10px",borderRadius:6,border:"1px solid "+C.danger+"30",background:C.danger+"10",color:C.danger,cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0,marginTop:18}}>×</button>
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:6}}>
+                {dc.code||"—"}: {dc.type==="percent"?(dc.value||0)+"% off":"$"+(dc.value||0)+" off"} · {dc.active?"Active":"Inactive"}
+              </div>
+            </div>
+          );})}
+          <button onClick={function(){onSaveDiscountCodes((discountCodes||[]).concat([{code:"",type:"percent",value:10,active:true}]));}}
+            style={{padding:"8px 16px",borderRadius:8,border:"1px dashed "+C.border,background:"transparent",color:C.accent,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>
+            + Add Discount Code
+          </button>
+        </div>
+      )}
+
       {tab==="export"&&(
         <div style={{maxWidth:520}}>
           <div style={{marginBottom:8,fontSize:13,color:C.muted,lineHeight:1.7}}>Export your data as CSV files. Open in Excel, Google Sheets, or any spreadsheet app.</div>
@@ -6144,12 +6241,7 @@ function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult})
               <input value={subject} onChange={function(e){setSubject(e.target.value);}} placeholder="Email subject…"
                 style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
             </div>
-            <div style={{marginBottom:6,display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
-              <span style={{fontSize:10,fontWeight:600,color:C.dim}}>INSERT:</span>
-              {EMAIL_VARS.map(function(v){return (
-                <button key={v} onClick={function(){insertVar(v);}} style={{padding:"2px 7px",borderRadius:4,border:"1px solid "+C.border,background:C.surface2,color:C.accent,cursor:"pointer",fontFamily:"monospace",fontSize:10,fontWeight:600}}>{v}</button>
-              );})}
-            </div>
+            
             <div style={{marginBottom:12}}>
               <textarea value={body} onChange={function(e){setBody(e.target.value);}} rows={9} placeholder="Write your message…"
                 style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
