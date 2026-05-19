@@ -204,6 +204,74 @@ function getGaTaxRate(zip) {
 }
 
 
+
+/* ─── Credit Agreement Generator ─────────────────────────────── */
+function fillTemplate(template, vars) {
+  // Replace {{var}} placeholders with actual values
+  return (template||"").replace(/\{\{([^}]+)\}\}/g, function(match, key) {
+    var k = key.trim().toLowerCase();
+    if(vars[k] !== undefined && vars[k] !== null && vars[k] !== "") return vars[k];
+    return match; // leave unreplaced if no value
+  });
+}
+
+function getTemplateVars(customer, req, company) {
+  return {
+    customer_name: customer.name || "",
+    company_name:  customer.company || "",
+    rep_name:      req.repName || req.repId || "",
+    order_id:      req.id || "",
+    date:          new Date().toLocaleDateString("en-US", {month:"long", day:"numeric", year:"numeric"}),
+    company:       company || "PreVasive USA",
+    approved_terms: req.approvedTerms ? req.approvedTerms.replace(/_/g," ").toUpperCase() : "NET 30",
+    credit_limit:  req.approvedLimit ? "$"+Number(req.approvedLimit).toLocaleString() : "$5,000",
+    address:       [customer.address,customer.city,customer.state,customer.zip].filter(Boolean).join(", ") || "",
+  };
+}
+
+function generateCreditAgreement(customer, req, template, company) {
+  var defaultTemplate = [
+    "CREDIT ACCOUNT AGREEMENT",
+    "",
+    "This Credit Account Agreement (\"Agreement\") is entered into on {{date}} between {{company}} (\"Seller\") and {{customer_name}}, {{company_name}} (\"Buyer\").",
+    "",
+    "1. CREDIT TERMS",
+    "Seller agrees to extend credit to Buyer under the following terms:",
+    "  - Payment Terms: {{approved_terms}}",
+    "  - Credit Limit: {{credit_limit}}",
+    "  - Buyer address: {{address}}",
+    "",
+    "2. PAYMENT OBLIGATIONS",
+    "Buyer agrees to pay all invoices in full within the agreed payment terms. Late payments may result in suspension of credit privileges.",
+    "",
+    "3. PERSONAL GUARANTEE",
+    "By signing below, the authorized representative of Buyer personally guarantees payment of all amounts due under this Agreement.",
+    "",
+    "4. GOVERNING LAW",
+    "This Agreement shall be governed by the laws of the State of Georgia.",
+    "",
+    "5. ACKNOWLEDGMENT",
+    "Buyer acknowledges that they have read, understood, and agree to all terms and conditions of this Agreement.",
+    "",
+    "Account Representative: {{rep_name}}",
+    "Agreement Date: {{date}}",
+    "Reference: {{order_id}}",
+  ].join("\n");
+  var tpl = template||defaultTemplate;
+  return fillTemplate(tpl, getTemplateVars(customer, req, company));
+}
+
+function generateCreditAgreementHtml(customer, req, template, company) {
+  var text = generateCreditAgreement(customer, req, template, company);
+  return text
+    .split("\n")
+    .map(function(line) {
+      if(line===line.toUpperCase()&&line.trim().length>3) return "<h3 style='font-size:13px;font-weight:800;color:#1a1a2e;margin:16px 0 6px'>"+line+"</h3>";
+      if(line.trim()==="") return "<br/>";
+      return "<p style='font-size:13px;color:#374151;line-height:1.8;margin:3px 0'>"+line+"</p>";
+    }).join("");
+}
+
 /* ─── Order Status Flow ───────────────────────────────────────────────── */
 var CARRIER_URLS = {
   UPS:   "https://www.ups.com/track?tracknum=",
@@ -862,6 +930,9 @@ function ApplyForm({onSubmit,onCancel}) {
   );
 }
 
+
+</script>
+<script id="c1" type="text/plain">
 function InviteModal({rep,onClose,addToast}) {
   var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
   var baseUrl = window.location.origin+window.location.pathname;
@@ -890,9 +961,6 @@ function InviteModal({rep,onClose,addToast}) {
   );
 }
 
-
-</script>
-<script id="c1" type="text/plain">
 function InviteRegistration({token,onComplete}) {
   const [name,    setName]    = useState("");
   const [email,   setEmail]   = useState("");
@@ -1403,6 +1471,9 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCou
   );
 }
 
+
+</script>
+<script id="c2" type="text/plain">
 function PageHeader({title,subtitle,action}) {
   return (
     <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",
@@ -1417,9 +1488,6 @@ function PageHeader({title,subtitle,action}) {
 }
 
 
-
-</script>
-<script id="c2" type="text/plain">
 function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast,showResult}) {
   var cust     = (customers||[]).find(function(x){return x.id===order.custId;})||{name:order.custName||"Customer"};
   var company  = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
@@ -6013,7 +6081,7 @@ function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult})
     setTmpl(t.id);
     var rn=currentUser&&currentUser.name||""; var cn=selCust?selCust.name:"{{customer_name}}";
     var dt=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
-    function fill(s){return s.replace(/\{\{customer_name\}\}/g,cn).replace(/\{\{rep_name\}\}/g,rn).replace(/\{\{date\}\}/g,dt).replace(/\{\{company\}\}/g,selCust&&selCust.company||"{{company}}").replace(/\{\{order_id\}\}/g,"");}
+    function fill(s){var co2=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";return s.replace(/\{\{customer_name\}\}/g,cn).replace(/\{\{rep_name\}\}/g,rn||currentUser&&currentUser.name||"").replace(/\{\{date\}\}/g,dt).replace(/\{\{company\}\}/g,co2).replace(/\{\{company_name\}\}/g,selCust&&selCust.company||"").replace(/\{\{order_id\}\}/g,"");}
     setSubject(fill(t.subject)); setBody(fill(t.body));
   }
 
