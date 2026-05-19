@@ -1421,115 +1421,100 @@ function PageHeader({title,subtitle,action}) {
 </script>
 <script id="c2" type="text/plain">
 function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast,showResult}) {
-  var cust = customers.find(function(x){return x.id===order.custId;})||{};
-  var company = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
-  const [toEmail,  setToEmail]  = useState(cust.email||"");
-  const [subject,  setSubject]  = useState("Invoice "+order.id+" from "+company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due");
-  const [msg,      setMsg]      = useState("Hi "+(cust.name||"there")+",\n\nPlease find your invoice for order "+order.id+" attached below.\n\nTotal Due: "+fmtMoney(order.totals&&order.totals.grand||0)+"\n\nClick the payment link to view your invoice and submit payment securely:\n\n{{PAYMENT_LINK}}\n\nThank you for your business.\n\n"+(currentUser&&currentUser.name||company));
-  const [copied,   setCopied]   = useState(false);
-  const [linkGen,  setLinkGen]  = useState(false);
-  const [payLink,  setPayLink]  = useState("");
+  var cust     = (customers||[]).find(function(x){return x.id===order.custId;})||{name:order.custName||"Customer"};
+  var company  = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+  var totals   = order.totals||{};
+  var custName = cust.name||order.custName||"Customer";
+  const [toEmail,setToEmail] = useState(cust.email||"");
+  const [subject,setSubject] = useState("Invoice from "+company+" — Order "+order.id);
+  const [body,   setBody]    = useState("Hi "+custName+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+"\nTotal Due: "+fmtMoney(totals.grand||0)+"\n\nPay online: [PAYMENT_LINK]\n\nThank you,\n"+(currentUser&&currentUser.name||company));
+  const [link,   setLink]    = useState("");
+  const [copied, setCopied]  = useState(false);
 
-  function generateLink() {
-    var token = order.id+"_"+Math.random().toString(36).slice(2,9);
-    var payData = {
-      token:token, status:"pending", order:order,
-      customer:cust, company:company, products:products,
-      createdAt:new Date().toISOString(),
-    };
-    localStorage.setItem("__pv__pay_"+token, JSON.stringify(payData));
-    var link = window.location.origin+window.location.pathname+"#pay="+token;
-    setPayLink(link);
-    setLinkGen(true);
-    setMsg(function(prev){return prev.replace("{{PAYMENT_LINK}}", link);});
-    return link;
+  function genLink() {
+    if(link) return link;
+    var tok=order.id+"_"+Math.random().toString(36).slice(2,9);
+    var pd={token:tok,status:"pending",order:order,customer:cust,company:company,products:products||[],createdAt:new Date().toISOString()};
+    localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));
+    var l=window.location.origin+window.location.pathname+"#pay="+tok;
+    setLink(l);
+    setBody(function(prev){return prev.replace("[PAYMENT_LINK]",l);});
+    return l;
   }
-
-  function copyLink() {
-    var link = payLink||generateLink();
-    navigator.clipboard.writeText(link).then(function(){
-      setCopied(true); setTimeout(function(){setCopied(false);},2500);
-      addToast("Payment link copied!","success");
-    });
-  }
-
-  function openMailto() {
-    var link = payLink||generateLink();
-    var body = msg.replace("{{PAYMENT_LINK}}", link);
-    var mailto = "mailto:"+encodeURIComponent(toEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body);
-    window.open(mailto, "_blank");
-    addToast("Opening mail client…","info");
-  }
-
-  function downloadInvoice() {
-    generateInvoice(order, customers, products, currentUser);
+  function copyLink(){var l=genLink();navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");});}
+  function openMail(){
+    if(!toEmail.trim()){addToast("Enter a customer email address first","warning");return;}
+    var l=genLink(); var txt=body.replace("[PAYMENT_LINK]",l);
+    window.open("mailto:"+encodeURIComponent(toEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(txt),"_blank");
+    addToast("Opening email client…","info");
   }
 
   return (
-    <Modal title={"Send Invoice — "+order.id} wide={true} onClose={onClose}
+    <Modal title="Send Invoice" wide={true} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
-        <Btn variant="ghost" onClick={downloadInvoice}>⬇ Download PDF</Btn>
+        <Btn variant="ghost" onClick={function(){generateInvoice(order,customers||[],products||[],currentUser);}}>⬇ Download</Btn>
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose}>Close</Btn>
-          <Btn variant="ghost" onClick={copyLink}>{copied?"✓ Copied!":"📋 Copy Pay Link"}</Btn>
-          <Btn onClick={openMailto}>✉ Open in Mail →</Btn>
+          <Btn variant="ghost" onClick={copyLink}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+          <Btn onClick={openMail}>✉ Open in Mail →</Btn>
         </div>
       </div>}>
 
+      {/* Customer banner */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,marginBottom:14}}>
+        <Avatar name={custName} size={38}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:14,color:C.text}}>{custName}</div>
+          {cust.company&&<div style={{fontSize:11,color:C.muted}}>{cust.company}</div>}
+          {cust.email&&<div style={{fontSize:11,color:C.accent}}>{cust.email}</div>}
+        </div>
+        <div style={{textAlign:"right",flexShrink:0}}>
+          <div style={{fontSize:10,color:C.muted,marginBottom:1}}>Total Due</div>
+          <div style={{fontSize:20,fontWeight:900,fontFamily:"monospace",color:C.accent}}>{fmtMoney(totals.grand||0)}</div>
+        </div>
+      </div>
+
+      {!cust.email&&<div style={{padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:12,fontSize:12,color:C.warning,fontWeight:600}}>⚠ No email on file — enter one below to send.</div>}
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
         <div>
-          <Field label="Send to" value={toEmail} onChange={setToEmail} type="email" placeholder="customer@email.com"/>
+          <Field label="To (Email)" value={toEmail} onChange={setToEmail} type="email" placeholder="customer@example.com"/>
           <Field label="Subject" value={subject} onChange={setSubject}/>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Message</div>
-            <textarea value={msg.replace("{{PAYMENT_LINK}}",payLink||"[payment link will appear here]")} onChange={function(e){setMsg(e.target.value);}} rows={9}
+            <textarea value={body} onChange={function(e){setBody(e.target.value);}} rows={9}
               style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
           </div>
         </div>
         <div>
-          {/* Payment link section */}
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px",marginBottom:14}}>
             <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Payment Link</div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>
-              Generate a secure link your customer opens to view the invoice and submit payment. No login required.
-            </div>
-            {!linkGen?(
-              <Btn onClick={generateLink} fullWidth={true}>⚡ Generate Payment Link</Btn>
+            <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>Secure link — customer pays online, no login needed.</div>
+            {!link?(
+              <Btn onClick={genLink} fullWidth={true}>⚡ Generate Link</Btn>
             ):(
               <div>
-                <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:8,padding:"8px 12px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",marginBottom:10,lineHeight:1.6}}>
-                  {payLink}
-                </div>
-                <div style={{display:"flex",gap:8}}>
-                  <Btn small onClick={copyLink} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-                </div>
-                <div style={{fontSize:10,color:C.success,marginTop:8,fontWeight:600}}>✓ Link generated — valid until order is paid</div>
+                <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"7px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",lineHeight:1.6,marginBottom:8}}>{link}</div>
+                <Btn small onClick={copyLink} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+                <div style={{fontSize:10,color:C.success,marginTop:6,fontWeight:600}}>✓ Paste into email or text</div>
               </div>
             )}
           </div>
-
-          {/* Invoice summary */}
-          <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>Invoice Summary</div>
-            {[["Order",order.id],["Customer",cust.name||order.custName||"—"],["Items",(order.items||[]).length+" product(s)"],
-              order.totals&&order.totals.discount>0&&["Discount","-"+fmtMoney(order.totals.discount)],
-              order.totals&&order.totals.shipping>0&&["Shipping",fmtMoney(order.totals.shipping)],
-              ["Total Due",fmtMoney(order.totals&&order.totals.grand||0)],
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px"}}>
+            <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Summary</div>
+            {[["Order",order.id],["Customer",custName],["Items",(order.items||[]).length+" item(s)"],
+              totals.discount>0&&["Discount","-"+fmtMoney(totals.discount)],
+              totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
+              totals.tax>0&&["Tax",fmtMoney(totals.tax)],
+              ["Total",fmtMoney(totals.grand||0)],
             ].filter(Boolean).map(function(row,i,arr){return (
-              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",
-                                   borderBottom:i<arr.length-1?"1px solid "+C.border:"none"}}>
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:i<arr.length-1?"1px solid "+C.border:"none"}}>
                 <span style={{color:C.muted}}>{row[0]}</span>
-                <span style={{fontWeight:i===arr.length-1?800:600,color:i===arr.length-1?C.accent:C.text,fontFamily:"monospace"}}>{row[1]}</span>
+                <span style={{fontWeight:i===arr.length-1?800:500,color:i===arr.length-1?C.accent:C.text,fontFamily:"monospace"}}>{row[1]}</span>
               </div>
             );})}
           </div>
-
-          {/* Customer terms info */}
-          {cust.termsStatus==="active"&&(
-            <div style={{marginTop:10,padding:"10px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
-              ✓ Customer has approved {fmtTerms(cust.termsType||"net_30")} terms · ${(cust.termsLimit||0).toLocaleString()} limit
-            </div>
-          )}
+          {cust.termsStatus==="active"&&<div style={{marginTop:10,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>✓ {fmtTerms(cust.termsType||"net_30")} Terms Active</div>}
         </div>
       </div>
     </Modal>
@@ -1538,847 +1523,493 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
 
 
 
-function OrderEditModal({order,products,customers,onSave,onClose}) {
-  const [items,    setItems]    = useState(JSON.parse(JSON.stringify(order.items||[])));
-  const [commRate, setCommRate] = useState(order.commissionRate||10);
-  const [notes,    setNotes]    = useState(order.notes||"");
-  var activeProds = products.filter(function(p){return p.active!==false;});
-  var cust = customers.find(function(c2){return c2.id===order.custId;})||{name:order.custName||""};
-
-  function calcTotal() {
-    return items.reduce(function(s,it){
-      var p=products.find(function(x){return x.id===it.prodId;});
-      return s+(p?p.price:it.unitPrice||0)*it.qty;
-    },0);
+function FileUpload({files,onChange,label,maxFiles}) {
+  function pick(){
+    var inp=document.createElement("input");inp.type="file";inp.multiple=true;
+    inp.onchange=function(){
+      var arr=Array.prototype.slice.call(inp.files||[]);
+      arr.forEach(function(f){
+        var rd=new FileReader();
+        rd.onload=function(e){onChange(function(prev){var next=(prev||[]).concat([{name:f.name,size:f.size,type:f.type,dataUrl:e.target.result}]);return next.slice(0,maxFiles||5);});};
+        rd.readAsDataURL(f);
+      });
+    };
+    inp.click();
   }
-
-  function save() {
-    var total = calcTotal();
-    var updated = Object.assign({},order,{
-      items:items,commissionRate:commRate,notes:notes,
-      totals:Object.assign({},order.totals,{
-        subtotal:total,grand:total,commission:total*(commRate/100)
-      }),editedAt:new Date().toISOString(),
-    });
-    updated = addAuditEntry(updated,"Order edited","Admin","Items or commission rate updated");
-    onSave(updated);
-  }
-
   return (
-    <Modal title={"Edit Order — "+order.id} wide={true} onClose={onClose}
+    <div style={{marginBottom:12}}>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>{label}</div>}
+      <div style={{border:"1px dashed "+C.border,borderRadius:8,padding:"12px",cursor:"pointer",textAlign:"center"}} onClick={pick}>
+        <div style={{fontSize:12,color:C.muted}}>📎 Click to attach files {maxFiles?"(max "+maxFiles+")":""}</div>
+      </div>
+      {(files||[]).map(function(f,i){return (
+        <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 8px",background:C.surface2,borderRadius:6,marginTop:4,fontSize:11}}>
+          <span style={{color:C.text}}>{f.name}</span>
+          <Btn small variant="danger" onClick={function(){onChange(function(prev){return prev.filter(function(_,j){return j!==i;});});}}>×</Btn>
+        </div>
+      );})}
+    </div>
+  );
+}
+
+function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
+  const [reqLimit, setReqLimit] = useState("5000");
+  const [reqTerms, setReqTerms] = useState("net_30");
+  const [reason,   setReason]   = useState("");
+  const [bizType,  setBizType]  = useState("");
+  const [annualRev,setAnnualRev]= useState("");
+  const [err,      setErr]      = useState("");
+  const [docs,     setDocs]     = useState([]);
+  function submit() {
+    if(!reason.trim()){setErr("Please provide a reason.");return;}
+    onSubmit({custId:customer.id,custName:customer.name,repId:repId,repName:repName,
+      requestedLimit:parseFloat(reqLimit)||0,requestedTerms:reqTerms,
+      reason:reason.trim(),bizType:bizType.trim(),annualRevenue:annualRev.trim(),
+      documents:docs.map(function(d){return {name:d.name,size:d.size,type:d.type,dataUrl:d.dataUrl};}),
+      submittedAt:new Date().toISOString(),status:"pending"});
+    addToast("Terms request submitted","success"); onClose();
+  }
+  return (
+    <Modal title={"Request Credit Terms — "+customer.name} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={submit}>Submit Request</Btn></div>}>
+      {err&&<div style={{padding:"8px 12px",background:C.danger+"12",borderRadius:6,color:C.danger,fontSize:12,fontWeight:600,marginBottom:12}}>{err}</div>}
+      <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted}}>
+        Requesting credit terms for <strong style={{color:C.text}}>{customer.name}</strong>.
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Drop label="Requested Terms" value={reqTerms} onChange={setReqTerms}
+          opts={[{v:"due_receipt",label:"Due on Receipt"},{v:"net_15",label:"Net 15"},{v:"net_30",label:"Net 30"},{v:"net_45",label:"Net 45"}]}/>
+        <Field label="Credit Limit ($)" value={reqLimit} onChange={setReqLimit} type="number" placeholder="5000"/>
+        <div style={{gridColumn:"1/-1"}}><Field label="Business Type" value={bizType} onChange={setBizType} placeholder="e.g. Medical Clinic"/></div>
+        <div style={{gridColumn:"1/-1"}}><Field label="Annual Revenue ($)" value={annualRev} onChange={setAnnualRev} placeholder="500000"/></div>
+        <div style={{gridColumn:"1/-1"}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Reason *</div>
+          <textarea value={reason} onChange={function(e){setReason(e.target.value);}} rows={3}
+            placeholder="Explain why this customer qualifies for credit terms…"
+            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
+        </div>
+        <div style={{gridColumn:"1/-1"}}>
+          <FileUpload files={docs} onChange={setDocs} label="Supporting Documents (optional)" maxFiles={5}/>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function CustomerPaymentPage({payData,onPaid,onDecline}) {
+  var order=payData.order||{},customer=payData.customer||{},company=payData.company||"PreVasive USA",
+      totals=order.totals||{},items=order.items||[],products=payData.products||[];
+  const [method,     setMethod]     = useState(customer.termsStatus==="active"?customer.termsType||"net_30":"due_receipt");
+  const [cardHolder, setCardHolder] = useState(customer.name||"");
+  const [cardLast4,  setCardLast4]  = useState("");
+  const [cardExpiry, setCardExpiry] = useState("");
+  const [agreed,     setAgreed]     = useState(false);
+  const [paying,     setPaying]     = useState(false);
+  const [done,       setDone]       = useState(false);
+  var isTerms=method==="net_15"||method==="net_30"||method==="net_45"||method==="due_receipt";
+  var canPay=agreed&&(isTerms||(cardLast4.length===4&&cardExpiry.length===5));
+  function pay(){if(!canPay) return;setPaying(true);setTimeout(function(){setPaying(false);onPaid({method:method,cardRef:!isTerms?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder}:null,paidAt:new Date().toISOString()});setDone(true);},800);}
+  if(done) return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:14,padding:"48px 40px",maxWidth:460,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
+        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
+        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Payment Confirmed</div>
+        <div style={{fontSize:13,color:"#6b7c93",marginBottom:20}}>Thank you, <strong>{customer.name||"Customer"}</strong>. Your payment for order <strong>{order.id}</strong> has been received.</div>
+        {window.__rcptLink&&<a href={window.__rcptLink} style={{display:"block",padding:"10px",borderRadius:8,background:"#635bff",color:"#fff",textDecoration:"none",fontWeight:700,fontSize:13,marginBottom:10}}>View Receipt →</a>}
+        <div style={{fontSize:11,color:"#a0aec0"}}>You may close this page.</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</div>
+        <div style={{fontSize:11,color:"#6b7c93"}}>Invoice {order.id} · {fmtMoney(totals.grand||0)} due</div>
+      </div>
+      <div style={{maxWidth:700,margin:"0 auto",padding:"28px 20px",display:"grid",gridTemplateColumns:"1fr 320px",gap:20,alignItems:"start"}}>
+        <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",overflow:"hidden"}}>
+          <div style={{padding:"18px 22px",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between"}}>
+            <div><div style={{fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em"}}>Invoice</div><div style={{fontSize:20,fontWeight:900,color:"#635bff"}}>{order.id}</div></div>
+            <div style={{textAlign:"right",fontSize:12,color:"#6b7c93"}}><div>{fmtDate(order.createdAt)}</div><div>Rep: {order.repName||"—"}</div></div>
+          </div>
+          <div style={{padding:"14px 22px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc"}}>
+            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#6b7c93",marginBottom:4}}>Bill To</div>
+            <div style={{fontWeight:700,fontSize:14,color:"#1a1a2e"}}>{customer.name||"Customer"}</div>
+            {customer.company&&<div style={{fontSize:12,color:"#6b7c93"}}>{customer.company}</div>}
+          </div>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#f6f9fc"}}>{["Product","Qty","Price","Total"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"#6b7c93",textTransform:"uppercase",fontWeight:600}}>{h}</th>;})}</tr></thead>
+            <tbody>{items.map(function(it,i){var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};var cup=it.customerPrice||p.price||0;return (<tr key={i} style={{borderTop:"1px solid #e8ecef"}}><td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:"#1a1a2e"}}>{p.name}</td><td style={{padding:"10px 14px",fontSize:12,color:"#6b7c93"}}>{it.qty}</td><td style={{padding:"10px 14px",fontFamily:"monospace",fontSize:12,color:"#6b7c93"}}>{fmtMoney(cup)}</td><td style={{padding:"10px 14px",fontFamily:"monospace",fontWeight:700,color:"#1a1a2e"}}>{fmtMoney(cup*it.qty)}</td></tr>);})}</tbody>
+          </table>
+          <div style={{padding:"14px 22px",borderTop:"2px solid #e8ecef"}}>
+            {totals.discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#1ea672",marginBottom:4}}><span>Discount</span><span>-{fmtMoney(totals.discount)}</span></div>}
+            {totals.shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span>{fmtMoney(totals.shipping)}</span></div>}
+            {totals.tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Tax</span><span>{fmtMoney(totals.tax)}</span></div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:18,fontWeight:900,color:"#635bff"}}><span>Total Due</span><span>{fmtMoney(totals.grand||0)}</span></div>
+          </div>
+        </div>
+        <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",padding:"20px"}}>
+          <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:14}}>Pay This Invoice</div>
+          <div style={{marginBottom:14}}>
+            {[["due_receipt","💵 Due on Receipt","Pay on delivery"],
+              ...(customer.termsStatus==="active"?[[customer.termsType||"net_30","📋 "+fmtTerms(customer.termsType||"net_30"),"Credit account · $"+(customer.termsLimit||0).toLocaleString()+" limit"]]:[]),
+            ].map(function(opt){var sel=method===opt[0];return (
+              <div key={opt[0]} onClick={function(){setMethod(opt[0]);}} style={{padding:"10px 12px",borderRadius:8,border:"2px solid "+(sel?"#635bff":"#e8ecef"),background:sel?"rgba(99,91,255,.05)":"#fff",cursor:"pointer",marginBottom:8}}>
+                <div style={{fontWeight:700,fontSize:12,color:sel?"#635bff":"#1a1a2e"}}>{opt[1]}</div>
+                <div style={{fontSize:10,color:"#6b7c93",marginTop:1}}>{opt[2]}</div>
+              </div>
+            );})}
+          </div>
+          <label style={{display:"flex",alignItems:"flex-start",gap:7,marginBottom:14,cursor:"pointer"}}>
+            <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{marginTop:2,accentColor:"#635bff"}}/>
+            <span style={{fontSize:11,color:"#6b7c93",lineHeight:1.5}}>I confirm the amount of <strong>{fmtMoney(totals.grand||0)}</strong> and authorize payment.</span>
+          </label>
+          <button onClick={pay} disabled={!canPay||paying} style={{width:"100%",padding:"13px",borderRadius:8,border:"none",background:canPay&&!paying?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",color:canPay&&!paying?"#fff":"#a0aec0",cursor:canPay&&!paying?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:800,fontSize:15}}>
+            {paying?"Processing…":"Confirm Payment →"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CustomerSigningPage({signingData,onSigned,onDecline}) {
+  var customer=signingData.customer||{},req=signingData.req||{},company=signingData.company||"PreVasive USA";
+  const [signerName,  setSignerName]  = useState("");
+  const [scrolled,    setScrolled]    = useState(false);
+  const [agreed,      setAgreed]      = useState(false);
+  const [done,        setDone]        = useState(false);
+  var termsLabel=fmtTerms(req.approvedTerms||"net_30");
+  var limit="$"+(req.approvedLimit||0).toLocaleString();
+  var canSign=scrolled&&signerName.trim().length>=3&&agreed;
+  function handleScroll(e){var el=e.target;if(el.scrollTop+el.clientHeight>=el.scrollHeight-30) setScrolled(true);}
+  if(done) return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:14,padding:"48px 40px",maxWidth:480,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
+        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
+        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Agreement Signed</div>
+        <div style={{fontSize:13,color:"#6b7c93",marginBottom:6}}>Thank you, <strong>{signerName}</strong>. Your credit account agreement has been signed.</div>
+        <div style={{marginTop:20,fontSize:11,color:"#a0aec0"}}>You may close this page. Your rep will be notified.</div>
+      </div>
+    </div>
+  );
+  return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</div>
+        <div style={{fontSize:11,color:"#6b7c93"}}>Credit Agreement — {termsLabel} · {limit}</div>
+      </div>
+      <div style={{maxWidth:700,margin:"0 auto",padding:"28px 20px"}}>
+        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,overflow:"hidden",marginBottom:20}}>
+          <div style={{padding:"12px 20px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <span style={{fontWeight:700,fontSize:13,color:"#1a1a2e"}}>Credit Account Agreement</span>
+            {!scrolled&&<span style={{fontSize:11,color:"#f6ab2f",fontWeight:600}}>↓ Scroll to bottom to sign</span>}
+            {scrolled&&<span style={{fontSize:11,color:"#1ea672",fontWeight:600}}>✓ Document read</span>}
+          </div>
+          <div onScroll={handleScroll} style={{maxHeight:380,overflowY:"auto",padding:"24px 28px"}}>
+            <div style={{fontSize:13,color:"#1a1a2e",lineHeight:1.9,whiteSpace:"pre-wrap",fontFamily:"Georgia,serif"}}>
+              {generateCreditAgreement(customer,req,signingData.template,company)}
+            </div>
+          </div>
+        </div>
+        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,padding:"24px 28px"}}>
+          <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:14}}>Sign this Agreement</div>
+          {!scrolled&&<div style={{padding:"8px 12px",background:"#f6ab2f12",border:"1px solid #f6ab2f25",borderRadius:8,fontSize:12,color:"#f6ab2f",fontWeight:600,marginBottom:12}}>Please scroll through the full document before signing.</div>}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Full Legal Name *</div>
+            <input value={signerName} onChange={function(e){setSignerName(e.target.value);}} placeholder="Your full legal name" disabled={!scrolled}
+              style={{width:"100%",border:"1px solid "+(signerName.length>=3&&scrolled?"#1ea672":"#e8ecef"),borderRadius:7,padding:"9px 12px",color:"#1a1a2e",fontSize:14,fontFamily:"Georgia,serif",fontStyle:"italic",boxSizing:"border-box",outline:"none",background:scrolled?"#fff":"#f6f9fc"}}/>
+          </div>
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:18,cursor:"pointer"}}>
+            <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} disabled={!scrolled} style={{marginTop:2,accentColor:"#635bff"}}/>
+            <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6,opacity:scrolled?1:.6}}>I have read and agree to all terms. I am authorized to sign on behalf of {customer.name||"the business"}.</span>
+          </label>
+          <div style={{display:"flex",gap:10}}>
+            <button onClick={onDecline} style={{flex:1,padding:"12px",borderRadius:7,border:"1px solid #e8ecef",background:"#fff",color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>Decline</button>
+            <button onClick={function(){if(!canSign) return;onSigned({signerName:signerName.trim(),signedAt:new Date().toISOString()});setDone(true);}} disabled={!canSign}
+              style={{flex:2,padding:"12px",borderRadius:7,border:"none",background:canSign?"#635bff":"#e8ecef",color:canSign?"#fff":"#a0aec0",cursor:canSign?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:800,fontSize:15}}>
+              {canSign?"Sign Agreement →":"Complete steps above"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+</script>
+<script id="c3" type="text/plain">
+function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,commRate,payMethod,onClose}) {
+  var cust=selCust||{name:custName||"Customer"};
+  var company=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+  var date=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+  var rate2=parseFloat(commRate)||0;
+  function buildHtml(){
+    var rows=items.filter(function(it){return it.prodId;}).map(function(it){
+      var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+      var cup=Math.round(p.price*(1+rate2/100)*100)/100;
+      return "<tr><td style='padding:10px 14px;font-weight:600;color:#1a1a2e'>"+p.name+"</td><td style='padding:10px 14px;text-align:right;color:#6b7c93'>"+it.qty+"</td><td style='padding:10px 14px;text-align:right;color:#6b7c93'>$"+cup.toFixed(2)+"</td><td style='padding:10px 14px;text-align:right;font-weight:700;color:#1a1a2e'>$"+(cup*it.qty).toFixed(2)+"</td></tr>";
+    }).join("");
+    return "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Preview</title><link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap' rel='stylesheet'><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,sans-serif;background:#f6f9fc;padding:32px 20px}.card{background:#fff;max-width:700px;margin:0 auto;border-radius:14px;border:1px solid #e8ecef;overflow:hidden}table{width:100%;border-collapse:collapse}th{padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600;background:#f6f9fc}</style></head><body>"
+      +"<div style='max-width:700px;margin:0 auto 16px;display:flex;justify-content:space-between'><div style='font-size:12px;color:#6b7c93'>CUSTOMER VIEW PREVIEW</div><button onclick='window.print()' style='padding:6px 12px;border-radius:6px;border:1px solid #e8ecef;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#635bff'>Print</button></div>"
+      +"<div class='card'><div style='padding:20px 24px;border-bottom:1px solid #e8ecef;display:flex;justify-content:space-between'><div style='font-weight:900;font-size:18px;color:#1a1a2e'>"+company+"</div><div style='text-align:right'><div style='font-size:24px;font-weight:900;font-family:monospace;color:#635bff'>$"+((totals.grand||0).toFixed(2))+"</div><div style='font-size:11px;color:#6b7c93'>"+date+"</div></div></div>"
+      +"<div style='padding:14px 24px;background:#f6f9fc;border-bottom:1px solid #e8ecef'><div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Bill To</div><div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+cust.name+"</div>"+(cust.email?"<div style='font-size:12px;color:#6b7c93'>"+cust.email+"</div>":"")+"</div>"
+      +"<table><thead><tr><th>Product</th><th style='text-align:right'>Qty</th><th style='text-align:right'>Price</th><th style='text-align:right'>Total</th></tr></thead><tbody>"+rows+"</tbody></table>"
+      +"<div style='padding:14px 24px;border-top:2px solid #e8ecef'>"
+      +(totals.discount>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Discount</span><span>-$"+totals.discount.toFixed(2)+"</span></div>":"")
+      +(totals.shipping>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Shipping</span><span>$"+totals.shipping.toFixed(2)+"</span></div>":"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Shipping</span><span>Free</span></div>")
+      +(totals.tax>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Tax</span><span>$"+totals.tax.toFixed(2)+"</span></div>":"")
+      +"<div style='display:flex;justify-content:space-between;font-size:18px;font-weight:900;color:#635bff'><span>Total</span><span>$"+((totals.grand||0).toFixed(2))+"</span></div></div></div></body></html>";
+  }
+  return (
+    <Modal title="Customer Invoice Preview" wide={true} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:11,color:C.muted}}>Exactly what your customer sees — no commission shown</div>
+        <div style={{display:"flex",gap:8}}>
+          <Btn variant="ghost" onClick={onClose}>Close</Btn>
+          <Btn onClick={function(){var w=window.open("","_blank");w.document.write(buildHtml());w.document.close();}}>Open in New Tab ↗</Btn>
+        </div>
+      </div>}>
+      <iframe srcDoc={buildHtml()} style={{width:"100%",height:500,border:"none",borderRadius:8,background:"#f6f9fc"}} title="Invoice Preview"/>
+    </Modal>
+  );
+}
+
+function OrderEditModal({order,products,customers,onSave,onClose}) {
+  const [notes, setNotes] = useState(order.notes||"");
+  return (
+    <Modal title={"Edit Order — "+order.id} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={save}>Save Changes</Btn>
+        <Btn onClick={function(){onSave(Object.assign({},order,{notes:notes.trim()}));}}>Save</Btn>
       </div>}>
-      <div style={{marginBottom:14,padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:12,color:C.warning,fontWeight:600}}>
-        ⚠ Only Submitted orders can be edited. Customer: <strong>{cust.name}</strong>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        <div>
-          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Items</div>
-          {items.map(function(it,i){return (
-            <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px auto",gap:8,marginBottom:8,alignItems:"center"}}>
-              <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value}):x;});});}}
-                style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}</option>;})}
-              </select>
-              <input type="number" min="1" value={it.qty}
-                onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{qty:parseInt(e.target.value)||1}):x;});});}}
-                style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
-              <button onClick={function(){setItems(function(prev){return prev.filter(function(_,j){return j!==i;});});}}
-                style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:16}}>×</button>
-            </div>
-          );})}
-          <button onClick={function(){setItems(function(prev){return prev.concat([{prodId:activeProds[0]&&activeProds[0].id||"",qty:1}]);});}}
-            style={{width:"100%",padding:"7px",borderRadius:7,border:"1px dashed "+C.border,background:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>+ Add Item</button>
-        </div>
-        <div>
-          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission Rate</div>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
-            <input type="range" min="0" max="25" step="0.5" value={commRate}
-              onChange={function(e){setCommRate(e.target.value);}} style={{flex:1,accentColor:C.accent}}/>
-            <span style={{fontSize:13,fontWeight:700,color:C.gold,fontFamily:"monospace",minWidth:80}}>{commRate}% = {fmtMoney(calcTotal()*(commRate/100))}</span>
-          </div>
-          <TextArea label="Notes" value={notes} onChange={setNotes} rows={4}/>
-          <div style={{background:C.surface2,borderRadius:10,padding:"12px 14px",marginTop:8}}>
-            <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent}}>
-              <span>New Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcTotal())}</span>
-            </div>
-          </div>
-        </div>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Order Notes</div>
+        <textarea value={notes} onChange={function(e){setNotes(e.target.value);}} rows={4}
+          placeholder="Add notes for this order…"
+          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
       </div>
     </Modal>
   );
 }
 
 function OrderDupModal({order,products,customers,reps,setOrders,addToast,showResult,onClose}) {
-  useEffect(function() {
-    var id = "ORD-"+String(Date.now()).slice(-6);
-    var newOrder = Object.assign({},order,{
-      id:id, status:"Submitted", createdAt:new Date().toISOString(),
-      deliveredAt:null, returnedAt:null, returnReason:null,
-      auditLog:[{ts:new Date().toISOString(),action:"Re-order from "+order.id,actor:"Rep",detail:""}],
-    });
-    setOrders(function(prev){return [newOrder].concat(prev);});
-    dbSave("crm_orders",id,newOrder);
-    addToast("Re-order "+id+" created from "+order.id,"success");
-    showResult({type:"order",title:"Re-order Created!",subtitle:"New order based on "+order.id,
-      rows:[["New Order",id],["Customer",order.custName||""],["Total",fmtMoney(order.totals&&order.totals.grand||0)],["Status","Submitted"]],cta:"Done"});
-    setTimeout(onClose, 50);
-  }, []);
-  return null;
-}
-
-
-function CustomerPaymentPage({payData,onPaid,onDecline}) {
-  var order    = payData.order||{};
-  var customer = payData.customer||{};
-  var company  = payData.company||"PreVasive USA";
-  var totals   = order.totals||{};
-  var items    = order.items||[];
-  var products = payData.products||[];
-  const [method,     setMethod]     = useState(customer.termsStatus==="active"?customer.termsType||"net_30":"credit_card");
-  const [cardHolder, setCardHolder] = useState(customer.name||"");
-  const [cardLast4,  setCardLast4]  = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardZip,    setCardZip]    = useState("");
-  const [agreed,     setAgreed]     = useState(false);
-  const [paying,     setPaying]     = useState(false);
-  const [done,       setDone]       = useState(false);
-
-  var isTerms  = method==="due_receipt"||method==="net_15"||method==="net_30"||method==="net_45";
-  var canPay   = agreed && (isTerms || (cardLast4.length===4 && cardExpiry.length===5));
-
-  function pay() {
-    if(!canPay) return;
-    setPaying(true);
-    setTimeout(function(){
-      setPaying(false);
-      onPaid({method:method,cardRef:!isTerms?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null,paidAt:new Date().toISOString()});
-      setDone(true);
-    },800);
+  const [repId2, setRepId2] = useState(order.repId||"");
+  function dup(){
+    var nid = genId("ord");
+    var newOrd = Object.assign({},order,{id:nid,repId:repId2,status:"Submitted",createdAt:new Date().toISOString(),paidAt:null,shippedAt:null,trackingNumber:null,carrier:null});
+    setOrders(function(prev){return [newOrd].concat(prev);});
+    dbSave("crm_orders",nid,newOrd);
+    addToast("Order duplicated — "+nid,"success");
+    onClose();
   }
-
-  if(done) return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderRadius:14,padding:"48px 40px",maxWidth:460,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
-        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
-        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Payment Confirmed</div>
-        <div style={{fontSize:13,color:"#6b7c93",marginBottom:20,lineHeight:1.6}}>
-          Thank you, <strong>{customer.name||"Customer"}</strong>. Your payment for order <strong>{order.id}</strong> has been received.
-        </div>
-        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",textAlign:"left"}}>
-          {[["Order",order.id],["Total",fmtMoney(totals.grand||0)],["Method",fmtTerms(method)],["Date",new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})]].map(function(r,i){return (
-            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:i<3?"1px solid #e8ecef":"none"}}>
-              <span style={{color:"#6b7c93"}}>{r[0]}</span><span style={{fontWeight:700,color:"#1a1a2e"}}>{r[1]}</span>
-            </div>
-          );})}
-        </div>
-        <div style={{marginTop:20,fontSize:11,color:"#a0aec0"}}>You may close this page. A receipt has been recorded.</div>
-      </div>
-    </div>
-  );
-
   return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif"}}>
-      {/* Header */}
-      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:28,height:28,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:"#fff"}}>P</div>
-          <span style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</span>
-        </div>
-        <div style={{fontSize:11,color:"#6b7c93"}}>Invoice {order.id} · {fmtMoney(totals.grand||0)} due</div>
-      </div>
-
-      <div style={{maxWidth:700,margin:"0 auto",padding:"28px 20px",display:"grid",gridTemplateColumns:"1fr 340px",gap:20,alignItems:"start"}}>
-
-        {/* Invoice */}
-        <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",overflow:"hidden"}}>
-          <div style={{padding:"20px 22px",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-            <div>
-              <div style={{fontSize:11,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>Invoice</div>
-              <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:"#635bff"}}>{order.id}</div>
-            </div>
-            <div style={{textAlign:"right",fontSize:12,color:"#6b7c93"}}>
-              <div>Date: {fmtDate(order.createdAt)}</div>
-              <div>Rep: {order.repName||"—"}</div>
-            </div>
-          </div>
-          <div style={{padding:"16px 22px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc"}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#6b7c93",marginBottom:4}}>Bill To</div>
-            <div style={{fontWeight:700,fontSize:14,color:"#1a1a2e"}}>{customer.name||"Customer"}</div>
-            {customer.company&&<div style={{fontSize:12,color:"#6b7c93"}}>{customer.company}</div>}
-            {customer.email&&<div style={{fontSize:12,color:"#6b7c93"}}>{customer.email}</div>}
-          </div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{background:"#f6f9fc"}}>
-              {["Product","Qty","Unit Price","Total"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
-            </tr></thead>
-            <tbody>
-              {items.map(function(it,i){
-                var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-                var cup=it.customerPrice||p.price||0;
-                return (
-                  <tr key={i} style={{borderTop:"1px solid #e8ecef"}}>
-                    <td style={{padding:"10px 14px",fontSize:13,color:"#1a1a2e",fontWeight:600}}>{p.name}</td>
-                    <td style={{padding:"10px 14px",fontSize:12,color:"#6b7c93"}}>{it.qty}</td>
-                    <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:"#6b7c93"}}>{fmtMoney(p.price||0)}</td>
-                    <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:"#1a1a2e"}}>{fmtMoney((p.price||0)*it.qty)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          <div style={{padding:"14px 22px",borderTop:"2px solid #e8ecef"}}>
-            {totals.discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#1ea672",marginBottom:4}}><span>Discount</span><span style={{fontFamily:"monospace"}}>-{fmtMoney(totals.discount)}</span></div>}
-            {totals.shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.shipping)}</span></div>}
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:18,fontWeight:900,color:"#635bff"}}><span>Total Due</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand||0)}</span></div>
-          </div>
-        </div>
-
-        {/* Payment form */}
-        <div>
-          <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",padding:"20px"}}>
-            <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:16}}>Pay This Invoice</div>
-
-            {/* Payment method */}
-            <div style={{marginBottom:16}}>
-              <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:8}}>Payment Method</div>
-              {(function(){
-                var payOpts=[{v:"due_receipt",l:"💵 Due on Receipt",sub:"Payment due upon delivery"}];
-                if(customer.termsStatus==="active") payOpts.push({v:customer.termsType||"net_30",l:"📋 "+fmtTerms(customer.termsType||"net_30"),sub:"Credit account · $"+(customer.termsLimit||0).toLocaleString()+" limit"});
-                return payOpts;
-              })().map(function(opt){
-                var sel=method===(opt.v||opt[0]);
-                return (
-                  <div key={opt.v||opt[0]} onClick={function(){setMethod(opt.v||opt[0]);}}
-                    style={{padding:"10px 12px",borderRadius:8,border:"2px solid "+(sel?"#635bff":"#e8ecef"),background:sel?"rgba(99,91,255,.05)":"#fff",cursor:"pointer",marginBottom:8}}>
-                    <div style={{fontWeight:700,fontSize:12,color:sel?"#635bff":"#1a1a2e"}}>{opt.l||opt[1]}</div>
-                    <div style={{fontSize:10,color:"#6b7c93",marginTop:1}}>{opt.sub||opt[2]}</div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Card fields */}
-            {method==="credit_card"&&(
-              <div style={{marginBottom:16}}>
-                <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:8}}>Card Details</div>
-                {[["Cardholder Name",cardHolder,setCardHolder,"text","Jane Smith","1/-1"],
-                  ["Card Number (last 4)","···· ···· ···· "+cardLast4,function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));},"text","4242","1"],
-                  ["Expiry",cardExpiry,function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);},"text","MM/YY","1"],
-                  ["Billing ZIP",cardZip,setCardZip,"text","30309","1"],
-                ].map(function(f,i){
-                  var isFullWidth=f[5]==="1/-1";
-                  return (
-                    <div key={i} style={{marginBottom:8,gridColumn:isFullWidth?"1/-1":"auto"}}>
-                      <div style={{fontSize:10,fontWeight:600,color:"#6b7c93",marginBottom:3}}>{f[0]}</div>
-                      <input value={f[1]} onChange={typeof f[2]==="function"&&f[2].length===1?function(e){f[2](e.target.value);}:f[2]}
-                        placeholder={f[4]} type={f[3]} maxLength={f[0]==="Card Number (last 4)"?10:f[0]==="Expiry"?5:undefined}
-                        style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"8px 10px",fontSize:12,fontFamily:f[0]==="Card Number (last 4)"||f[0]==="Expiry"?"monospace":"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"}}/>
-                    </div>
-                  );
-                })}
-                <div style={{fontSize:10,color:"#a0aec0",marginTop:6}}>🔒 Card info for reference only. Processed securely by your rep.</div>
-              </div>
-            )}
-
-            {isTerms&&(
-              <div style={{padding:"10px 12px",background:"rgba(30,166,114,.08)",border:"1px solid rgba(30,166,114,.2)",borderRadius:8,marginBottom:14,fontSize:12,color:"#1ea672",fontWeight:600}}>
-                ✓ Payment due {fmtTerms(method)} from invoice date
-              </div>
-            )}
-
-            <label style={{display:"flex",alignItems:"flex-start",gap:7,marginBottom:14,cursor:"pointer"}}>
-              <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{marginTop:2,accentColor:"#635bff"}}/>
-              <span style={{fontSize:11,color:"#6b7c93",lineHeight:1.5}}>
-                I confirm the amount of <strong style={{color:"#1a1a2e"}}>{fmtMoney(totals.grand||0)}</strong> is correct and authorize payment via the selected method.
-              </span>
-            </label>
-
-            <button onClick={pay} disabled={!canPay||paying}
-              style={{width:"100%",padding:"13px",borderRadius:8,border:"none",
-                      background:canPay&&!paying?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",
-                      color:canPay&&!paying?"#fff":"#a0aec0",cursor:canPay&&!paying?"pointer":"not-allowed",
-                      fontFamily:"inherit",fontWeight:800,fontSize:15,
-                      boxShadow:canPay&&!paying?"0 4px 14px rgba(99,91,255,.35)":"none"}}>
-              {paying?"Processing…":isTerms?"Confirm Invoice ✓":"Pay "+fmtMoney(totals.grand||0)+" →"}
-            </button>
-          </div>
-
-          <div style={{marginTop:12,fontSize:10,color:"#a0aec0",textAlign:"center",lineHeight:1.6}}>
-            Secure invoice from {company} · Questions? Contact your sales rep.
-          </div>
-        </div>
-      </div>
-    </div>
+    <Modal title={"Duplicate Order — "+order.id} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={dup}>Duplicate Order</Btn></div>}>
+      <div style={{fontSize:12,color:C.muted,marginBottom:16,lineHeight:1.6}}>Creates a copy of this order as a new Submitted order.</div>
+      <Drop label="Assign to Rep" value={repId2} onChange={setRepId2}
+        opts={reps.map(function(r){return {v:r.id,label:r.name};})}/>
+    </Modal>
   );
 }
-
-
-
-</script>
-<script id="c3" type="text/plain">
-function CustomerSigningPage({signingData,onSigned,onDecline}) {
-  var customer = signingData.customer||{};
-  var req      = signingData.req||{};
-  var agreementHtml = signingData.agreementHtml||"";
-  var company  = signingData.company||"PreVasive USA";
-  const [signerName,  setSignerName]  = useState("");
-  const [signerTitle, setSignerTitle] = useState("");
-  const [scrolled,    setScrolled]    = useState(false);
-  const [agreed,      setAgreed]      = useState(false);
-  const [done,        setDone]        = useState(false);
-
-  var termsLabel = fmtTerms(req.approvedTerms||"net_30");
-  var limit = "$"+(req.approvedLimit||0).toLocaleString();
-  var nameMatch = signerName.trim().length>=3;
-  var canSign = scrolled && nameMatch && agreed;
-
-  function handleScroll(e){
-    var el=e.target;
-    if(el.scrollTop+el.clientHeight>=el.scrollHeight-30) setScrolled(true);
-  }
-
-  if(done) return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
-      <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:14,padding:"48px 40px",maxWidth:480,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
-        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",border:"2px solid #1ea67230",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
-        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Agreement Signed</div>
-        <div style={{fontSize:13,color:"#6b7c93",marginBottom:6,lineHeight:1.6}}>
-          Thank you, <strong>{signerName}</strong>. Your credit account agreement has been signed and recorded.
-        </div>
-        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",marginTop:20,textAlign:"left"}}>
-          {[["Customer",customer.name||""],["Terms",termsLabel],["Credit Limit",limit],["Signed",new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})]].map(function(row,i){return (
-            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:i<3?"1px solid #e8ecef":"none"}}>
-              <span style={{color:"#6b7c93"}}>{row[0]}</span><span style={{fontWeight:700,color:"#1a1a2e"}}>{row[1]}</span>
-            </div>
-          );})}
-        </div>
-        <div style={{marginTop:20,fontSize:11,color:"#a0aec0"}}>You may close this page. Your rep will be notified.</div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"'Inter',system-ui,sans-serif"}}>
-      {/* Header */}
-      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:28,height:28,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:900,color:"#fff"}}>P</div>
-          <span style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</span>
-        </div>
-        <div style={{fontSize:11,color:"#6b7c93"}}>Credit Account Agreement — {termsLabel} · {limit}</div>
-      </div>
-
-      <div style={{maxWidth:760,margin:"0 auto",padding:"28px 20px"}}>
-        {/* Customer info banner */}
-        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,padding:"16px 20px",marginBottom:20,
-                     display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:12}}>
-          <div>
-            <div style={{fontWeight:800,fontSize:17,color:"#1a1a2e"}}>{customer.name}</div>
-            <div style={{fontSize:12,color:"#6b7c93",marginTop:2}}>{customer.company||customer.email||""}</div>
-          </div>
-          <div style={{display:"flex",gap:16}}>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em"}}>Terms</div>
-              <div style={{fontWeight:800,color:"#635bff",fontSize:15}}>{termsLabel}</div>
-            </div>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em"}}>Credit Limit</div>
-              <div style={{fontWeight:800,color:"#1a1a2e",fontSize:15}}>{limit}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Agreement document */}
-        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,overflow:"hidden",marginBottom:20}}>
-          <div style={{padding:"12px 20px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc",
-                       display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontWeight:700,fontSize:13,color:"#1a1a2e"}}>Credit Account Agreement</span>
-            {!scrolled&&<span style={{fontSize:11,color:"#f6ab2f",fontWeight:600}}>↓ Scroll to bottom to sign</span>}
-            {scrolled&&<span style={{fontSize:11,color:"#1ea672",fontWeight:600}}>✓ Document read</span>}
-          </div>
-          <div onScroll={handleScroll}
-            style={{maxHeight:420,overflowY:"auto",padding:"24px 28px"}}>
-            <div style={{fontSize:13,color:"#1a1a2e",lineHeight:1.9,whiteSpace:"pre-wrap",fontFamily:"Georgia,serif"}}>
-              {generateCreditAgreement(customer, req, signingData.template, company)}
-            </div>
-            {!scrolled&&<div style={{height:60,background:"linear-gradient(transparent,#fff)",position:"sticky",bottom:0,display:"flex",alignItems:"flex-end",justifyContent:"center",paddingBottom:8}}>
-              <span style={{fontSize:11,color:"#6b7c93"}}>↓ Continue scrolling to read the full agreement</span>
-            </div>}
-          </div>
-        </div>
-
-        {/* Signature block */}
-        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,padding:"24px 28px",marginBottom:20}}>
-          <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:16}}>Sign this Agreement</div>
-          {!scrolled&&(
-            <div style={{padding:"10px 14px",background:"#f6ab2f12",border:"1px solid #f6ab2f25",borderRadius:8,fontSize:12,color:"#f6ab2f",fontWeight:600,marginBottom:16}}>
-              Please scroll through the entire document above before signing.
-            </div>
-          )}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
-            <div>
-              <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Full Legal Name *</div>
-              <input value={signerName} onChange={function(e){setSignerName(e.target.value);}}
-                placeholder="Your full legal name" disabled={!scrolled}
-                style={{width:"100%",border:"1px solid "+(signerName.trim().length>=3&&scrolled?"#1ea672":"#e8ecef"),
-                        borderRadius:7,padding:"9px 12px",color:"#1a1a2e",fontSize:14,
-                        fontFamily:"Georgia,serif",fontStyle:"italic",boxSizing:"border-box",outline:"none",
-                        background:scrolled?"#fff":"#f6f9fc",opacity:scrolled?1:.6}}/>
-            </div>
-            <div>
-              <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Title / Position</div>
-              <input value={signerTitle} onChange={function(e){setSignerTitle(e.target.value);}}
-                placeholder="e.g. Owner, CFO, Manager" disabled={!scrolled}
-                style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"9px 12px",
-                        color:"#1a1a2e",fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",
-                        background:scrolled?"#fff":"#f6f9fc",opacity:scrolled?1:.6}}/>
-            </div>
-          </div>
-          <label style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:20,cursor:"pointer"}}>
-            <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}}
-              disabled={!scrolled} style={{marginTop:2,width:14,height:14,accentColor:"#635bff"}}/>
-            <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6,opacity:scrolled?1:.6}}>
-              I have read and fully understand this Credit Account Agreement. I agree to all terms and conditions, and personally guarantee all obligations. I am authorized to sign on behalf of {customer.name||"the business"}.
-            </span>
-          </label>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={onDecline}
-              style={{flex:1,padding:"12px",borderRadius:7,border:"1px solid #e8ecef",background:"#fff",
-                      color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>
-              Decline
-            </button>
-            <button onClick={function(){
-                if(!canSign) return;
-                onSigned({signerName:signerName.trim(),signerTitle:signerTitle.trim(),signedAt:new Date().toISOString()});
-                setDone(true);
-              }}
-              disabled={!canSign}
-              style={{flex:2,padding:"12px",borderRadius:7,border:"none",
-                      background:canSign?"#635bff":"#e8ecef",
-                      color:canSign?"#fff":"#a0aec0",cursor:canSign?"pointer":"not-allowed",
-                      fontFamily:"inherit",fontWeight:800,fontSize:15,
-                      boxShadow:canSign?"0 4px 14px rgba(99,91,255,.3)":"none"}}>
-              {canSign?"Sign Agreement →":"Complete all steps above"}
-            </button>
-          </div>
-          <div style={{marginTop:12,fontSize:10,color:"#a0aec0",textAlign:"center",lineHeight:1.5}}>
-            By signing, you agree this digital signature is legally binding · {new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-
-function generateCreditAgreement(customer, req, template, company) {
-  var co   = company||"PreVasive USA";
-  var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
-  var termsLabel = fmtTerms(req.approvedTerms||req.requestedTerms||"net_30");
-  var limit = "$"+(req.approvedLimit||req.requestedLimit||0).toLocaleString();
-
-  var defaultTemplate = "CREDIT ACCOUNT AGREEMENT\n\n"
-    +"This Credit Account Agreement is entered into as of {{date}} between {{company_name}} (the Company) and {{customer_name}} (the Customer).\n\n"
-    +"1. CREDIT TERMS\n"
-    +"The Company hereby grants Customer a credit account with the following terms:\n"
-    +"   Payment Terms: {{terms_type}}\n"
-    +"   Credit Limit:  {{credit_limit}}\n\n"
-    +"2. PAYMENT OBLIGATIONS\n"
-    +"Customer agrees to pay all invoices in full within the approved payment terms from invoice date. "
-    +"Late payments accrue interest at 1.5% per month (18% per annum) on outstanding balances.\n\n"
-    +"3. CREDIT LIMIT\n"
-    +"The credit limit of {{credit_limit}} may not be exceeded without prior written approval. "
-    +"The Company reserves the right to reduce or revoke credit at any time based on payment history or business standing.\n\n"
-    +"4. PERSONAL GUARANTEE\n"
-    +"By signing, the authorized signer personally guarantees payment of all amounts owed by Customer under this agreement. "
-    +"This guarantee is unconditional and survives any dissolution or restructuring of the Customer business.\n\n"
-    +"5. BUSINESS STANDING\n"
-    +"Customer agrees to maintain good business standing, provide updated financial information upon request, "
-    +"and notify Company of any material changes to ownership, structure, or financial condition within 30 days.\n\n"
-    +"6. DEFAULT\n"
-    +"Failure to pay within terms, exceeding the credit limit, or material misrepresentation constitutes default. "
-    +"Company may suspend credit privileges, accelerate all outstanding balances, and pursue collection at Customer's expense.\n\n"
-    +"7. GOVERNING LAW\n"
-    +"This agreement is governed by the laws of the State of Georgia.";
-
-  var body = (template||defaultTemplate)
-    .replace(/\{\{date\}\}/g, date)
-    .replace(/\{\{company_name\}\}/g, co)
-    .replace(/\{\{customer_name\}\}/g, customer.name||"Customer")
-    .replace(/\{\{terms_type\}\}/g, termsLabel)
-    .replace(/\{\{credit_limit\}\}/g, limit)
-    .replace(/\{\{business_type\}\}/g, req.bizType||"Business")
-    .replace(/\{\{rep_name\}\}/g, req.repName||"Sales Representative");
-
-  return body;
-}
-
-function generateCreditAgreementHtml(customer, req, template, company) {
-  var body = generateCreditAgreement(customer, req, template, company);
-  var co   = company||"PreVasive USA";
-  var termsLabel = fmtTerms(req.approvedTerms||req.requestedTerms||"net_30");
-  var limit = "$"+(req.approvedLimit||req.requestedLimit||0).toLocaleString();
-  var date = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
-
-  return "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>"
-    +"body{font-family:-apple-system,Arial,sans-serif;max-width:720px;margin:40px auto;padding:0 24px;font-size:13px;color:#1a1a2e;line-height:1.8}"
-    +"h1{font-size:22px;font-weight:800;color:#635bff;margin-bottom:4px}h2{font-size:13px;font-weight:700;color:#1a1a2e;margin-top:20px;margin-bottom:6px}"
-    +".meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f6f9fc;padding:16px;border-radius:8px;margin:16px 0}"
-    +".meta-item{font-size:12px}.meta-label{color:#6b7c93;font-size:10px;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px}"
-    +".meta-value{font-weight:700;color:#1a1a2e}"
-    +".body-text{white-space:pre-wrap;font-size:13px;line-height:1.9}"
-    +".sig-block{margin-top:40px;padding:24px;border:2px solid #e8ecef;border-radius:10px;background:#fafbff}"
-    +".sig-line{border-bottom:1px solid #1a1a2e;margin:16px 0 4px;min-height:32px}"
-    +".footer{margin-top:32px;font-size:10px;color:#a0aec0;border-top:1px solid #e8ecef;padding-top:12px}"
-    +"</style></head><body>"
-    +"<div style='display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px'>"
-    +"<div><h1>"+co+"</h1><div style='font-size:11px;color:#6b7c93'>Credit Account Agreement</div></div>"
-    +"<div style='text-align:right;font-size:11px;color:#6b7c93'>Date: "+date+"<br>Ref: "+customer.id+"</div>"
-    +"</div>"
-    +"<div class='meta'>"
-    +"<div class='meta-item'><div class='meta-label'>Customer</div><div class='meta-value'>"+customer.name+"</div></div>"
-    +"<div class='meta-item'><div class='meta-label'>Business</div><div class='meta-value'>"+(req.bizType||"—")+"</div></div>"
-    +"<div class='meta-item'><div class='meta-label'>Payment Terms</div><div class='meta-value'>"+termsLabel+"</div></div>"
-    +"<div class='meta-item'><div class='meta-label'>Credit Limit</div><div class='meta-value'>"+limit+"</div></div>"
-    +"</div>"
-    +"<div class='body-text'>"+body.replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>"
-    +"<div class='sig-block'>"
-    +"<div style='font-weight:800;font-size:14px;color:#1a1a2e;margin-bottom:16px'>Digital Signatures</div>"
-    +"<div style='display:grid;grid-template-columns:1fr 1fr;gap:24px'>"
-    +"<div><div style='font-size:11px;color:#6b7c93;margin-bottom:4px'>Authorized Signer — Customer</div>"
-    +"<div class='sig-line'></div><div style='font-size:10px;color:#6b7c93'>Signature / Date</div></div>"
-    +"<div><div style='font-size:11px;color:#6b7c93;margin-bottom:4px'>Authorized — "+co+"</div>"
-    +"<div class='sig-line'></div><div style='font-size:10px;color:#6b7c93'>Signature / Date</div></div>"
-    +"</div></div>"
-    +"<div class='footer'>This agreement is legally binding. Generated by "+co+" CRM on "+date+".</div>"
-    +"</body></html>";
-}
-
-
-function FileUpload({files,onChange,maxFiles,accept,label}) {
-  var MAX = maxFiles||5;
-  var inputRef = {current:null};
-
-  function handleFiles(newFiles) {
-    var arr = Array.prototype.slice.call(newFiles);
-    arr = arr.filter(function(f){return f.size < 5*1024*1024;});
-    arr.slice(0,MAX-files.length).forEach(function(file){
-      var reader = new FileReader();
-      reader.onload = function(e){
-        onChange(function(prev){
-          return prev.concat([{name:file.name,size:file.size,type:file.type,dataUrl:e.target.result,addedAt:new Date().toISOString()}]).slice(0,MAX);
-        });
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  function handleDrop(e){e.preventDefault();handleFiles(e.dataTransfer.files);}
-  function handleDrag(e){e.preventDefault();}
-
-  return (
-    <div>
-      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>{label}</div>}
-      <div onDrop={handleDrop} onDragOver={handleDrag}
-        style={{border:"2px dashed "+C.border,borderRadius:10,padding:"20px",textAlign:"center",
-                cursor:"pointer",background:C.surface2,transition:"border-color .15s"}}
-        onMouseEnter={function(e){e.currentTarget.style.borderColor=C.accent;}}
-        onMouseLeave={function(e){e.currentTarget.style.borderColor=C.border;}}
-        onClick={function(){document.getElementById("fu-input").click();}}>
-        <input id="fu-input" type="file" multiple accept={accept||".pdf,.jpg,.jpeg,.png,.doc,.docx"}
-          style={{display:"none"}}
-          onChange={function(e){handleFiles(e.target.files);e.target.value="";}}/>
-        <div style={{fontSize:22,marginBottom:6}}>📎</div>
-        <div style={{fontSize:12,fontWeight:600,color:C.text,marginBottom:3}}>
-          Drop files or click to upload
-        </div>
-        <div style={{fontSize:10,color:C.dim}}>
-          PDF, JPG, PNG, DOC · Max 5MB each · Up to {MAX} files
-        </div>
-      </div>
-      {files.length>0&&(
-        <div style={{marginTop:10}}>
-          {files.map(function(f,i){return (
-            <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",
-                                 background:C.surface,border:"1px solid "+C.border,
-                                 borderRadius:8,marginBottom:6}}>
-              <span style={{fontSize:16}}>{f.type&&f.type.indexOf("pdf")>=0?"📄":f.type&&f.type.indexOf("image")>=0?"🖼":"📎"}</span>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.name}</div>
-                <div style={{fontSize:10,color:C.dim}}>{(f.size/1024).toFixed(0)}KB</div>
-              </div>
-              {f.dataUrl&&f.type&&f.type.indexOf("image")>=0&&(
-                <img src={f.dataUrl} alt="" style={{width:32,height:32,objectFit:"cover",borderRadius:4,border:"1px solid "+C.border}}/>
-              )}
-              <button onClick={function(e){e.stopPropagation();onChange(function(prev){return prev.filter(function(_,j){return j!==i;});});}}
-                style={{background:"none",border:"none",color:C.danger,cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 4px"}}>×</button>
-            </div>
-          );})}
-        </div>
-      )}
-    </div>
-  );
-}
-
 
 function CustomerEditModal({customer,onSave,onClose,addToast}) {
-  var approved = customer.termsStatus==="active"||customer.termsStatus==="awaiting_signature"||customer.termsStatus==="approved";
-  const [email,   setEmail]   = useState(customer.email||"");
-  const [phone,   setPhone]   = useState(customer.phone||"");
-  const [company, setCompany] = useState(customer.company||"");
-  const [addr,    setAddr]    = useState(customer.address||"");
-  const [city,    setCity]    = useState(customer.city||"");
-  const [state2,  setState2]  = useState(customer.state||"");
-  const [zip,     setZip]     = useState(customer.zip||"");
-  // Name only editable if NOT approved
-  const [name,    setName]    = useState(customer.name||"");
-
-  function save() {
-    if(!name.trim()){return;}
-    var updated = Object.assign({},customer,{
-      name:approved?customer.name:name.trim(), // lock name if approved
-      email:email.trim(), phone:phone.trim(),
-      company:company.trim(), address:addr.trim(),
-      city:city.trim(), state:state2.trim(), zip:zip.trim(),
+  var approved=customer.termsStatus==="active"||customer.termsStatus==="awaiting_signature"||customer.termsStatus==="approved";
+  const [email,     setEmail]     = useState(customer.email||"");
+  const [phone,     setPhone]     = useState(customer.phone||"");
+  const [company,   setCompany]   = useState(customer.company||"");
+  const [name,      setName]      = useState(customer.name||"");
+  const [addresses, setAddresses] = useState((function(){
+    if(customer.addresses&&customer.addresses.length>0) return customer.addresses;
+    if(customer.address) return [{id:genId("adr"),label:"Primary",address:customer.address||"",city:customer.city||"",state:customer.state||"",zip:customer.zip||"",isPrimary:true}];
+    return [];
+  })());
+  function save(){
+    if(!name.trim()) return;
+    var primary=addresses.find(function(a){return a.isPrimary;})||addresses[0]||{};
+    var updated=Object.assign({},customer,{
+      name:approved?customer.name:name.trim(),email:email.trim(),phone:phone.trim(),company:company.trim(),
+      addresses:addresses,address:primary.address||"",city:primary.city||"",state:primary.state||"",zip:primary.zip||"",
       updatedAt:new Date().toISOString(),
     });
-    onSave(updated);
-    addToast("Customer updated","success");
-    onClose();
+    onSave(updated);addToast("Customer updated","success");onClose();
   }
-
   return (
     <Modal title={"Edit Customer — "+customer.name} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={save}>Save Changes</Btn>
-      </div>}>
-
-      {approved&&(
-        <div style={{padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:16,fontSize:12,color:C.warning,fontWeight:600}}>
-          ⚠ This customer has an approved credit account. Name cannot be changed.
-        </div>
-      )}
-
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={save}>Save Changes</Btn></div>}>
+      {approved&&<div style={{padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.warning,fontWeight:600}}>⚠ Credit account approved — name cannot be changed.</div>}
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        {/* Name — locked if approved */}
         <div style={{gridColumn:"1/-1"}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>
-            Full Name {approved&&<span style={{color:C.warning,fontSize:10}}>🔒 Locked</span>}
-          </div>
-          <input value={approved?customer.name:name}
-            onChange={function(e){if(!approved)setName(e.target.value);}}
-            disabled={approved}
-            style={{width:"100%",background:approved?C.surface2:C.bg,border:"1px solid "+C.border,
-                    borderRadius:7,padding:"8px 12px",color:approved?C.dim:C.text,
-                    fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",
-                    opacity:approved?0.7:1,cursor:approved?"not-allowed":"text"}}/>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Full Name {approved&&<span style={{color:C.warning,fontSize:10}}>🔒 Locked</span>}</div>
+          <input value={approved?customer.name:name} onChange={function(e){if(!approved)setName(e.target.value);}} disabled={approved}
+            style={{width:"100%",background:approved?C.surface2:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:approved?C.dim:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",opacity:approved?0.7:1,cursor:approved?"not-allowed":"text"}}/>
         </div>
-
-        <div style={{gridColumn:"1/-1"}}>
-          <Field label="Company / Practice Name" value={company} onChange={setCompany}
-            placeholder="e.g. Atlanta Medical Group"/>
-        </div>
-
-        <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
-
-        <div style={{gridColumn:"1/-1",fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em"}}>Contact</div>
-
+        <div style={{gridColumn:"1/-1"}}><Field label="Company / Practice" value={company} onChange={setCompany} placeholder="e.g. Atlanta Medical Group"/></div>
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="email@practice.com"/>
         <Field label="Phone" value={phone} onChange={setPhone} placeholder="(404) 555-0100"/>
-
         <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
-
-        <div style={{gridColumn:"1/-1",fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em"}}>Address</div>
-
         <div style={{gridColumn:"1/-1"}}>
-          <Field label="Street Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/>
+          <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Addresses</div>
+          <MultiAddressManager addresses={addresses} onChange={setAddresses}/>
         </div>
-        <Field label="City" value={city} onChange={setCity}/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-          <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
-          <Field label="ZIP" value={zip} onChange={setZip} placeholder="30309"/>
-        </div>
+      </div>
+    </Modal>
+  );
+}
 
-        {zip&&getGaTaxRate(zip)&&(
-          <div style={{gridColumn:"1/-1",padding:"8px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:7,fontSize:11,color:C.muted,display:"flex",justifyContent:"space-between"}}>
-            <span>📍 {getGaTaxRate(zip).county} County, Georgia</span>
-            <span style={{fontWeight:700,color:C.accent}}>{((getGaTaxRate(zip).rate||0)*100).toFixed(1)}% sales tax</span>
+
+function generateReceiptToken(order, customer, paymentRef, company) {
+  var token = order.id+"_rcpt_"+Math.random().toString(36).slice(2,8);
+  var rData = {token:token,order:order,customer:customer,paymentRef:paymentRef,
+    company:company||"PreVasive USA",paidAt:new Date().toISOString()};
+  localStorage.setItem("__pv__rcpt_"+token,JSON.stringify(rData));
+  return token;
+}
+
+function ReceiptPage({receiptData}) {
+  var order=receiptData.order||{},customer=receiptData.customer||{},
+      company=receiptData.company||"PreVasive USA",totals=order.totals||{},
+      items=order.items||[],paidAt=receiptData.paidAt||new Date().toISOString(),
+      payRef=receiptData.paymentRef||{};
+  var payLabel=payRef.type==="card"?"Credit Card ····"+payRef.last4:payRef.type==="cash"?"Cash":payRef.type==="check"?"Check"+(payRef.ref?" #"+payRef.ref:""):fmtTerms(order.payMethod||"due_receipt");
+  return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif",padding:"32px 20px"}}>
+      <div style={{maxWidth:520,margin:"0 auto"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{width:52,height:52,borderRadius:"50%",background:"#1ea67215",border:"2px solid #1ea67230",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 12px"}}>✓</div>
+          <div style={{fontSize:24,fontWeight:900,color:"#1a1a2e",marginBottom:4}}>Payment Confirmed</div>
+          <div style={{fontSize:13,color:"#6b7c93"}}>Thank you, {customer.name||order.custName||"Customer"}</div>
+        </div>
+        <div style={{background:"#fff",borderRadius:14,border:"1px solid #e8ecef",overflow:"hidden",boxShadow:"0 4px 24px rgba(0,0,0,.06)"}}>
+          <div style={{padding:"16px 22px",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontWeight:900,fontSize:17,color:"#1a1a2e"}}>{company}</div>
+            <div style={{fontFamily:"monospace",fontWeight:700,color:"#635bff",fontSize:13}}>{order.id}</div>
           </div>
-        )}
+          <div style={{padding:"14px 22px",background:"#f6fdf9",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:10,color:"#6b7c93",marginBottom:1}}>Amount Paid</div>
+              <div style={{fontSize:26,fontWeight:900,fontFamily:"monospace",color:"#1ea672"}}>{fmtMoney(totals.grand||0)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:12,fontWeight:600,color:"#1a1a2e"}}>{fmtDate(paidAt)}</div>
+              <div style={{fontSize:11,color:"#6b7c93",marginTop:3}}>{payLabel}</div>
+            </div>
+          </div>
+          <div style={{padding:"14px 22px",borderBottom:"1px solid #e8ecef"}}>
+            {items.filter(function(it){return it.prodId;}).map(function(it,i){
+              var cup=it.customerPrice||it.unitPrice||0;
+              return (
+                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid #f6f9fc"}}>
+                  <span style={{color:"#374151",fontWeight:600}}>{it.productName||it.prodId} ×{it.qty}</span>
+                  <span style={{fontFamily:"monospace",fontWeight:700}}>{fmtMoney(cup*it.qty)}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{padding:"14px 22px",borderBottom:"1px solid #e8ecef"}}>
+            {[totals.discount>0&&["Discount","-"+fmtMoney(totals.discount),"#1ea672"],
+              totals.shipping>0&&["Shipping",fmtMoney(totals.shipping),null],
+              totals.shipping===0&&["Shipping","Free","#1ea672"],
+              totals.tax>0&&["Tax (GA "+(((totals.taxRate||0)*100).toFixed(1))+"%)","+ "+fmtMoney(totals.tax),null],
+              ["Total Paid",fmtMoney(totals.grand||0),"#635bff"],
+            ].filter(Boolean).map(function(row,i,arr){return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:i===arr.length-1?14:12,
+                fontWeight:i===arr.length-1?900:400,padding:"4px 0",color:row[2]||"#374151",
+                borderTop:i===arr.length-1?"1px solid #e8ecef":"none",fontFamily:i===arr.length-1?"monospace":"inherit"}}>
+                <span style={{color:i===arr.length-1?"#6b7c93":"inherit"}}>{row[0]}</span><span>{row[1]}</span>
+              </div>
+            );})}
+          </div>
+          <div style={{padding:"14px 22px"}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>Billed To</div>
+            <div style={{fontSize:12,color:"#374151",lineHeight:1.8}}>
+              <div style={{fontWeight:700}}>{customer.name||order.custName}</div>
+              {customer.company&&<div>{customer.company}</div>}
+              {customer.email&&<div style={{color:"#6b7c93"}}>{customer.email}</div>}
+            </div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:10,marginTop:14}}>
+          <button onClick={function(){window.print();}} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #e8ecef",background:"#fff",color:"#374151",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:12}}>
+            🖨 Print Receipt
+          </button>
+        </div>
+        <div style={{marginTop:14,fontSize:11,color:"#a0aec0",textAlign:"center"}}>{company} · Keep this for your records.</div>
       </div>
-    </Modal>
+    </div>
   );
 }
 
-
-
-</script>
-<script id="c4" type="text/plain">
-function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
-  const [reqLimit,  setReqLimit]  = useState("5000");
-  const [reqTerms,  setReqTerms]  = useState("net_30");
-  const [reason,    setReason]    = useState("");
-  const [bizType,   setBizType]   = useState("");
-  const [annualRev, setAnnualRev] = useState("");
-  const [err,       setErr]       = useState("");
-  const [docs,      setDocs]      = useState([]);
-
-  function submit() {
-    if(!reason.trim()){setErr("Please provide a reason for the terms request.");return;}
-    onSubmit({
-      custId:customer.id, custName:customer.name, repId:repId, repName:repName,
-      requestedLimit:parseFloat(reqLimit)||0, requestedTerms:reqTerms,
-      reason:reason.trim(), bizType:bizType.trim(), annualRevenue:annualRev.trim(),
-      documents:docs.map(function(d){return {name:d.name,size:d.size,type:d.type,dataUrl:d.dataUrl};}),
-      submittedAt:new Date().toISOString(), status:"pending",
-    });
-    addToast("Terms request submitted for "+customer.name,"success");
-    onClose();
+function MultiAddressManager({addresses,onChange}) {
+  const [adding,  setAdding]  = useState(false);
+  const [editIdx, setEditIdx] = useState(null);
+  const [label,   setLabel]   = useState("");
+  const [addr,    setAddr]    = useState("");
+  const [city,    setCity]    = useState("");
+  const [state2,  setState2]  = useState("");
+  const [zip,     setZip]     = useState("");
+  function resetForm(){setLabel("");setAddr("");setCity("");setState2("");setZip("");}
+  function openAdd(){resetForm();setEditIdx(null);setAdding(true);}
+  function openEdit(i){var a=addresses[i];setLabel(a.label||"");setAddr(a.address||"");setCity(a.city||"");setState2(a.state||"");setZip(a.zip||"");setEditIdx(i);setAdding(true);}
+  function save(){
+    if(!addr.trim()) return;
+    var entry={id:editIdx!==null?addresses[editIdx].id:genId("adr"),label:label.trim()||"Address "+(addresses.length+1),address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),isPrimary:editIdx!==null?addresses[editIdx].isPrimary:addresses.length===0};
+    var updated=editIdx!==null?addresses.map(function(a,i){return i===editIdx?entry:a;}):addresses.concat([entry]);
+    onChange(updated);setAdding(false);resetForm();setEditIdx(null);
   }
-
+  function remove(i){var updated=addresses.filter(function(_,j){return j!==i;});if(addresses[i].isPrimary&&updated.length>0) updated[0]=Object.assign({},updated[0],{isPrimary:true});onChange(updated);}
+  function setPrimary(i){onChange(addresses.map(function(a,j){return Object.assign({},a,{isPrimary:j===i});}));}
+  var taxInfo=zip&&getGaTaxRate(zip);
   return (
-    <Modal title={"Request Credit Terms — "+customer.name} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={submit}>Submit Request</Btn>
-      </div>}>
-      {err&&<div style={{padding:"8px 12px",background:C.danger+"12",borderRadius:6,color:C.danger,fontSize:12,fontWeight:600,marginBottom:12}}>{err}</div>}
-      <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted}}>
-        Request credit terms for <strong style={{color:C.text}}>{customer.name}</strong>. Admin will review and approve or deny within 1–2 business days.
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Drop label="Requested Terms" value={reqTerms} onChange={setReqTerms}
-          opts={[{v:"due_receipt",label:"Due on Receipt"},{v:"net_15",label:"Net 15"},{v:"net_30",label:"Net 30"},{v:"net_45",label:"Net 45"}]}/>
-        <Field label="Requested Credit Limit ($)" value={reqLimit} onChange={setReqLimit} type="number" placeholder="5000"/>
-        <div style={{gridColumn:"1/-1"}}>
-          <Field label="Business Type" value={bizType} onChange={setBizType} placeholder="e.g. Medical Clinic, Hospital, Private Practice"/>
+    <div>
+      {addresses.map(function(a,i){return (
+        <div key={a.id||i} style={{background:C.surface,border:"1px solid "+(a.isPrimary?C.accent:C.border),borderRadius:10,padding:"12px 14px",marginBottom:8,boxShadow:a.isPrimary?"0 0 0 2px "+C.accent+"20":undefined}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                <span style={{fontWeight:700,fontSize:13,color:C.text}}>{a.label||"Address"}</span>
+                {a.isPrimary&&<span style={{padding:"1px 6px",borderRadius:10,fontSize:9,fontWeight:700,background:C.accent+"18",color:C.accent}}>PRIMARY</span>}
+              </div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.7}}>
+                {a.address&&<div>{a.address}</div>}
+                {[a.city,a.state,a.zip].filter(Boolean).join(", ")&&<div>{[a.city,a.state,a.zip].filter(Boolean).join(", ")}</div>}
+              </div>
+              {a.zip&&getGaTaxRate(a.zip)&&<div style={{fontSize:10,color:C.accent,marginTop:3}}>📍 {getGaTaxRate(a.zip).county} — {((getGaTaxRate(a.zip).rate||0)*100).toFixed(1)}% tax</div>}
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              {!a.isPrimary&&<Btn small variant="ghost" onClick={function(){setPrimary(i);}}>Set Primary</Btn>}
+              <Btn small variant="ghost" onClick={function(){openEdit(i);}}>Edit</Btn>
+              <Btn small variant="danger" onClick={function(){remove(i);}}>×</Btn>
+            </div>
+          </div>
         </div>
-        <div style={{gridColumn:"1/-1"}}>
-          <Field label="Estimated Annual Revenue ($)" value={annualRev} onChange={setAnnualRev} placeholder="e.g. 500000"/>
+      );})}
+      {adding?(
+        <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px",marginBottom:8}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>{editIdx!==null?"Edit Address":"New Address"}</div>
+          <Field label="Label" value={label} onChange={setLabel} placeholder="e.g. Main Office, Warehouse"/>
+          <Field label="Street Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
+            <Field label="City" value={city} onChange={setCity}/>
+            <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
+            <Field label="ZIP" value={zip} onChange={setZip} placeholder="30309"/>
+          </div>
+          {taxInfo&&<div style={{padding:"5px 10px",background:C.accent+"08",borderRadius:6,fontSize:11,color:C.accent,marginBottom:8}}>📍 {taxInfo.county} County — {((taxInfo.rate||0)*100).toFixed(1)}% tax</div>}
+          <div style={{display:"flex",gap:8}}>
+            <Btn small onClick={save} disabled={!addr.trim()}>{editIdx!==null?"Save Changes":"Add Address"}</Btn>
+            <Btn small variant="ghost" onClick={function(){setAdding(false);resetForm();setEditIdx(null);}}>Cancel</Btn>
+          </div>
         </div>
-        <div style={{gridColumn:"1/-1"}}>
-          <FileUpload files={docs} onChange={setDocs} label="Supporting Documents (optional)"
-            maxFiles={5} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"/>
-          <div style={{fontSize:10,color:C.dim,marginTop:4,marginBottom:10}}>Upload: business license, tax ID, financial statements, bank letter, etc.</div>
-        </div>
-        <div style={{gridColumn:"1/-1"}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Reason for Terms Request *</div>
-          <textarea value={reason} onChange={function(e){setReason(e.target.value);}} rows={3}
-            placeholder="Explain why this customer qualifies for credit terms (payment history, relationship, volume expectations)…"
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
-                    padding:"8px 12px",color:C.text,fontSize:12,fontFamily:"inherit",
-                    boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.6}}/>
-        </div>
-      </div>
-    </Modal>
+      ):(
+        <Btn small variant="ghost" onClick={openAdd}>+ Add Address</Btn>
+      )}
+    </div>
   );
 }
-
-
-function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,commRate,payMethod,onClose}) {
-  var cust    = selCust||{name:custName||"Customer"};
-  var company = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
-  var date    = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
-  var rate2   = parseFloat(commRate)||0;
-
-  function openNewTab() {
-    var html = buildPreviewHtml();
-    var w = window.open("","_blank");
-    w.document.write(html);
-    w.document.close();
-  }
-
-  function buildPreviewHtml() {
-    var rows = items.filter(function(it){return it.prodId;}).map(function(it){
-      var p   = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-      var cup = Math.round(p.price*(1+rate2/100)*100)/100; // marked-up unit price
-      return "<tr><td style='padding:10px 14px;font-size:13px;font-weight:600;color:#1a1a2e'>"+p.name+"</td>"
-        +"<td style='padding:10px 14px;font-size:12px;color:#6b7c93;text-align:right'>"+it.qty+"</td>"
-        +"<td style='padding:10px 14px;font-size:12px;font-family:monospace;color:#6b7c93;text-align:right'>$"+cup.toFixed(2)+"</td>"
-        +"<td style='padding:10px 14px;font-size:13px;font-family:monospace;font-weight:700;color:#1a1a2e;text-align:right'>$"+(cup*it.qty).toFixed(2)+"</td></tr>";
-    }).join("");
-    return "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Invoice Preview</title>"
-      +"<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap' rel='stylesheet'>"
-      +"<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,system-ui,sans-serif;background:#f6f9fc;min-height:100vh;padding:32px 20px}"
-      +".card{background:#fff;max-width:740px;margin:0 auto;border-radius:14px;border:1px solid #e8ecef;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.06)}"
-      +".header{padding:24px 28px;border-bottom:1px solid #e8ecef;display:flex;justify-content:space-between;align-items:flex-start}"
-      +".badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700;background:#635bff12;color:#635bff}"
-      +".addr{padding:16px 28px;background:#f6f9fc;border-bottom:1px solid #e8ecef;display:grid;grid-template-columns:1fr 1fr;gap:20px}"
-      +".addr-block .label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#6b7c93;margin-bottom:6px}"
-      +".addr-block p{font-size:12px;color:#374151;line-height:1.8}"
-      +".addr-block strong{color:#1a1a2e}"
-      +"table{width:100%;border-collapse:collapse}"
-      +"thead tr{background:#f6f9fc}"
-      +"thead th{padding:8px 14px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600;text-align:left}"
-      +"thead th:last-child{text-align:right}"
-      +"tbody tr{border-top:1px solid #e8ecef}"
-      +".totals{padding:16px 28px;border-top:2px solid #e8ecef}"
-      +".total-row{display:flex;justify-content:space-between;font-size:13px;padding:4px 0;color:#6b7c93}"
-      +".total-row.grand{font-size:18px;font-weight:900;color:#635bff;padding-top:10px;margin-top:6px;border-top:1px solid #e8ecef}"
-      +".footer{padding:16px 28px;border-top:1px solid #e8ecef;font-size:11px;color:#a0aec0;text-align:center}"
-      +"</style></head><body>"
-      +"<div style='max-width:740px;margin:0 auto 16px;display:flex;justify-content:space-between;align-items:center'>"
-      +"<div style='font-size:12px;color:#6b7c93'>INVOICE PREVIEW — This is what your customer sees</div>"
-      +"<button onclick='window.print()' style='padding:6px 14px;border-radius:6px;border:1px solid #e8ecef;background:#fff;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;color:#635bff'>Print</button>"
-      +"</div>"
-      +"<div class='card'>"
-      +"<div class='header'><div><div style='font-size:13px;color:#6b7c93;margin-bottom:4px'>Invoice from</div>"
-      +"<div style='font-size:22px;font-weight:900;color:#1a1a2e'>"+company+"</div></div>"
-      +"<div style='text-align:right'><div style='font-size:24px;font-weight:900;font-family:monospace;color:#635bff'>$"+((totals.grand||0).toFixed(2))+"</div>"
-      +"<div style='font-size:11px;color:#6b7c93;margin-top:2px'>"+date+"</div>"
-      +"<div class='badge' style='margin-top:6px;display:inline-block'>"+fmtTerms(payMethod||"due_receipt")+"</div>"
-      +"</div></div>"
-      +"<div class='addr'>"
-      +"<div class='addr-block'><div class='label'>Billed To</div><p>"
-      +"<strong>"+cust.name+"</strong><br>"
-      +(cust.company?""+cust.company+"<br>":""  )
-      +(cust.address?""+cust.address+"<br>":"")
-      +([cust.city,cust.state,cust.zip].filter(Boolean).join(", "))
-      +"</p></div>"
-      +"<div class='addr-block'><div class='label'>Shipped To</div><p>"
-      +"<strong>"+cust.name+"</strong><br>"
-      +(cust.company?""+cust.company+"<br>":"")
-      +(cust.address?""+cust.address+"<br>":"No address on file")
-      +([cust.city,cust.state,cust.zip].filter(Boolean).join(", "))
-      +"</p></div></div>"
-      +"<table><thead><tr><th>Product</th><th style='text-align:right'>Qty</th><th style='text-align:right'>Unit Price</th><th style='text-align:right'>Total</th></tr></thead>"
-      +"<tbody>"+rows+"</tbody></table>"
-      +"<div class='totals'>"
-      +(totals.discount>0?"<div class='total-row'><span>Discount</span><span style='color:#1ea672'>-$"+(totals.discount.toFixed(2))+"</span></div>":"")
-      +(totals.shipping>0?"<div class='total-row'><span>Shipping</span><span>$"+totals.shipping.toFixed(2)+"</span></div>":"<div class='total-row'><span>Shipping</span><span style='color:#1ea672'>Free</span></div>")
-      +(totals.tax>0?"<div class='total-row'><span>Sales Tax (GA "+(((totals.taxRate||0)*100).toFixed(1))+"%)</span><span>$"+totals.tax.toFixed(2)+"</span></div>":"")
-      +"<div class='total-row grand'><span>Total Due</span><span>$"+((totals.grand||0).toFixed(2))+"</span></div>"
-      +"</div>"
-      +"<div class='footer'>"+company+" · Questions? Contact your sales representative.</div>"
-      +"</div></body></html>";
-  }
-
-  var previewHtml = buildPreviewHtml();
-
-  return (
-    <Modal title="Customer Invoice Preview" wide={true} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontSize:11,color:C.muted}}>This is exactly what your customer sees — no markup or commission shown</div>
-        <div style={{display:"flex",gap:8}}>
-          <Btn variant="ghost" onClick={onClose}>Close</Btn>
-          <Btn onClick={openNewTab}>Open in New Tab ↗</Btn>
-        </div>
-      </div>}>
-      <iframe
-        srcDoc={previewHtml}
-        style={{width:"100%",height:520,border:"none",borderRadius:8,background:"#f6f9fc"}}
-        title="Invoice Preview"/>
-    </Modal>
-  );
-}
-
 
 function CollectPaymentModal({order,onCollect,onClose,addToast}) {
-  var totals = order.totals||{};
+  var totals=order.totals||{};
   const [method,     setMethod]     = useState("card");
   const [cardHolder, setCardHolder] = useState(order.custName||"");
   const [cardLast4,  setCardLast4]  = useState("");
@@ -2386,38 +2017,23 @@ function CollectPaymentModal({order,onCollect,onClose,addToast}) {
   const [cardZip,    setCardZip]    = useState("");
   const [ref,        setRef]        = useState("");
   const [collecting, setCollecting] = useState(false);
-
-  var canCollect = method==="card" ? cardLast4.length===4&&cardExpiry.length===5 : ref.trim().length>0;
-
-  function collect() {
+  var canCollect=method==="card"?cardLast4.length===4&&cardExpiry.length===5:ref.trim().length>0;
+  function collect(){
     if(!canCollect) return;
     setCollecting(true);
-    var payRef = method==="card"
-      ? {type:"card",holder:cardHolder,last4:cardLast4,expiry:cardExpiry,zip:cardZip}
-      : {type:method,ref:ref.trim()};
-    setTimeout(function(){
-      setCollecting(false);
-      onCollect(payRef);
-      addToast("Payment of "+fmtMoney(totals.grand||0)+" collected","success");
-      onClose();
-    },400);
+    var payRef=method==="card"?{type:"card",holder:cardHolder,last4:cardLast4,expiry:cardExpiry,zip:cardZip}:{type:method,ref:ref.trim()};
+    setTimeout(function(){setCollecting(false);onCollect(payRef);addToast("Payment collected — receipt ready","success");onClose();},400);
   }
-
   return (
     <Modal title={"Collect Payment — "+order.id} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={collect} disabled={!canCollect||collecting}>
-          {collecting?"Processing…":"✓ Confirm Payment Collected"}
-        </Btn>
+        <Btn onClick={collect} disabled={!canCollect||collecting}>{collecting?"Processing…":"✓ Confirm Payment Collected"}</Btn>
       </div>}>
-
       <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{fontSize:12,color:C.muted}}>Amount to collect</div>
         <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:C.success}}>{fmtMoney(totals.grand||0)}</div>
       </div>
-
-      {/* Payment method */}
       <div style={{marginBottom:16}}>
         <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Payment Method</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
@@ -2425,8 +2041,7 @@ function CollectPaymentModal({order,onCollect,onClose,addToast}) {
             var sel=method===opt[0];
             return (
               <div key={opt[0]} onClick={function(){setMethod(opt[0]);}}
-                style={{padding:"10px",borderRadius:8,border:"2px solid "+(sel?C.accent:C.border),
-                        background:sel?C.accent+"08":C.surface2,cursor:"pointer",textAlign:"center"}}>
+                style={{padding:"10px",borderRadius:8,border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent+"08":C.surface2,cursor:"pointer",textAlign:"center"}}>
                 <div style={{fontSize:16,marginBottom:3}}>{opt[1].split(" ")[0]}</div>
                 <div style={{fontSize:11,fontWeight:sel?700:400,color:sel?C.accent:C.muted}}>{opt[1].split(" ").slice(1).join(" ")}</div>
               </div>
@@ -2434,53 +2049,31 @@ function CollectPaymentModal({order,onCollect,onClose,addToast}) {
           })}
         </div>
       </div>
-
-      {/* Card reference fields */}
       {method==="card"&&(
         <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
-          <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Card Reference</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div style={{gridColumn:"1/-1"}}>
-              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
-              <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
-                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-            </div>
+          <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>Card Reference</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            <div style={{gridColumn:"1/-1"}}><Field label="Cardholder Name" value={cardHolder} onChange={setCardHolder} placeholder="Jane Smith"/></div>
             <div>
               <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
-              <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}}
-                placeholder="4242" maxLength={4}
+              <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
                 style={{width:"100%",background:C.bg,border:"1px solid "+(cardLast4.length===4?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
             </div>
             <div>
               <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
-              <input value={cardExpiry}
-                onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}}
-                placeholder="12/27" maxLength={5}
+              <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
                 style={{width:"100%",background:C.bg,border:"1px solid "+(cardExpiry.length===5?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
             </div>
-            <div>
-              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Billing ZIP</div>
-              <input value={cardZip} onChange={function(e){setCardZip(e.target.value.slice(0,10));}} placeholder="30309"
-                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
-            </div>
           </div>
-          <div style={{marginTop:10,fontSize:10,color:C.dim}}>
-            For reference only — process through your card terminal separately.
-          </div>
+          <div style={{marginTop:8,fontSize:10,color:C.dim}}>Reference only — process through your terminal separately.</div>
         </div>
       )}
-
-      {/* Cash / Check reference */}
       {(method==="cash"||method==="check")&&(
         <div style={{marginBottom:14}}>
-          <Field
-            label={method==="check"?"Check Number / Reference":"Cash Receipt Reference"}
-            value={ref} onChange={setRef}
-            placeholder={method==="check"?"e.g. Check #1042":"e.g. Cash receipt #005"}
-            hint="Optional but recommended for recordkeeping"/>
+          <Field label={method==="check"?"Check Number":"Cash Receipt Reference"} value={ref} onChange={setRef}
+            placeholder={method==="check"?"e.g. Check #1042":"e.g. Receipt #005"}/>
         </div>
       )}
-
       <div style={{padding:"8px 12px",background:C.surface2,borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.7}}>
         Confirming marks this order as <strong style={{color:C.success}}>Paid</strong> and unlocks fulfillment.
       </div>
@@ -2489,37 +2082,20 @@ function CollectPaymentModal({order,onCollect,onClose,addToast}) {
 }
 
 
+</script>
+<script id="c4" type="text/plain">
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
-  const [carrier,   setCarrier]   = useState("UPS");
-  const [trackNum,  setTrackNum]  = useState(order.trackingNumber||"");
-  const [copied,    setCopied]    = useState(false);
-  const [step,      setStep]      = useState(order.status==="Waiting Shipping"?"tracking":"send");
-
-  var summary = formatShipStationSummary(order, customers, products);
-  var cust    = customers.find(function(x){return x.id===order.custId;})||{};
-  var trackUrl = getTrackingUrl(carrier, trackNum);
-
-  function copyToClipboard() {
-    navigator.clipboard.writeText(summary).then(function(){
-      setCopied(true); setTimeout(function(){setCopied(false);},2500);
-    });
-  }
-
-  function openShipStation() {
-    window.open("https://app.shipstation.com/orders/awaiting-shipment","_blank");
-  }
-
-  function sendToFulfillment() {
-    onSend({action:"fulfillment",status:"Waiting Shipping"});
-    setStep("tracking");
-  }
-
-  function saveTracking() {
-    if(!trackNum.trim()) return;
-    onSend({action:"tracking",trackingNumber:trackNum.trim(),carrier:carrier,trackingUrl:trackUrl,status:"Shipped"});
-    onClose();
-  }
-
+  const [carrier,  setCarrier]  = useState("UPS");
+  const [trackNum, setTrackNum] = useState(order.trackingNumber||"");
+  const [copied,   setCopied]   = useState(false);
+  const [step,     setStep]     = useState(order.status==="Waiting Shipping"?"tracking":"send");
+  var summary  = formatShipStationSummary(order,customers,products);
+  var cust     = customers.find(function(x){return x.id===order.custId;})||{};
+  var trackUrl = getTrackingUrl(carrier,trackNum);
+  function copyToClipboard(){navigator.clipboard.writeText(summary).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);});}
+  function openShipStation(){window.open("https://app.shipstation.com/orders/awaiting-shipment","_blank");}
+  function sendToFulfillment(){onSend({action:"fulfillment",status:"Waiting Shipping"});setStep("tracking");}
+  function saveTracking(){if(!trackNum.trim()) return;onSend({action:"tracking",trackingNumber:trackNum.trim(),carrier:carrier,trackingUrl:trackUrl,status:"Shipped"});onClose();}
   return (
     <Modal title={step==="send"?"Send to Fulfillment":"Add Tracking Number"} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
@@ -2527,35 +2103,23 @@ function FulfillmentModal({order,customers,products,onSend,onClose}) {
         {step==="send"&&<Btn onClick={sendToFulfillment}>Send to ShipStation →</Btn>}
         {step==="tracking"&&<Btn onClick={saveTracking} disabled={!trackNum.trim()}>Save Tracking & Mark Shipped</Btn>}
       </div>}>
-
       {step==="send"&&(
         <div>
           <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted,lineHeight:1.6}}>
-            Copy the order summary below and paste into ShipStation, or click Open ShipStation to go there directly.
+            Copy the order summary and paste into ShipStation, or click Open ShipStation to go there directly.
           </div>
-
-          {/* Order summary */}
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Order Summary — Copy to ShipStation</div>
-            <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:8,padding:"12px 14px",
-                         fontFamily:"monospace",fontSize:11,color:C.text,whiteSpace:"pre-wrap",
-                         maxHeight:220,overflowY:"auto",lineHeight:1.8}}>{summary}</div>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Order Summary</div>
+            <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:8,padding:"12px 14px",fontFamily:"monospace",fontSize:11,color:C.text,whiteSpace:"pre-wrap",maxHeight:200,overflowY:"auto",lineHeight:1.8}}>{summary}</div>
             <div style={{display:"flex",gap:8,marginTop:8}}>
-              <Btn small variant="ghost" onClick={copyToClipboard} fullWidth={true}>
-                {copied?"✓ Copied!":"📋 Copy to Clipboard"}
-              </Btn>
-              <Btn small variant="ghost" onClick={openShipStation} fullWidth={true}>
-                Open ShipStation ↗
-              </Btn>
+              <Btn small variant="ghost" onClick={copyToClipboard} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy"}</Btn>
+              <Btn small variant="ghost" onClick={openShipStation} fullWidth={true}>Open ShipStation ↗</Btn>
             </div>
           </div>
-
-          {/* Shipping address */}
           <div style={{background:C.surface2,borderRadius:8,padding:"12px 14px",fontSize:12}}>
             <div style={{fontWeight:700,color:C.text,marginBottom:6}}>Ship To</div>
             <div style={{color:C.muted,lineHeight:1.7}}>
               <div style={{fontWeight:600,color:C.text}}>{cust.name||order.custName}</div>
-              {cust.company&&<div>{cust.company}</div>}
               {cust.address&&<div>{cust.address}</div>}
               {cust.city&&<div>{cust.city}{cust.state?", "+cust.state:""}{cust.zip?" "+cust.zip:""}</div>}
               {cust.phone&&<div>📞 {cust.phone}</div>}
@@ -2563,33 +2127,19 @@ function FulfillmentModal({order,customers,products,onSend,onClose}) {
           </div>
         </div>
       )}
-
       {step==="tracking"&&(
         <div>
           <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:16,fontSize:12,color:C.success,fontWeight:600}}>
-            ✓ Order sent to fulfillment — status: Waiting Shipping. Enter the tracking number once available.
+            ✓ Order sent to fulfillment. Enter tracking when available.
           </div>
-
           <Drop label="Carrier" value={carrier} onChange={setCarrier}
             opts={[{v:"UPS",label:"UPS"},{v:"FedEx",label:"FedEx"},{v:"USPS",label:"USPS"},{v:"DHL",label:"DHL"},{v:"Other",label:"Other"}]}/>
-
           <Field label="Tracking Number" value={trackNum} onChange={setTrackNum}
-            placeholder="e.g. 1Z999AA10123456784" hint="Entering tracking number will mark order as Shipped"/>
-
+            placeholder="e.g. 1Z999AA10123456784" hint="Entering tracking number marks order as Shipped"/>
           {trackNum.trim()&&carrier!=="Other"&&(
             <div style={{marginTop:4,padding:"8px 12px",background:C.surface2,borderRadius:8,fontSize:11}}>
-              <div style={{color:C.muted,marginBottom:4}}>Tracking URL (shared with rep):</div>
-              <a href={trackUrl} target="_blank"
-                style={{color:C.accent,fontFamily:"monospace",fontSize:11,wordBreak:"break-all",textDecoration:"none"}}>
-                {trackUrl}
-              </a>
-            </div>
-          )}
-
-          {order.trackingNumber&&(
-            <div style={{marginTop:12,padding:"10px 12px",background:C.surface2,borderRadius:8,fontSize:12}}>
-              <div style={{color:C.muted,marginBottom:2}}>Current tracking:</div>
-              <div style={{fontFamily:"monospace",fontWeight:600,color:C.text}}>{order.carrier} · {order.trackingNumber}</div>
+              <div style={{color:C.muted,marginBottom:4}}>Tracking URL:</div>
+              <a href={trackUrl} target="_blank" style={{color:C.accent,fontFamily:"monospace",fontSize:11,wordBreak:"break-all",textDecoration:"none"}}>{trackUrl}</a>
             </div>
           )}
         </div>
@@ -2599,9 +2149,6 @@ function FulfillmentModal({order,customers,products,onSend,onClose}) {
 }
 
 
-
-</script>
-<script id="c5" type="text/plain">
 function RepPayModal({order,rep,onConfirm,onClose}) {
   var comm = order.totals&&order.totals.commission||0;
   const [method, setMethod] = useState("manual");
@@ -2867,6 +2414,9 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
@@ -2986,12 +2536,18 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
       {collectTarget&&(
         <CollectPaymentModal order={collectTarget} addToast={addToast}
           onCollect={function(payRef){
+            var co3=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+            var cust3=customers.find(function(x){return x.id===collectTarget.custId;})||{name:collectTarget.custName||""};
+            var rTok=generateReceiptToken(collectTarget,cust3,payRef,co3);
+            var rLink=window.location.origin+window.location.pathname+"#receipt="+rTok;
             var updated=addAuditEntry(Object.assign({},collectTarget,{
               status:"Paid",paidAt:new Date().toISOString(),
               paymentRef:payRef,paymentType:payRef.type,
+              receiptToken:rTok,receiptLink:rLink,
             }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
             setOrders(function(prev){return prev.map(function(x){return x.id===collectTarget.id?updated:x;});});
             dbSave("crm_orders",collectTarget.id,updated);
+            addToast("Payment collected! Receipt link ready to send.","success");
             setCollectTarget(null);
           }}
           onClose={function(){setCollectTarget(null);}}/>
@@ -4967,14 +4523,19 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
       {collectTarget2&&(
         <CollectPaymentModal order={collectTarget2} addToast={addToast}
           onCollect={function(payRef){
+            var co4=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+            var cust4=customers.find(function(x){return x.id===collectTarget2.custId;})||{name:collectTarget2.custName||""};
+            var rTok2=generateReceiptToken(collectTarget2,cust4,payRef,co4);
+            var rLink2=window.location.origin+window.location.pathname+"#receipt="+rTok2;
             var updated=addAuditEntry(Object.assign({},collectTarget2,{
               status:"Paid",paidAt:new Date().toISOString(),
               paymentRef:payRef,paymentType:payRef.type,
+              receiptToken:rTok2,receiptLink:rLink2,
             }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
             onUpdate(updated); setViewOrder(updated);
             dbSave("crm_orders",collectTarget2.id,updated);
             setCollectTarget2(null);
-            addToast("Payment collected — order marked Paid","success");
+            addToast("Payment collected! Copy receipt link from order detail.","success");
           }}
           onClose={function(){setCollectTarget2(null);}}/>
       )}
@@ -6582,6 +6143,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [cardHolder,   setCardHolder]   = useState("");
   const [cardZip,      setCardZip]      = useState("");
   const [sendInvAuto,  setSendInvAuto]  = useState(true);
+  const [shipAddrId,   setShipAddrId]   = useState(null);
+  const [dorPath,      setDorPath]      = useState("link"); // "link" or "card"
   const [showPostInv,  setShowPostInv]  = useState(false);
   const [placedOrder,  setPlacedOrder]  = useState(null);
   const [showPreview,  setShowPreview]  = useState(false);
@@ -6668,6 +6231,12 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var order = {
       id:id, repId:repId, repName:repName,
       custId:cid, custName:cname,
+      shipAddress:(function(){
+        if(!selCust) return null;
+        if(shipAddrId&&selCust.addresses){var a=selCust.addresses.find(function(x){return x.id===shipAddrId;});if(a) return a;}
+        if(selCust.addresses&&selCust.addresses.length>0){return selCust.addresses.find(function(a){return a.isPrimary;})||selCust.addresses[0];}
+        return selCust.address?{address:selCust.address,city:selCust.city,state:selCust.state,zip:selCust.zip,label:"Primary"}:null;
+      })(),
       items:items.filter(function(it){return it.prodId;}).map(function(it){
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
         var rate3=parseFloat(commRate)||0;
@@ -6675,7 +6244,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       }),
       totals:totals, commissionRate:parseFloat(commRate)||0,
       payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
-      cardRef:payMethod==="credit_card"&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null, /* card only for credit_card method */
+      cardRef:(payMethod==="credit_card"||(payMethod==="due_receipt"&&dorPath==="card"))&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null,
+      dorPath:payMethod==="due_receipt"?dorPath:null,
       notes:notes, status:isEdit?(editOrder.status||"Submitted"):"Submitted",
       createdAt:isEdit?(editOrder.createdAt||new Date().toISOString()):new Date().toISOString(),
       updatedAt:new Date().toISOString(),
@@ -6880,6 +6450,64 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   var termsLimit   = selCust ? (selCust.termsLimit||0) : 0;
                   var isNetTerms   = payMethod&&(payMethod==="net_15"||payMethod==="net_30"||payMethod==="net_45"||payMethod==="due_receipt"===false);
                   isNetTerms = approvedType&&payMethod===approvedType&&termsActive;
+
+                  // DUE ON RECEIPT — show two paths
+                  if(payMethod==="due_receipt"&&!termsActive) {
+                    return (
+                      <div>
+                        <div style={{padding:"12px 14px",borderRadius:10,border:"2px solid "+C.success,
+                                     background:C.success+"08",marginBottom:8}}>
+                          <div style={{fontWeight:700,fontSize:14,color:C.success}}>Due on Receipt</div>
+                          <div style={{fontSize:11,color:C.muted,marginTop:3}}>Choose how to collect payment:</div>
+                        </div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
+                          <div style={{padding:"14px",borderRadius:10,border:"2px solid "+C.accent,
+                                       background:C.accent+"08",cursor:"pointer",textAlign:"center"}}
+                            onClick={function(){setDorPath("link");}}>
+                            <div style={{fontSize:20,marginBottom:6}}>✉</div>
+                            <div style={{fontWeight:700,fontSize:12,color:C.accent}}>Send Invoice Link</div>
+                            <div style={{fontSize:10,color:C.muted,marginTop:3}}>Customer pays online</div>
+                            {dorPath==="link"&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:C.accent}}>✓ Selected</div>}
+                          </div>
+                          <div style={{padding:"14px",borderRadius:10,border:"2px solid "+C.warning,
+                                       background:C.warning+"08",cursor:"pointer",textAlign:"center"}}
+                            onClick={function(){setDorPath("card");}}>
+                            <div style={{fontSize:20,marginBottom:6}}>💳</div>
+                            <div style={{fontWeight:700,fontSize:12,color:C.warning}}>Collect Card</div>
+                            <div style={{fontSize:10,color:C.muted,marginTop:3}}>Enter card on delivery</div>
+                            {dorPath==="card"&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:C.warning}}>✓ Selected</div>}
+                          </div>
+                        </div>
+                        {dorPath==="link"&&(
+                          <div style={{marginTop:10,padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:8,fontSize:11,color:C.muted}}>
+                            📧 After placing the order, you can send the customer a payment link from the order detail.
+                          </div>
+                        )}
+                        {dorPath==="card"&&(
+                          <div style={{marginTop:10,padding:"12px 14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
+                            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>💳 Card Reference</div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                              <div style={{gridColumn:"1/-1"}}>
+                                <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
+                                <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
+                                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
+                                <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
+                                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
+                              </div>
+                              <div>
+                                <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
+                                <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
+                                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
 
                   if(termsActive && approvedType) {
                     // Customer has approved terms — locked to their term type
@@ -7317,6 +6945,22 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                   <span style={{color:C.muted}}>{r[0]}</span><span style={{fontWeight:600,color:C.text}}>{r[1]}</span>
                 </div>
               );})}
+              {viewOrd.receiptLink&&(
+                <div style={{padding:"10px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:8}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.success,marginBottom:6}}>🧾 Payment Receipt Ready</div>
+                  <div style={{display:"flex",gap:8}}>
+                    <a href={viewOrd.receiptLink} target="_blank"
+                      style={{flex:1,textAlign:"center",padding:"7px",borderRadius:6,background:C.success,
+                              color:"#fff",textDecoration:"none",fontSize:11,fontWeight:700}}>
+                      View Receipt ↗
+                    </a>
+                    <Btn small variant="ghost" onClick={function(){
+                      navigator.clipboard.writeText(viewOrd.receiptLink)
+                        .then(function(){addToast("Receipt link copied!","success");});
+                    }}>📋 Copy Link</Btn>
+                  </div>
+                </div>
+              )}
               {viewOrd.trackingNumber&&(
                 <div style={{padding:"10px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginTop:8}}>
                   <div style={{fontSize:11,fontWeight:700,color:C.success,marginBottom:4}}>🚚 Shipment Tracking</div>
@@ -7504,6 +7148,16 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
           }}
           onClose={function(){setTermsReqCust(null);}}
           addToast={addToast}/>
+      )}
+      {showSendInv&&viewOrd&&(
+        <SendInvoiceModal
+          order={viewOrd}
+          customers={customers}
+          products={products}
+          currentUser={currentUser}
+          addToast={addToast}
+          showResult={showResult}
+          onClose={function(){setShowSendInv(false);}}/>
       )}
     </div>
   );
@@ -7926,6 +7580,7 @@ function App() {
   const [inviteToken,  setInviteToken]  = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]invite=([^&]+)/);return m?m[1]:null;})());
   const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
   const [payToken,     setPayToken]     = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]pay=([^&]+)/);return m?m[1]:null;})());
+  const [receiptToken, setReceiptToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]receipt=([^&]+)/);return m?m[1]:null;})());
 
   // Handle Stripe Connect return — update rep stripeConnectId
   useEffect(function(){
@@ -8025,6 +7680,13 @@ function App() {
     setCurrentUser(null); setActiveTab("dashboard");
   }
 
+  // Receipt page — no auth required
+  if(receiptToken) {
+    var rcptData = null;
+    try { rcptData = JSON.parse(localStorage.getItem("__pv__rcpt_"+receiptToken)||"null"); } catch(e){}
+    if(rcptData) return React.createElement(ReceiptPage, {receiptData:rcptData});
+  }
+
   // Invoice payment page — no auth required
   if(payToken) {
     var payData2 = null;
@@ -8035,11 +7697,22 @@ function App() {
         onPaid: function(result) {
           var updated = Object.assign({},payData2,{status:"paid",paidAt:result.paidAt,payMethod:result.method,cardRef:result.cardRef});
           localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
+          // Generate receipt token
+          var co2 = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+          var rToken = generateReceiptToken(payData2.order,payData2.customer,{type:result.method},co2);
+          var rLink  = window.location.origin+window.location.pathname+"#receipt="+rToken;
+          updated.receiptToken = rToken;
+          updated.receiptLink  = rLink;
+          localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
           // Update order in Supabase
           var sb = getSB();
           if(sb && payData2.order && payData2.order.id) {
-            sb.from("crm_orders").update({data:Object.assign({},payData2.order,{status:"Paid",paidAt:result.paidAt,payMethod:result.method}),updated_at:new Date().toISOString()}).eq("id",payData2.order.id);
+            sb.from("crm_orders").update({data:Object.assign({},payData2.order,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken}),updated_at:new Date().toISOString()}).eq("id",payData2.order.id);
           }
+          // Also update in-memory orders if admin is viewing
+          setOrders(function(prev){return prev.map(function(o){
+            return o.id===payData2.order.id?Object.assign({},o,{status:"Paid",paidAt:result.paidAt,receiptToken:rToken}):o;
+          });});
         },
         onDecline: function(){ setPayToken(null); if(window.history) window.history.replaceState(null,"",window.location.pathname); },
       });
