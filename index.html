@@ -274,120 +274,118 @@ function generateCreditAgreementHtml(customer, req, template, company) {
 
 
 /* ─── Google Places Autocomplete ────────────────────────────────── */
-// Load Maps JS API once when key is available
 var __mapsLoaded = false;
 var __mapsLoading = false;
 var __mapsCallbacks = [];
+
 function loadMapsApi(apiKey, cb) {
-  if(window.google && window.google.maps && window.google.maps.places) { cb(); return; }
-  if(__mapsLoaded) { cb(); return; }
+  if(window.google&&window.google.maps&&window.google.maps.places){cb();return;}
+  if(__mapsLoaded){cb();return;}
   __mapsCallbacks.push(cb);
   if(__mapsLoading) return;
   __mapsLoading = true;
-  window.__mapsReady = function() {
-    __mapsLoaded = true;
-    __mapsCallbacks.forEach(function(fn){ fn(); });
-    __mapsCallbacks = [];
+  window.__mapsReady = function(){
+    __mapsLoaded=true;
+    __mapsLoading=false;
+    __mapsCallbacks.forEach(function(fn){fn();});
+    __mapsCallbacks=[];
   };
-  var script = document.createElement("script");
-  script.src = "https://maps.googleapis.com/maps/api/js?key="+apiKey+"&libraries=places&callback=__mapsReady";
-  script.async = true;
-  script.onerror = function() { __mapsLoading = false; __mapsCallbacks = []; };
-  document.head.appendChild(script);
+  var s=document.createElement("script");
+  s.src="https://maps.googleapis.com/maps/api/js?key="+encodeURIComponent(apiKey)+"&libraries=places&callback=__mapsReady";
+  s.async=true;
+  s.onerror=function(){__mapsLoading=false;__mapsCallbacks=[];};
+  document.head.appendChild(s);
 }
 
-function PlacesAutocomplete({value, onChange, onSelect, placeholder, label, hint}) {
+function getPlacesKey(){
+  try{return JSON.parse(localStorage.getItem("googleCfg")||"{}").apiKey||"";}catch(e){return "";}
+}
+
+function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
   const [suggestions, setSuggestions] = useState([]);
   const [open,        setOpen]        = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [ready,       setReady]       = useState(!!(window.google&&window.google.maps&&window.google.maps.places));
-  var debounce = {t:null};
+  var debounceRef = {t:null};
 
-  function getKey() {
-    try { return JSON.parse(localStorage.getItem("googleCfg")||"{}").apiKey||""; } catch(e){return "";}
-  }
+  // Try to load on mount + whenever value changes (catches late key entry)
+  useEffect(function(){
+    var key=getPlacesKey();
+    if(key&&!ready){
+      loadMapsApi(key,function(){setReady(true);});
+    }
+  });
 
-  useEffect(function() {
-    var key = getKey();
-    if(!key) return;
-    loadMapsApi(key, function(){ setReady(true); });
-  }, []);
-
-  function search(text) {
-    clearTimeout(debounce.t);
-    if(!text||text.length<3){ setSuggestions([]); setOpen(false); return; }
-    if(!ready){ return; }
-    debounce.t = setTimeout(function(){
+  function search(text){
+    clearTimeout(debounceRef.t);
+    if(!text||text.length<3){setSuggestions([]);setOpen(false);return;}
+    if(!ready||!window.google){return;}
+    debounceRef.t=setTimeout(function(){
       setLoading(true);
-      var svc = new window.google.maps.places.AutocompleteService();
+      var svc=new window.google.maps.places.AutocompleteService();
       svc.getPlacePredictions(
-        {input:text, types:["address"], componentRestrictions:{country:"us"}},
-        function(predictions, status) {
+        {input:text,types:["address"],componentRestrictions:{country:"us"}},
+        function(preds,status){
           setLoading(false);
-          if(status===window.google.maps.places.PlacesServiceStatus.OK && predictions){
-            setSuggestions(predictions);
-            setOpen(true);
-          } else {
-            setSuggestions([]);
-          }
+          if(preds&&status==="OK"){setSuggestions(preds);setOpen(true);}
+          else{setSuggestions([]);}
         }
       );
-    }, 300);
+    },300);
   }
 
-  function selectSuggestion(pred) {
-    setOpen(false); setSuggestions([]);
-    onChange(pred.structured_formatting ? pred.structured_formatting.main_text : pred.description);
-    if(!onSelect) return;
-    var dummy = document.createElement("div");
-    var svc   = new window.google.maps.places.PlacesService(dummy);
-    svc.getDetails({placeId:pred.place_id, fields:["address_components","formatted_address"]},
-      function(result, status) {
-        if(status!==window.google.maps.places.PlacesServiceStatus.OK || !result) return;
-        var comps = result.address_components||[];
-        function get(type){
-          var match=comps.find(function(x){return x.types.indexOf(type)>=0;});
-          return match?match.short_name||match.long_name:"";
-        }
-        onSelect({
-          street: (get("street_number")+" "+get("route")).trim(),
-          city:   get("locality")||get("sublocality")||get("neighborhood"),
-          state:  get("administrative_area_level_1"),
-          zip:    get("postal_code"),
-        });
-      }
-    );
+  function pickSuggestion(pred){
+    setOpen(false);setSuggestions([]);
+    var main=pred.structured_formatting?pred.structured_formatting.main_text:pred.description;
+    onChange(main);
+    if(!onSelect||!window.google) return;
+    var dummy=document.createElement("div");
+    var svc=new window.google.maps.places.PlacesService(dummy);
+    svc.getDetails({placeId:pred.place_id,fields:["address_components"]},function(result,status){
+      if(status!=="OK"||!result) return;
+      var ac=result.address_components||[];
+      function g(t){var x=ac.find(function(a){return a.types.indexOf(t)>=0;});return x?x.short_name||x.long_name:"";}
+      onSelect({
+        street:(g("street_number")+" "+g("route")).trim(),
+        city:g("locality")||g("sublocality")||g("neighborhood"),
+        state:g("administrative_area_level_1"),
+        zip:g("postal_code"),
+      });
+    });
   }
 
   return (
     <div style={{position:"relative",marginBottom:12}}>
       {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label}</div>}
       <div style={{position:"relative"}}>
-        <input value={value} placeholder={ready?placeholder||"Start typing address…":"Enter API key in Settings → Address"}
-          onChange={function(e){onChange(e.target.value);search(e.target.value);}}
+        <input value={value}
+          placeholder={ready?(placeholder||"Start typing address…"):(getPlacesKey()?"Loading Google Maps…":placeholder||"Street address")}
+          onChange={function(e){onChange(e.target.value);if(ready)search(e.target.value);}}
           onFocus={function(){if(suggestions.length>0)setOpen(true);}}
-          onBlur={function(){setTimeout(function(){setOpen(false);},150);}}
+          onBlur={function(){setTimeout(function(){setOpen(false);},160);}}
           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
-                  padding:"8px 32px 8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
+                  padding:"8px 30px 8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
                   boxSizing:"border-box",outline:"none"}}/>
-        {loading&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted}}>...</span>}
-        {!loading&&value&&(
-          <span onClick={function(){onChange("");setSuggestions([]);setOpen(false);}}
-            style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
-                    fontSize:14,color:C.dim,cursor:"pointer",lineHeight:1}}>×</span>
-        )}
+        {loading&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted,pointerEvents:"none"}}>⏳</span>}
+        {!loading&&ready&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:10,color:C.success,pointerEvents:"none"}}>📍</span>}
+        {!loading&&!ready&&!getPlacesKey()&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:10,color:C.dim,pointerEvents:"none"}}>✏️</span>}
       </div>
-      {hint&&<div style={{fontSize:10,color:C.dim,marginTop:3}}>{hint}</div>}
+      {!ready&&!getPlacesKey()&&(
+        <div style={{fontSize:10,color:C.warning,marginTop:3}}>
+          ⚠ No Google API key — type address manually or add key in <strong>Settings → Address</strong>
+        </div>
+      )}
+      {hint&&ready&&<div style={{fontSize:10,color:C.dim,marginTop:3}}>{hint}</div>}
       {open&&suggestions.length>0&&(
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,
                      border:"1px solid "+C.border,borderRadius:8,
-                     boxShadow:"0 8px 24px rgba(0,0,0,.18)",zIndex:9999,
-                     maxHeight:220,overflowY:"auto",marginTop:2}}>
+                     boxShadow:"0 8px 24px rgba(0,0,0,.18)",
+                     zIndex:9999,maxHeight:220,overflowY:"auto",marginTop:2}}>
           {suggestions.map(function(pred){
-            var main = pred.structured_formatting?pred.structured_formatting.main_text:pred.description;
-            var sub  = pred.structured_formatting?pred.structured_formatting.secondary_text:"";
+            var main=pred.structured_formatting?pred.structured_formatting.main_text:pred.description;
+            var sub=pred.structured_formatting?pred.structured_formatting.secondary_text:"";
             return (
-              <div key={pred.place_id} onMouseDown={function(){selectSuggestion(pred);}}
+              <div key={pred.place_id} onMouseDown={function(){pickSuggestion(pred);}}
                 style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid "+C.border}}
                 onMouseEnter={function(e){e.currentTarget.style.background=C.surface2;}}
                 onMouseLeave={function(e){e.currentTarget.style.background="";}}>
@@ -1019,6 +1017,9 @@ function RepSubscriptionWall({rep,onActivate,onLogout}) {
 }
 
 
+
+</script>
+<script id="c1" type="text/plain">
 function ApplyForm({onSubmit,onCancel}) {
   const [name,    setName]    = useState("");
   const [company, setCompany] = useState("");
@@ -1064,9 +1065,6 @@ function ApplyForm({onSubmit,onCancel}) {
   );
 }
 
-
-</script>
-<script id="c1" type="text/plain">
 function InviteModal({rep,onClose,addToast}) {
   var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
   var baseUrl = window.location.origin+window.location.pathname;
