@@ -7474,9 +7474,11 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
           onClose={function(){setTermsReqCust(null);}}
           addToast={addToast}/>
       )}
-      {showSendInv&&viewOrd&&(
-        <SendInvoiceModal
-          order={viewOrd}
+    </div>
+  );
+}
+
+/* ──          order={viewOrd}
           customers={customers}
           products={products}
           currentUser={currentUser}
