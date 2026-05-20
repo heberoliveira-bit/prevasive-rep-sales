@@ -298,7 +298,7 @@ function loadMapsApi(apiKey, cb) {
 }
 
 function getPlacesKey(){
-  try{return JSON.parse(localStorage.getItem("googleCfg")||"{}").apiKey||"";}catch(e){return "";}
+  try{return JSON.parse(localStorage.getItem("__pv__googleCfg")||"{}").apiKey||"";}catch(e){return "";}
 }
 
 function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
