@@ -272,6 +272,98 @@ function generateCreditAgreementHtml(customer, req, template, company) {
     }).join("");
 }
 
+
+/* ─── Google Places Autocomplete ────────────────────────────────── */
+function PlacesAutocomplete({value, onChange, onSelect, placeholder, label, hint}) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [open,        setOpen]        = useState(false);
+  const [loading,     setLoading]     = useState(false);
+  var timerRef = {current:null};
+
+  function getKey() {
+    try {
+      var cfg = JSON.parse(localStorage.getItem("googleCfg")||"{}");
+      return cfg.apiKey||"";
+    } catch(e) { return ""; }
+  }
+
+  function search(text) {
+    clearTimeout(timerRef.current);
+    if(!text||text.length<3){setSuggestions([]);setOpen(false);return;}
+    timerRef.current = setTimeout(function(){
+      var key = getKey();
+      if(!key){return;}
+      setLoading(true);
+      fetch("https://maps.googleapis.com/maps/api/place/autocomplete/json?input="+encodeURIComponent(text)+"&types=address&components=country:us&key="+key)
+        .then(function(r){return r.json();})
+        .then(function(data){
+          setLoading(false);
+          if(data.predictions){setSuggestions(data.predictions);setOpen(true);}
+        })
+        .catch(function(){setLoading(false);});
+    }, 300);
+  }
+
+  function selectSuggestion(pred) {
+    var key = getKey();
+    setOpen(false);
+    setSuggestions([]);
+    onChange(pred.structured_formatting.main_text||pred.description);
+    if(onSelect) {
+      fetch("https://maps.googleapis.com/maps/api/place/details/json?place_id="+pred.place_id+"&fields=address_components,formatted_address&key="+key)
+        .then(function(r){return r.json();})
+        .then(function(data){
+          if(!data.result) return;
+          var comps = data.result.address_components||[];
+          function get(type){var c=comps.find(function(x){return x.types.indexOf(type)>=0;});return c?c.short_name||c.long_name:"";}
+          var street = (get("street_number")+" "+get("route")).trim();
+          var city   = get("locality")||get("sublocality")||get("neighborhood");
+          var state  = get("administrative_area_level_1");
+          var zip    = get("postal_code");
+          onSelect({street:street,city:city,state:state,zip:zip});
+        })
+        .catch(function(){});
+    }
+  }
+
+  return (
+    <div style={{position:"relative",marginBottom:12}}>
+      {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label}</div>}
+      <div style={{position:"relative"}}>
+        <input value={value} placeholder={placeholder||"Start typing address…"}
+          onChange={function(e){onChange(e.target.value);search(e.target.value);}}
+          onFocus={function(){if(suggestions.length>0)setOpen(true);}}
+          onBlur={function(){setTimeout(function(){setOpen(false);},150);}}
+          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
+                  padding:"8px 32px 8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
+                  boxSizing:"border-box",outline:"none"}}/>
+        {loading&&<div style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:C.muted}}>⟳</div>}
+        {!loading&&value&&<div style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:C.dim,cursor:"pointer"}} onClick={function(){onChange("");setSuggestions([]);setOpen(false);}}>×</div>}
+      </div>
+      {hint&&<div style={{fontSize:10,color:C.dim,marginTop:3}}>{hint}</div>}
+      {open&&suggestions.length>0&&(
+        <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,
+                     border:"1px solid "+C.border,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,.15)",
+                     zIndex:9999,maxHeight:220,overflowY:"auto",marginTop:2}}>
+          {suggestions.map(function(pred){return (
+            <div key={pred.place_id}
+              onMouseDown={function(){selectSuggestion(pred);}}
+              style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid "+C.border,fontSize:12}}
+              onMouseEnter={function(e){e.currentTarget.style.background=C.surface2;}}
+              onMouseLeave={function(e){e.currentTarget.style.background="";}} >
+              <div style={{fontWeight:600,color:C.text}}>{pred.structured_formatting.main_text}</div>
+              <div style={{fontSize:10,color:C.muted,marginTop:1}}>{pred.structured_formatting.secondary_text}</div>
+            </div>
+          );})}
+          <div style={{padding:"6px 14px",fontSize:10,color:C.dim,textAlign:"right"}}>
+            Powered by Google
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Order Status Flow ───────────────────────────────────────────────── */
 var CARRIER_URLS = {
   UPS:   "https://www.ups.com/track?tracknum=",
@@ -2057,7 +2149,9 @@ function MultiAddressManager({addresses,onChange}) {
         <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px",marginBottom:8}}>
           <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>{editIdx!==null?"Edit Address":"New Address"}</div>
           <Field label="Label" value={label} onChange={setLabel} placeholder="e.g. Main Office, Warehouse"/>
-          <Field label="Street Address" value={addr} onChange={setAddr} placeholder="123 Medical Dr"/>
+          <PlacesAutocomplete label="Street Address" value={addr} onChange={setAddr}
+            placeholder="123 Medical Dr, Atlanta…"
+            onSelect={function(a){setAddr(a.street);setCity(a.city);setState2(a.state);setZip(a.zip);}}/>
           <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
             <Field label="City" value={city} onChange={setCity}/>
             <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
@@ -6287,6 +6381,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [custEmail,  setCustEmail]  = useState("");
   const [custPhone,  setCustPhone]  = useState("");
   const [custComp,   setCustComp]   = useState("");
+  const [custAddr,   setCustAddr]   = useState("");
+  const [custCity,   setCustCity]   = useState("");
+  const [custState2, setCustState2] = useState("");
+  const [custZip,    setCustZip]    = useState("");
   const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1}]);
   const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"pay_later");
   const [commRate,   setCommRate]   = useState((editOrder&&editOrder.commissionRate)||(repData&&repData.defaultCommissionRate)||10);
@@ -6382,7 +6480,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(newCust&&custName.trim()) {
       var nid = genId("cust");
       var nc = {id:nid,repId:repId,name:custName.trim(),email:custEmail.trim(),
-                phone:custPhone.trim(),company:custComp.trim(),createdAt:new Date().toISOString()};
+                phone:custPhone.trim(),company:custComp.trim(),
+                address:custAddr.trim(),city:custCity.trim(),state:custState2.trim(),zip:custZip.trim(),
+                addresses:custAddr.trim()?[{id:genId("adr"),label:"Primary",address:custAddr.trim(),city:custCity.trim(),state:custState2.trim(),zip:custZip.trim(),isPrimary:true}]:[],
+                createdAt:new Date().toISOString()};
       setCustomers(function(prev){return [nc].concat(prev);});
       dbSave("crm_customers",nid,nc);
       cid=nid; cname=custName.trim();
@@ -6499,6 +6600,23 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     <Field label="Email" value={custEmail} onChange={setCustEmail} type="email"/>
                     <Field label="Phone" value={custPhone} onChange={setCustPhone}/>
                     <div style={{gridColumn:"1/-1"}}><Field label="Company" value={custComp} onChange={setCustComp}/></div>
+                    <div style={{gridColumn:"1/-1",height:1,background:C.border,margin:"2px 0"}}/>
+                    <div style={{gridColumn:"1/-1"}}>
+                      <PlacesAutocomplete label="Street Address" value={custAddr} onChange={setCustAddr}
+                        placeholder="123 Medical Dr, Atlanta…"
+                        onSelect={function(a){setCustAddr(a.street);setCustCity(a.city);setCustState2(a.state);setCustZip(a.zip);}}/>
+                    </div>
+                    <Field label="City" value={custCity} onChange={setCustCity}/>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                      <Field label="State" value={custState2} onChange={setCustState2} placeholder="GA"/>
+                      <Field label="ZIP" value={custZip} onChange={setCustZip} placeholder="30309"/>
+                    </div>
+                    {custZip&&getGaTaxRate(custZip)&&(
+                      <div style={{gridColumn:"1/-1",padding:"6px 10px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:6,fontSize:11,color:C.accent,display:"flex",justifyContent:"space-between"}}>
+                        <span>📍 {getGaTaxRate(custZip).county} County, GA</span>
+                        <span style={{fontWeight:700}}>{((getGaTaxRate(custZip).rate||0)*100).toFixed(1)}% tax</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -7731,7 +7849,7 @@ function App() {
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",enabled:false});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
-  const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
+  const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"AIzaSyCGm1EnoA3NqxScxhWHcSBTMQi4lcoZ5yE",enabled:true});
   const [discountCodes, setDiscountCodes] = useLS("discountCodes", [{id:"dc1",code:"PREVA10",type:"percent",value:10,active:true,uses:0},{id:"dc2",code:"PREVA50",type:"fixed",value:50,active:true,uses:0}]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [toasts,      setToasts]      = useState([]);
