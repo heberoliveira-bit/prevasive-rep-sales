@@ -274,88 +274,129 @@ function generateCreditAgreementHtml(customer, req, template, company) {
 
 
 /* ─── Google Places Autocomplete ────────────────────────────────── */
+// Load Maps JS API once when key is available
+var __mapsLoaded = false;
+var __mapsLoading = false;
+var __mapsCallbacks = [];
+function loadMapsApi(apiKey, cb) {
+  if(window.google && window.google.maps && window.google.maps.places) { cb(); return; }
+  if(__mapsLoaded) { cb(); return; }
+  __mapsCallbacks.push(cb);
+  if(__mapsLoading) return;
+  __mapsLoading = true;
+  window.__mapsReady = function() {
+    __mapsLoaded = true;
+    __mapsCallbacks.forEach(function(fn){ fn(); });
+    __mapsCallbacks = [];
+  };
+  var script = document.createElement("script");
+  script.src = "https://maps.googleapis.com/maps/api/js?key="+apiKey+"&libraries=places&callback=__mapsReady";
+  script.async = true;
+  script.onerror = function() { __mapsLoading = false; __mapsCallbacks = []; };
+  document.head.appendChild(script);
+}
+
 function PlacesAutocomplete({value, onChange, onSelect, placeholder, label, hint}) {
   const [suggestions, setSuggestions] = useState([]);
   const [open,        setOpen]        = useState(false);
   const [loading,     setLoading]     = useState(false);
-  var timerRef = {current:null};
+  const [ready,       setReady]       = useState(!!(window.google&&window.google.maps&&window.google.maps.places));
+  var debounce = {t:null};
 
   function getKey() {
-    try {
-      var cfg = JSON.parse(localStorage.getItem("googleCfg")||"{}");
-      return cfg.apiKey||"";
-    } catch(e) { return ""; }
+    try { return JSON.parse(localStorage.getItem("googleCfg")||"{}").apiKey||""; } catch(e){return "";}
   }
 
+  useEffect(function() {
+    var key = getKey();
+    if(!key) return;
+    loadMapsApi(key, function(){ setReady(true); });
+  }, []);
+
   function search(text) {
-    clearTimeout(timerRef.current);
-    if(!text||text.length<3){setSuggestions([]);setOpen(false);return;}
-    timerRef.current = setTimeout(function(){
-      var key = getKey();
-      if(!key){return;}
+    clearTimeout(debounce.t);
+    if(!text||text.length<3){ setSuggestions([]); setOpen(false); return; }
+    if(!ready){ return; }
+    debounce.t = setTimeout(function(){
       setLoading(true);
-      fetch("https://maps.googleapis.com/maps/api/place/autocomplete/json?input="+encodeURIComponent(text)+"&types=address&components=country:us&key="+key)
-        .then(function(r){return r.json();})
-        .then(function(data){
+      var svc = new window.google.maps.places.AutocompleteService();
+      svc.getPlacePredictions(
+        {input:text, types:["address"], componentRestrictions:{country:"us"}},
+        function(predictions, status) {
           setLoading(false);
-          if(data.predictions){setSuggestions(data.predictions);setOpen(true);}
-        })
-        .catch(function(){setLoading(false);});
+          if(status===window.google.maps.places.PlacesServiceStatus.OK && predictions){
+            setSuggestions(predictions);
+            setOpen(true);
+          } else {
+            setSuggestions([]);
+          }
+        }
+      );
     }, 300);
   }
 
   function selectSuggestion(pred) {
-    var key = getKey();
-    setOpen(false);
-    setSuggestions([]);
-    onChange(pred.structured_formatting.main_text||pred.description);
-    if(onSelect) {
-      fetch("https://maps.googleapis.com/maps/api/place/details/json?place_id="+pred.place_id+"&fields=address_components,formatted_address&key="+key)
-        .then(function(r){return r.json();})
-        .then(function(data){
-          if(!data.result) return;
-          var comps = data.result.address_components||[];
-          function get(type){var c=comps.find(function(x){return x.types.indexOf(type)>=0;});return c?c.short_name||c.long_name:"";}
-          var street = (get("street_number")+" "+get("route")).trim();
-          var city   = get("locality")||get("sublocality")||get("neighborhood");
-          var state  = get("administrative_area_level_1");
-          var zip    = get("postal_code");
-          onSelect({street:street,city:city,state:state,zip:zip});
-        })
-        .catch(function(){});
-    }
+    setOpen(false); setSuggestions([]);
+    onChange(pred.structured_formatting ? pred.structured_formatting.main_text : pred.description);
+    if(!onSelect) return;
+    var dummy = document.createElement("div");
+    var svc   = new window.google.maps.places.PlacesService(dummy);
+    svc.getDetails({placeId:pred.place_id, fields:["address_components","formatted_address"]},
+      function(result, status) {
+        if(status!==window.google.maps.places.PlacesServiceStatus.OK || !result) return;
+        var comps = result.address_components||[];
+        function get(type){
+          var match=comps.find(function(x){return x.types.indexOf(type)>=0;});
+          return match?match.short_name||match.long_name:"";
+        }
+        onSelect({
+          street: (get("street_number")+" "+get("route")).trim(),
+          city:   get("locality")||get("sublocality")||get("neighborhood"),
+          state:  get("administrative_area_level_1"),
+          zip:    get("postal_code"),
+        });
+      }
+    );
   }
 
   return (
     <div style={{position:"relative",marginBottom:12}}>
       {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label}</div>}
       <div style={{position:"relative"}}>
-        <input value={value} placeholder={placeholder||"Start typing address…"}
+        <input value={value} placeholder={ready?placeholder||"Start typing address…":"Enter API key in Settings → Address"}
           onChange={function(e){onChange(e.target.value);search(e.target.value);}}
           onFocus={function(){if(suggestions.length>0)setOpen(true);}}
           onBlur={function(){setTimeout(function(){setOpen(false);},150);}}
           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
                   padding:"8px 32px 8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
                   boxSizing:"border-box",outline:"none"}}/>
-        {loading&&<div style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:C.muted}}>⟳</div>}
-        {!loading&&value&&<div style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:12,color:C.dim,cursor:"pointer"}} onClick={function(){onChange("");setSuggestions([]);setOpen(false);}}>×</div>}
+        {loading&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted}}>...</span>}
+        {!loading&&value&&(
+          <span onClick={function(){onChange("");setSuggestions([]);setOpen(false);}}
+            style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
+                    fontSize:14,color:C.dim,cursor:"pointer",lineHeight:1}}>×</span>
+        )}
       </div>
       {hint&&<div style={{fontSize:10,color:C.dim,marginTop:3}}>{hint}</div>}
       {open&&suggestions.length>0&&(
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,
-                     border:"1px solid "+C.border,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,.15)",
-                     zIndex:9999,maxHeight:220,overflowY:"auto",marginTop:2}}>
-          {suggestions.map(function(pred){return (
-            <div key={pred.place_id}
-              onMouseDown={function(){selectSuggestion(pred);}}
-              style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid "+C.border,fontSize:12}}
-              onMouseEnter={function(e){e.currentTarget.style.background=C.surface2;}}
-              onMouseLeave={function(e){e.currentTarget.style.background="";}} >
-              <div style={{fontWeight:600,color:C.text}}>{pred.structured_formatting.main_text}</div>
-              <div style={{fontSize:10,color:C.muted,marginTop:1}}>{pred.structured_formatting.secondary_text}</div>
-            </div>
-          );})}
-          <div style={{padding:"6px 14px",fontSize:10,color:C.dim,textAlign:"right"}}>
+                     border:"1px solid "+C.border,borderRadius:8,
+                     boxShadow:"0 8px 24px rgba(0,0,0,.18)",zIndex:9999,
+                     maxHeight:220,overflowY:"auto",marginTop:2}}>
+          {suggestions.map(function(pred){
+            var main = pred.structured_formatting?pred.structured_formatting.main_text:pred.description;
+            var sub  = pred.structured_formatting?pred.structured_formatting.secondary_text:"";
+            return (
+              <div key={pred.place_id} onMouseDown={function(){selectSuggestion(pred);}}
+                style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid "+C.border}}
+                onMouseEnter={function(e){e.currentTarget.style.background=C.surface2;}}
+                onMouseLeave={function(e){e.currentTarget.style.background="";}}>
+                <div style={{fontWeight:600,fontSize:12,color:C.text}}>📍 {main}</div>
+                {sub&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>{sub}</div>}
+              </div>
+            );
+          })}
+          <div style={{padding:"4px 14px",fontSize:10,color:C.dim,textAlign:"right",borderTop:"1px solid "+C.border}}>
             Powered by Google
           </div>
         </div>
@@ -363,6 +404,7 @@ function PlacesAutocomplete({value, onChange, onSelect, placeholder, label, hint
     </div>
   );
 }
+
 
 /* ─── Order Status Flow ───────────────────────────────────────────────── */
 var CARRIER_URLS = {
@@ -7849,7 +7891,7 @@ function App() {
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",enabled:false});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
-  const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"AIzaSyCGm1EnoA3NqxScxhWHcSBTMQi4lcoZ5yE",enabled:true});
+  const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
   const [discountCodes, setDiscountCodes] = useLS("discountCodes", [{id:"dc1",code:"PREVA10",type:"percent",value:10,active:true,uses:0},{id:"dc2",code:"PREVA50",type:"fixed",value:50,active:true,uses:0}]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [toasts,      setToasts]      = useState([]);
