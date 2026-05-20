@@ -274,26 +274,28 @@ function generateCreditAgreementHtml(customer, req, template, company) {
 
 
 /* ─── Google Places Autocomplete ────────────────────────────────── */
-var __mapsLoaded = false;
-var __mapsLoading = false;
-var __mapsCallbacks = [];
+var __placesLib = null;
+var __placesLoading = false;
+var __placesCallbacks = [];
 
-function loadMapsApi(apiKey, cb) {
-  if(window.google&&window.google.maps&&window.google.maps.places){cb();return;}
-  if(__mapsLoaded){cb();return;}
-  __mapsCallbacks.push(cb);
-  if(__mapsLoading) return;
-  __mapsLoading = true;
+function loadPlacesLib(apiKey, cb) {
+  if(__placesLib){cb(__placesLib);return;}
+  __placesCallbacks.push(cb);
+  if(__placesLoading) return;
+  __placesLoading = true;
+  // Use new loading=async + importLibrary pattern
   window.__mapsReady = function(){
-    __mapsLoaded=true;
-    __mapsLoading=false;
-    __mapsCallbacks.forEach(function(fn){fn();});
-    __mapsCallbacks=[];
+    window.google.maps.importLibrary("places").then(function(lib){
+      __placesLib = lib;
+      __placesLoading = false;
+      __placesCallbacks.forEach(function(fn){fn(lib);});
+      __placesCallbacks = [];
+    });
   };
-  var s=document.createElement("script");
-  s.src="https://maps.googleapis.com/maps/api/js?key="+encodeURIComponent(apiKey)+"&libraries=places&callback=__mapsReady";
-  s.async=true;
-  s.onerror=function(){__mapsLoading=false;__mapsCallbacks=[];};
+  var s = document.createElement("script");
+  s.src = "https://maps.googleapis.com/maps/api/js?key="+encodeURIComponent(apiKey)+"&loading=async&libraries=places&callback=__mapsReady";
+  s.async = true;
+  s.onerror = function(){ __placesLoading=false; __placesCallbacks=[]; };
   document.head.appendChild(s);
 }
 
@@ -305,92 +307,97 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
   const [suggestions, setSuggestions] = useState([]);
   const [open,        setOpen]        = useState(false);
   const [loading,     setLoading]     = useState(false);
-  const [ready,       setReady]       = useState(!!(window.google&&window.google.maps&&window.google.maps.places));
-  var debounceRef = {t:null};
+  const [lib,         setLib]         = useState(__placesLib);
+  var debounceT = {v:null};
 
-  // Try to load on mount + whenever value changes (catches late key entry)
+  // Load ONCE on mount only
   useEffect(function(){
-    var key=getPlacesKey();
-    if(key&&!ready){
-      loadMapsApi(key,function(){setReady(true);});
-    }
-  });
+    var key = getPlacesKey();
+    if(!key || __placesLib) return;
+    loadPlacesLib(key, function(l){ setLib(l); });
+  }, []); // ← empty array = run once
 
   function search(text){
-    clearTimeout(debounceRef.t);
+    clearTimeout(debounceT.v);
     if(!text||text.length<3){setSuggestions([]);setOpen(false);return;}
-    if(!ready||!window.google){return;}
-    debounceRef.t=setTimeout(function(){
+    if(!lib){return;}
+    debounceT.v = setTimeout(function(){
       setLoading(true);
-      var svc=new window.google.maps.places.AutocompleteService();
-      svc.getPlacePredictions(
-        {input:text,types:["address"],componentRestrictions:{country:"us"}},
-        function(preds,status){
-          setLoading(false);
-          if(preds&&status==="OK"){setSuggestions(preds);setOpen(true);}
-          else{setSuggestions([]);}
-        }
-      );
-    },300);
-  }
-
-  function pickSuggestion(pred){
-    setOpen(false);setSuggestions([]);
-    var main=pred.structured_formatting?pred.structured_formatting.main_text:pred.description;
-    onChange(main);
-    if(!onSelect||!window.google) return;
-    var dummy=document.createElement("div");
-    var svc=new window.google.maps.places.PlacesService(dummy);
-    svc.getDetails({placeId:pred.place_id,fields:["address_components"]},function(result,status){
-      if(status!=="OK"||!result) return;
-      var ac=result.address_components||[];
-      function g(t){var x=ac.find(function(a){return a.types.indexOf(t)>=0;});return x?x.short_name||x.long_name:"";}
-      onSelect({
-        street:(g("street_number")+" "+g("route")).trim(),
-        city:g("locality")||g("sublocality")||g("neighborhood"),
-        state:g("administrative_area_level_1"),
-        zip:g("postal_code"),
+      lib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+        input: text,
+        includedRegionCodes: ["us"],
+      }).then(function(result){
+        setLoading(false);
+        var preds = result.suggestions||[];
+        setSuggestions(preds);
+        if(preds.length>0) setOpen(true);
+      }).catch(function(e){
+        setLoading(false);
+        console.warn("Places error:", e);
       });
-    });
+    }, 300);
   }
 
+  function pickSuggestion(sug){
+    setOpen(false); setSuggestions([]);
+    var pred = sug.placePrediction;
+    var mainText = pred.mainText ? pred.mainText.toString() : pred.text;
+    onChange(mainText||"");
+    if(!onSelect) return;
+    var place = pred.toPlace();
+    place.fetchFields({fields:["addressComponents"]}).then(function(){
+      var comps = place.addressComponents||[];
+      function g(type){
+        var match = comps.find(function(a){return a.types&&a.types.indexOf(type)>=0;});
+        return match ? (match.shortText||match.longText||"") : "";
+      }
+      onSelect({
+        street: (g("street_number")+" "+g("route")).trim(),
+        city:   g("locality")||g("sublocality_level_1")||g("neighborhood"),
+        state:  g("administrative_area_level_1"),
+        zip:    g("postal_code"),
+      });
+    }).catch(function(e){console.warn("Place details error:",e);});
+  }
+
+  var hasKey = !!getPlacesKey();
   return (
     <div style={{position:"relative",marginBottom:12}}>
       {label&&<div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label}</div>}
       <div style={{position:"relative"}}>
         <input value={value}
-          placeholder={ready?(placeholder||"Start typing address…"):(getPlacesKey()?"Loading Google Maps…":placeholder||"Street address")}
-          onChange={function(e){onChange(e.target.value);if(ready)search(e.target.value);}}
+          placeholder={lib?(placeholder||"Start typing address…"):loading?"Loading Maps…":(placeholder||"Street address")}
+          onChange={function(e){onChange(e.target.value);if(lib)search(e.target.value);}}
           onFocus={function(){if(suggestions.length>0)setOpen(true);}}
           onBlur={function(){setTimeout(function(){setOpen(false);},160);}}
           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,
                   padding:"8px 30px 8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",
                   boxSizing:"border-box",outline:"none"}}/>
-        {loading&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:11,color:C.muted,pointerEvents:"none"}}>⏳</span>}
-        {!loading&&ready&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:10,color:C.success,pointerEvents:"none"}}>📍</span>}
-        {!loading&&!ready&&!getPlacesKey()&&<span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",fontSize:10,color:C.dim,pointerEvents:"none"}}>✏️</span>}
+        <span style={{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",
+                      fontSize:12,pointerEvents:"none",color:lib?C.success:C.dim}}>
+          {loading?"⏳":lib?"📍":"✏️"}
+        </span>
       </div>
-      {!ready&&!getPlacesKey()&&(
-        <div style={{fontSize:10,color:C.warning,marginTop:3}}>
-          ⚠ No Google API key — type address manually or add key in <strong>Settings → Address</strong>
-        </div>
-      )}
-      {hint&&ready&&<div style={{fontSize:10,color:C.dim,marginTop:3}}>{hint}</div>}
+      {!hasKey&&<div style={{fontSize:10,color:C.warning,marginTop:3}}>
+        ⚠ No Google API key — type manually or add key in <strong>Settings → Address</strong>
+      </div>}
+      {hint&&lib&&<div style={{fontSize:10,color:C.dim,marginTop:3}}>{hint}</div>}
       {open&&suggestions.length>0&&(
         <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.bg,
                      border:"1px solid "+C.border,borderRadius:8,
                      boxShadow:"0 8px 24px rgba(0,0,0,.18)",
                      zIndex:9999,maxHeight:220,overflowY:"auto",marginTop:2}}>
-          {suggestions.map(function(pred){
-            var main=pred.structured_formatting?pred.structured_formatting.main_text:pred.description;
-            var sub=pred.structured_formatting?pred.structured_formatting.secondary_text:"";
+          {suggestions.map(function(sug,i){
+            var pred = sug.placePrediction;
+            var main = pred.mainText?pred.mainText.toString():"";
+            var sec  = pred.secondaryText?pred.secondaryText.toString():"";
             return (
-              <div key={pred.place_id} onMouseDown={function(){pickSuggestion(pred);}}
+              <div key={i} onMouseDown={function(){pickSuggestion(sug);}}
                 style={{padding:"9px 14px",cursor:"pointer",borderBottom:"1px solid "+C.border}}
                 onMouseEnter={function(e){e.currentTarget.style.background=C.surface2;}}
                 onMouseLeave={function(e){e.currentTarget.style.background="";}}>
                 <div style={{fontWeight:600,fontSize:12,color:C.text}}>📍 {main}</div>
-                {sub&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>{sub}</div>}
+                {sec&&<div style={{fontSize:10,color:C.muted,marginTop:1}}>{sec}</div>}
               </div>
             );
           })}
@@ -1017,9 +1024,6 @@ function RepSubscriptionWall({rep,onActivate,onLogout}) {
 }
 
 
-
-</script>
-<script id="c1" type="text/plain">
 function ApplyForm({onSubmit,onCancel}) {
   const [name,    setName]    = useState("");
   const [company, setCompany] = useState("");
@@ -1065,6 +1069,9 @@ function ApplyForm({onSubmit,onCancel}) {
   );
 }
 
+
+</script>
+<script id="c1" type="text/plain">
 function InviteModal({rep,onClose,addToast}) {
   var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
   var baseUrl = window.location.origin+window.location.pathname;
