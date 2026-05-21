@@ -7214,7 +7214,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 {[["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
                   ["Shipping",totals.shipping===0?"Free ✓":"$"+totals.shipping.toFixed(2)],
                   totals.tax>0&&["Tax",(((totals.taxRate||0)*100).toFixed(1))+"% = "+fmtMoney(totals.tax)],
-                  ["Payment",payMethod.replace(/_/g," ")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
+                  ["Payment",fmtTerms(payMethod)+(dorPath==="card"?" — Collect Card":dorPath==="link"?" — Send Invoice Link":"")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
                   ["Grand Total",fmtMoney(totals.grand)]].map(function(row,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.border}}>
                     <span style={{color:C.muted}}>{row[0]}</span>
@@ -7223,9 +7223,37 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 );})}
               </div>
 
-              <div style={{padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:12,color:C.warning,fontWeight:600,marginBottom:14}}>
-                ⚠ Once placed, this order will be submitted for processing.
-              </div>
+              {/* Card collection for DOR — collect card path */}
+              {payMethod==="due_receipt"&&dorPath==="card"&&(
+                <div style={{background:C.surface2,border:"1px solid "+C.warning+"40",borderRadius:10,padding:"14px",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.warning,marginBottom:10}}>💳 Collect Card Reference</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                    <div style={{gridColumn:"1/-1"}}>
+                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
+                      <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
+                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
+                      <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+(cardLast4.length===4?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
+                      <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+(cardExpiry.length===5?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                  </div>
+                  <div style={{fontSize:10,color:C.dim,marginTop:8}}>Reference only — process payment through your terminal separately.</div>
+                </div>
+              )}
+
+              {/* Send invoice reminder for DOR link path */}
+              {payMethod==="due_receipt"&&dorPath==="link"&&(
+                <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted}}>
+                  📧 After placing, send the customer a payment link from the order detail.
+                </div>
+              )}
 
               {/* Invoice auto-send for net terms */}
               {(function(){
