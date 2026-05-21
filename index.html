@@ -6420,7 +6420,7 @@ var EMAIL_TEMPLATES = [
 ];
 var EMAIL_VARS = ["{{customer_name}}","{{rep_name}}","{{order_id}}","{{date}}","{{company}}"];
 
-function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult}) {
+function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showResult}) {
   const [toId,     setToId]     = useState("");
   const [toEmail,  setToEmail]  = useState("");
   const [subject,  setSubject]  = useState("");
@@ -6431,7 +6431,7 @@ function EmailModule({currentUser,customers,orders,isAdmin,addToast,showResult})
   const [sending,  setSending]  = useState(false);
   const [sentLog,  setSentLog]  = useState([]);
 
-  var myCusts = isAdmin ? customers : customers.filter(function(c2){return c2.repId===(currentUser&&(currentUser.rep_id||currentUser.id));});
+  var myCusts = isAdmin ? customers : customers.filter(function(c2){return c2.repId===repId;});
   var selCust = myCusts.find(function(c2){return c2.id===toId;})||null;
   var filtCusts = search ? myCusts.filter(function(c2){var s=search.toLowerCase();return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.email||"").toLowerCase().indexOf(s)>=0;}) : myCusts;
 
@@ -8428,6 +8428,7 @@ function App() {
         {/* Admin Modules */}
         {(activeTab==="email")&&(
           <EmailModule currentUser={currentUser} customers={customers} orders={orders}
+            repId={effectiveUser.rep_id||effectiveUser.id}
             isAdmin={isAdmin} addToast={addToast} showResult={showResult}/>
         )}
         {(activeTab==="quotes"||activeTab==="rep_quotes")&&(
