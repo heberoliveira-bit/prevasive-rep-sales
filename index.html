@@ -6544,6 +6544,7 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules,currentUser}) {
   const [step,       setStep]       = useState(1);
+  const [showErrors, setShowErrors]  = useState(false);
   const [custId,     setCustId]     = useState((editOrder&&editOrder.custId)||"");
   const [newCust,    setNewCust]    = useState(false);
   const [custName,   setCustName]   = useState("");
@@ -6669,8 +6670,32 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   }
 
   function step1Valid() {
-    if(newCust) return custName.trim().length>0;
-    return custId.length>0;
+    if(newCust) {
+      if(!custName.trim()) return false;
+      if(!custEmail.trim()) return false;
+      if(!custPhone.trim()) return false;
+      if(!custAddr.trim()||!custCity.trim()||!custState2.trim()||!custZip.trim()) return false;
+    } else {
+      if(!custId) return false;
+    }
+    if(!items.some(function(it){return it.prodId;})) return false;
+    return true;
+  }
+  function step1Errors() {
+    var errs=[];
+    if(newCust) {
+      if(!custName.trim())  errs.push("Customer name is required");
+      if(!custEmail.trim()) errs.push("Email is required");
+      if(!custPhone.trim()) errs.push("Phone number is required");
+      if(!custAddr.trim())  errs.push("Street address is required");
+      if(!custCity.trim())  errs.push("City is required");
+      if(!custState2.trim()) errs.push("State is required");
+      if(!custZip.trim())   errs.push("ZIP code is required");
+    } else {
+      if(!custId) errs.push("Select a customer");
+    }
+    if(!items.some(function(it){return it.prodId;})) errs.push("Select at least one product");
+    return errs;
   }
   function step2Valid() { return items.some(function(it){return it.prodId;}); }
 
@@ -6869,10 +6894,20 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 ):(
                   <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
                     <div style={{gridColumn:"1/-1"}}><Field label="Customer Name *" value={custName} onChange={setCustName} placeholder="Dr. Jane Smith"/></div>
-                    <Field label="Email" value={custEmail} onChange={setCustEmail} type="email"/>
-                    <Field label="Phone" value={custPhone} onChange={setCustPhone}/>
+                    <Field label="Email *" value={custEmail} onChange={setCustEmail} type="email"
+                      style={showErrors&&!custEmail.trim()?{border:"1px solid "+C.danger}:{}}/>
+                    <Field label="Phone *" value={custPhone} onChange={setCustPhone}
+                      style={showErrors&&!custPhone.trim()?{border:"1px solid "+C.danger}:{}}/>
                     <div style={{gridColumn:"1/-1"}}><Field label="Company" value={custComp} onChange={setCustComp}/></div>
                     <div style={{gridColumn:"1/-1",height:1,background:C.border,margin:"2px 0"}}/>
+
+                    {/* Validation error banner */}
+                    {showErrors&&step1Errors().length>0&&(
+                      <div style={{gridColumn:"1/-1",padding:"10px 14px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:8,marginBottom:4}}>
+                        <div style={{fontSize:11,fontWeight:700,color:C.danger,marginBottom:4}}>Please complete required fields:</div>
+                        {step1Errors().map(function(e,i){return <div key={i} style={{fontSize:11,color:C.danger}}>• {e}</div>;})}
+                      </div>
+                    )}
 
                     {/* Ship To */}
                     <div style={{gridColumn:"1/-1"}}>
@@ -7000,8 +7035,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 {items.map(function(it,i){return (
                   <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px auto",gap:8,marginBottom:8,alignItems:"center"}}>
                     <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value}):x;});});}}
-                      style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                      <option value="">Select product…</option>
+                      style={{background:C.bg,border:"1px solid "+(showErrors&&!items.some(function(i){return i.prodId;})?C.danger:C.border),borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
+                      <option value="">Select product… *</option>
                       {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}{p.sku?" ("+p.sku+")":""}</option>;})}
                     </select>
                     <input type="number" min="1" value={it.qty}
@@ -7076,28 +7111,6 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                             📧 After placing the order, you can send the customer a payment link from the order detail.
                           </div>
                         )}
-                        {dorPath==="card"&&(
-                          <div style={{marginTop:10,padding:"12px 14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
-                            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>💳 Card Reference</div>
-                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                              <div style={{gridColumn:"1/-1"}}>
-                                <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
-                                <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
-                                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-                              </div>
-                              <div>
-                                <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
-                                <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
-                                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
-                              </div>
-                              <div>
-                                <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
-                                <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
-                                  style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
-                              </div>
-                            </div>
-                          </div>
-                        )}
                       </div>
                     );
                   }
@@ -7163,37 +7176,6 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   );
                 })()}
 
-              {/* Card fields — Credit Card only (not used currently) */}
-              {payMethod==="credit_card"&&(
-                <div style={{marginTop:4,padding:"14px",background:C.surface2,borderRadius:10,border:"1px solid "+C.border}}>
-                  <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>💳 Card Reference</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                    <div>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
-                      <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
-                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
-                      <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
-                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
-                      <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
-                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Billing ZIP</div>
-                      <input value={cardZip} onChange={function(e){setCardZip(e.target.value.slice(0,10));}} placeholder="30309"
-                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
-                  </div>
-                  <div style={{marginTop:10,fontSize:10,color:C.dim,lineHeight:1.5}}>
-                    ⚠ For reference only. No card data is stored or transmitted. Process payment through your terminal separately.
-                  </div>
-                </div>
-              )}
               </div>
 
               <div style={{marginBottom:16}}>
@@ -7429,8 +7411,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
             {step===1?"Cancel":"← Back"}
           </Btn>
           {step<3?(
-            <Btn onClick={function(){if(step===1&&!step1Valid()) return; if(step===2&&!step2Valid()) return; setStep(step+1);}}
-              disabled={(step===1&&!step1Valid())||(step===2&&!step2Valid())}>
+            <Btn onClick={function(){
+                if(step===1){if(!step1Valid()){setShowErrors(true);return;}setShowErrors(false);}
+                if(step===2&&!step2Valid()) return;
+                setStep(step+1);}}
+              disabled={(step===2&&!step2Valid())}>
               Next →
             </Btn>
           ):(
