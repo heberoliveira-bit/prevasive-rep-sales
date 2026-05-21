@@ -6677,6 +6677,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       if(!custAddr.trim()||!custCity.trim()||!custState2.trim()||!custZip.trim()) return false;
     } else {
       if(!custId) return false;
+      var hasAddr = selCust&&((selCust.addresses&&selCust.addresses.length>0)||(selCust.address&&selCust.address.trim()));
+      if(!hasAddr) return false;
     }
     if(!items.some(function(it){return it.prodId;})) return false;
     return true;
@@ -6684,15 +6686,19 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   function step1Errors() {
     var errs=[];
     if(newCust) {
-      if(!custName.trim())  errs.push("Customer name is required");
-      if(!custEmail.trim()) errs.push("Email is required");
-      if(!custPhone.trim()) errs.push("Phone number is required");
-      if(!custAddr.trim())  errs.push("Street address is required");
-      if(!custCity.trim())  errs.push("City is required");
+      if(!custName.trim())   errs.push("Customer name is required");
+      if(!custEmail.trim())  errs.push("Email is required");
+      if(!custPhone.trim())  errs.push("Phone number is required");
+      if(!custAddr.trim())   errs.push("Street address is required");
+      if(!custCity.trim())   errs.push("City is required");
       if(!custState2.trim()) errs.push("State is required");
-      if(!custZip.trim())   errs.push("ZIP code is required");
+      if(!custZip.trim())    errs.push("ZIP code is required");
     } else {
       if(!custId) errs.push("Select a customer");
+      else {
+        var hasAddr = selCust&&((selCust.addresses&&selCust.addresses.length>0)||(selCust.address&&selCust.address.trim()));
+        if(!hasAddr) errs.push("Customer has no address on file — edit customer to add one");
+      }
     }
     if(!items.some(function(it){return it.prodId;})) errs.push("Select at least one product");
     return errs;
@@ -7018,6 +7024,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           ✓ {fmtTerms(selCust.termsType||"net_30")} Terms Active
                         </div>
                       )}
+                      {showErrors&&!(selCust.addresses&&selCust.addresses.length>0)&&!(selCust.address&&selCust.address.trim())&&(
+                        <div style={{marginTop:8,padding:"6px 10px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:6,fontSize:11,color:C.danger,fontWeight:600}}>
+                          ⚠ No address on file — edit customer to add one
+                        </div>
+                      )}
                     </div>
                   </div>
                   {selCust.zip&&getGaTaxRate(selCust.zip)&&(
@@ -7026,6 +7037,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                       <span style={{fontWeight:700,color:C.accent}}>{((getGaTaxRate(selCust.zip).rate||0)*100).toFixed(1)}% sales tax</span>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Validation errors for existing customer path */}
+              {showErrors&&step1Errors().length>0&&(
+                <div style={{marginBottom:12,padding:"10px 14px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:8}}>
+                  <div style={{fontSize:11,fontWeight:700,color:C.danger,marginBottom:4}}>Please complete required fields:</div>
+                  {step1Errors().map(function(e,i){return <div key={i} style={{fontSize:11,color:C.danger}}>• {e}</div>;})}
                 </div>
               )}
 
