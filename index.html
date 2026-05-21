@@ -6432,6 +6432,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [custCity,   setCustCity]   = useState("");
   const [custState2, setCustState2] = useState("");
   const [custZip,    setCustZip]    = useState("");
+  const [billSameAsShip, setBillSameAsShip] = useState(true);
+  const [billAddr,   setBillAddr]   = useState("");
+  const [billCity,   setBillCity]   = useState("");
+  const [billState,  setBillState]  = useState("");
+  const [billZip,    setBillZip]    = useState("");
   const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1}]);
   const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"pay_later");
   const [commRate,   setCommRate]   = useState((editOrder&&editOrder.commissionRate)||(repData&&repData.defaultCommissionRate)||10);
@@ -6529,6 +6534,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       var nc = {id:nid,repId:repId,name:custName.trim(),email:custEmail.trim(),
                 phone:custPhone.trim(),company:custComp.trim(),
                 address:custAddr.trim(),city:custCity.trim(),state:custState2.trim(),zip:custZip.trim(),
+                billingAddress:billSameAsShip?null:{address:billAddr.trim(),city:billCity.trim(),state:billState.trim(),zip:billZip.trim()},
+                billSameAsShip:billSameAsShip,
                 addresses:custAddr.trim()?[{id:genId("adr"),label:"Primary",address:custAddr.trim(),city:custCity.trim(),state:custState2.trim(),zip:custZip.trim(),isPrimary:true}]:[],
                 createdAt:new Date().toISOString()};
       setCustomers(function(prev){return [nc].concat(prev);});
@@ -6648,22 +6655,65 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     <Field label="Phone" value={custPhone} onChange={setCustPhone}/>
                     <div style={{gridColumn:"1/-1"}}><Field label="Company" value={custComp} onChange={setCustComp}/></div>
                     <div style={{gridColumn:"1/-1",height:1,background:C.border,margin:"2px 0"}}/>
+
+                    {/* Ship To */}
                     <div style={{gridColumn:"1/-1"}}>
+                      <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:8}}>📦 Ship To</div>
                       <PlacesAutocomplete label="Street Address" value={custAddr} onChange={setCustAddr}
                         placeholder="123 Medical Dr, Atlanta…"
                         onSelect={function(a){setCustAddr(a.street);setCustCity(a.city);setCustState2(a.state);setCustZip(a.zip);}}/>
-                    </div>
-                    <Field label="City" value={custCity} onChange={setCustCity}/>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                      <Field label="State" value={custState2} onChange={setCustState2} placeholder="GA"/>
-                      <Field label="ZIP" value={custZip} onChange={setCustZip} placeholder="30309"/>
-                    </div>
-                    {custZip&&getGaTaxRate(custZip)&&(
-                      <div style={{gridColumn:"1/-1",padding:"6px 10px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:6,fontSize:11,color:C.accent,display:"flex",justifyContent:"space-between"}}>
-                        <span>📍 {getGaTaxRate(custZip).county} County, GA</span>
-                        <span style={{fontWeight:700}}>{((getGaTaxRate(custZip).rate||0)*100).toFixed(1)}% tax</span>
+                      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
+                        <Field label="City" value={custCity} onChange={setCustCity}/>
+                        <Field label="State" value={custState2} onChange={setCustState2} placeholder="GA"/>
+                        <Field label="ZIP" value={custZip} onChange={setCustZip} placeholder="30309"/>
                       </div>
-                    )}
+                      {custZip&&getGaTaxRate(custZip)&&(
+                        <div style={{padding:"6px 10px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:6,fontSize:11,color:C.accent,display:"flex",justifyContent:"space-between",marginTop:4}}>
+                          <span>📍 {getGaTaxRate(custZip).county} County, GA</span>
+                          <span style={{fontWeight:700}}>{((getGaTaxRate(custZip).rate||0)*100).toFixed(1)}% tax</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bill To */}
+                    <div style={{gridColumn:"1/-1",marginTop:8}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em"}}>💳 Bill To</div>
+                        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:11,color:C.muted}}>
+                          <input type="checkbox" checked={billSameAsShip}
+                            onChange={function(e){
+                              setBillSameAsShip(e.target.checked);
+                              if(e.target.checked){setBillAddr("");setBillCity("");setBillState("");setBillZip("");}
+                            }}
+                            style={{accentColor:C.accent}}/>
+                          Same as shipping
+                        </label>
+                      </div>
+                      {billSameAsShip?(
+                        <div style={{padding:"10px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:8,fontSize:12,color:C.muted,lineHeight:1.7}}>
+                          {custAddr?(
+                            <div>
+                              <div style={{fontWeight:600,color:C.text}}>{custName||"Customer"}</div>
+                              <div>{custAddr}</div>
+                              <div>{[custCity,custState2,custZip].filter(Boolean).join(", ")}</div>
+                            </div>
+                          ):(
+                            <span style={{color:C.dim,fontStyle:"italic"}}>Fill shipping address above</span>
+                          )}
+                        </div>
+                      ):(
+                        <div>
+                          <PlacesAutocomplete label="Billing Street Address" value={billAddr} onChange={setBillAddr}
+                            placeholder="Billing address…"
+                            onSelect={function(a){setBillAddr(a.street);setBillCity(a.city);setBillState(a.state);setBillZip(a.zip);}}/>
+                          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
+                            <Field label="City" value={billCity} onChange={setBillCity}/>
+                            <Field label="State" value={billState} onChange={setBillState} placeholder="GA"/>
+                            <Field label="ZIP" value={billZip} onChange={setBillZip} placeholder="30309"/>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
