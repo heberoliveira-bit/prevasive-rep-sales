@@ -1,6 +1,7 @@
 <!DOCTYPE html><html><head><meta charset="UTF-8"><title>PreVasive Rep Sales</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<script src="https://js.stripe.com/v3/"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -6574,7 +6575,35 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [cardZip,      setCardZip]      = useState("");
   const [sendInvAuto,  setSendInvAuto]  = useState(true);
   const [shipAddrId,   setShipAddrId]   = useState(null);
-  const [dorPath,      setDorPath]      = useState("link"); // "link" or "card"
+  const [dorPath,      setDorPath]      = useState("link");
+  const [cardMode,     setCardMode]     = useState("online"); // "online" or "terminal"
+  const [cardName,     setCardName]     = useState("");
+  const [charging,     setCharging]     = useState(false);
+  const [chargeErr,    setChargeErr]    = useState("");
+  const [charged,      setCharged]      = useState(null); // {id, last4, brand}
+  const stripeRef = {el:null, stripe:null, card:null};
+  const [sendOnPlace,  setSendOnPlace]  = useState(true);
+
+  // Mount Stripe Elements when reaching Step 3 + card mode
+  useEffect(function(){
+    if(step!==3||payMethod!=="due_receipt"||dorPath!=="card"||cardMode!=="online") return;
+    var key = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").publishableKey||"";}catch(e){return "";}})();
+    if(!key||!window.Stripe) return;
+    setTimeout(function(){
+      var el = document.getElementById("stripe-card-element");
+      if(!el||stripeRef.card) return;
+      stripeRef.stripe = window.Stripe(key);
+      var elements = stripeRef.stripe.elements();
+      stripeRef.card = elements.create("card",{
+        style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"13px",color:"#f0f4ff","::placeholder":{color:"#6b7c93"}}},
+        hidePostalCode:true,
+      });
+      stripeRef.card.mount("#stripe-card-element");
+      stripeRef.el = el;
+    }, 100);
+    return function(){if(stripeRef.card){stripeRef.card.unmount();stripeRef.card=null;}};
+  });
+  const [placeEmail,   setPlaceEmail]   = useState(""); // "link" or "card"
   const [showPostInv,  setShowPostInv]  = useState(false);
   const [placedOrder,  setPlacedOrder]  = useState(null);
   const [showPreview,  setShowPreview]  = useState(false);
@@ -6644,9 +6673,41 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   }
   function step2Valid() { return items.some(function(it){return it.prodId;}); }
 
+  function getStripeKey(){
+    try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").publishableKey||"";}catch(e){return "";}
+  }
+  function getStripeEdgeFn(){
+    try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}
+  }
+
   function place() {
     if(!agreed||placing) return;
+    // For online Stripe charge, tokenize card first then place
+    if(payMethod==="due_receipt"&&dorPath==="card"&&cardMode==="online"&&!charged) {
+      if(!stripeRef.stripe||!stripeRef.card){addToast("Stripe not loaded — check API key in Settings","warning");return;}
+      setPlacing(true);
+      stripeRef.stripe.createPaymentMethod({type:"card",card:stripeRef.card,billing_details:{name:cardName||selCust&&selCust.name||custName}}).then(function(result){
+        if(result.error){setPlacing(false);setChargeErr(result.error.message);return;}
+        var pmId = result.paymentMethod.id;
+        var stripeEdge = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}})();
+        if(!stripeEdge){setPlacing(false);setChargeErr("Stripe Edge Function URL not set — check Settings → Stripe");return;}
+        fetch(stripeEdge,{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"charge",paymentMethodId:pmId,amount:Math.round((calcTotals().grand||0)*100),currency:"usd",description:"Order — "+(selCust?selCust.name:custName)}),
+        }).then(function(r){return r.json();}).then(function(d){
+          if(d.error){setPlacing(false);setChargeErr(d.error);return;}
+          setCharged({id:d.paymentIntentId||pmId,last4:d.last4||"????",brand:d.brand||"Card"});
+          setCardLast4(d.last4||"");
+          doPlace();
+        }).catch(function(e){setPlacing(false);setChargeErr("Could not reach payment server");});
+      });
+      return; // wait for async charge
+    }
     setPlacing(true);
+    doPlace();
+  }
+
+  function doPlace() {
     var totals = calcTotals();
     var cid = custId; var cname = selCust?selCust.name:custName;
     if(newCust&&custName.trim()) {
@@ -6690,6 +6751,42 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       return isEdit?prev.map(function(o){return o.id===id?order:o;}): [order].concat(prev);
     });
     dbSave("crm_orders",id,order);
+
+    // ── DOR: Send Invoice Link — email customer immediately ──
+    if(payMethod==="due_receipt"&&dorPath==="link"&&sendOnPlace&&placeEmail.trim()) {
+      var emailCfg2=null;
+      try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+      if(emailCfg2&&emailCfg2.edgeFnUrl&&emailCfg2.pass) {
+        var payTok2 = id+"_"+Math.random().toString(36).slice(2,9);
+        var payD2   = {token:payTok2,status:"pending",order:order,customer:selCust||{name:cname},company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",products:products,createdAt:new Date().toISOString()};
+        localStorage.setItem("__pv__pay_"+payTok2,JSON.stringify(payD2));
+        var payLinkUrl = window.location.origin+window.location.pathname+"#pay="+payTok2;
+        var emailHtml  = "<h2>Invoice from "+(payD2.company)+"</h2><p>Hi "+(cname||"there")+",</p><p>Please find your invoice for order <strong>"+id+"</strong> below.</p><p><strong>Total Due: "+fmtMoney(order.totals&&order.totals.grand||0)+"</strong></p><p><a href='"+payLinkUrl+"' style='background:#635bff;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;margin:16px 0'>Pay Invoice →</a></p><p style='color:#6b7c93;font-size:12px'>"+payD2.company+" · Do not reply to this email.</p>";
+        var repEmail3 = currentUser&&currentUser.email ? currentUser.email : null;
+        fetch(emailCfg2.edgeFnUrl,{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({to:placeEmail.trim(),cc:repEmail3||undefined,subject:"Invoice from "+payD2.company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due",html:emailHtml,fromName:emailCfg2.fromName||"PreVasive USA",fromEmail:emailCfg2.fromEmail,user:emailCfg2.user,pass:emailCfg2.pass}),
+        }).then(function(r){return r.json();}).then(function(d){
+          if(d.ok){addToast("✓ Invoice sent to "+placeEmail.trim(),"success");}
+          else{addToast("Order placed — email failed: "+(d.error||"check settings"),"warning");}
+        }).catch(function(){addToast("Order placed — email server unreachable","warning");});
+      }
+    }
+
+    // ── DOR: Stripe Terminal — start reader payment ──
+    if(payMethod==="due_receipt"&&dorPath==="card"&&cardMode==="terminal") {
+      var stripeEdgeFn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}})();
+      if(stripeEdgeFn) {
+        fetch(stripeEdgeFn,{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"terminal_payment",amount:Math.round((order.totals&&order.totals.grand||0)*100),currency:"usd",orderId:id}),
+        }).then(function(r){return r.json();}).then(function(d){
+          if(d.ok){addToast("✓ Terminal payment initiated — have customer tap/swipe","success");}
+          else{addToast("Terminal error: "+(d.error||"check Stripe settings"),"warning");}
+        }).catch(function(){addToast("Could not reach payment server","warning");});
+      }
+    }
+
     var isNetOrder = selCust&&selCust.termsStatus==="active"&&selCust.termsType&&selCust.termsType!=="due_receipt";
     setTimeout(function(){
       setPlacing(false);
@@ -6763,7 +6860,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   <button onClick={function(){setNewCust(true);setCustId("");}} style={{flex:1,padding:"8px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",border:"2px solid "+(newCust?C.accent:C.border),background:newCust?C.accent+"10":C.surface2,color:newCust?C.accent:C.muted,fontSize:12,fontWeight:newCust?600:400}}>New Customer</button>
                 </div>
                 {!newCust?(
-                  <select value={custId} onChange={function(e){setCustId(e.target.value);}}
+                  <select value={custId} onChange={function(e){setCustId(e.target.value);var sc2=myCusts.find(function(x){return x.id===e.target.value;});if(sc2) setPlaceEmail(sc2.email||"");}}
                     style={{width:"100%",background:C.bg,border:"1px solid "+(custId?C.success:C.border),borderRadius:7,padding:"9px 12px",color:custId?C.text:C.dim,fontSize:13,fontFamily:"inherit",outline:"none"}}>
                     <option value="">Select customer…</option>
                     {myCusts.map(function(c2){return <option key={c2.id} value={c2.id}>{c2.name}{c2.company?" — "+c2.company:""}</option>;})}
@@ -7223,37 +7320,75 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 );})}
               </div>
 
-              {/* Card collection for DOR — collect card path */}
-              {payMethod==="due_receipt"&&dorPath==="card"&&(
-                <div style={{background:C.surface2,border:"1px solid "+C.warning+"40",borderRadius:10,padding:"14px",marginBottom:14}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.warning,marginBottom:10}}>💳 Collect Card Reference</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                    <div style={{gridColumn:"1/-1"}}>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Cardholder Name</div>
-                      <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Jane Smith"
-                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
-                      <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
-                        style={{width:"100%",background:C.bg,border:"1px solid "+(cardLast4.length===4?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
-                    <div>
-                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
-                      <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
-                        style={{width:"100%",background:C.bg,border:"1px solid "+(cardExpiry.length===5?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
-                    </div>
+              {/* ── DOR: Send Invoice Link ── */}
+              {payMethod==="due_receipt"&&dorPath==="link"&&(
+                <div style={{background:C.accent+"08",border:"1px solid "+C.accent+"25",borderRadius:10,padding:"14px",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.accent,marginBottom:10}}>✉ Send Payment Link to Customer</div>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+                    Invoice email sent immediately when order is placed. Fulfillment begins once customer pays online.
                   </div>
-                  <div style={{fontSize:10,color:C.dim,marginTop:8}}>Reference only — process payment through your terminal separately.</div>
+                  <Field label="Send To" value={placeEmail} onChange={setPlaceEmail} type="email" placeholder="customer@email.com"/>
+                  <label style={{display:"flex",alignItems:"center",gap:7,fontSize:11,color:C.muted,cursor:"pointer",marginTop:4}}>
+                    <input type="checkbox" checked={sendOnPlace} onChange={function(e){setSendOnPlace(e.target.checked);}} style={{accentColor:C.accent}}/>
+                    Send invoice email immediately when I place this order
+                  </label>
+                  {sendOnPlace&&!placeEmail&&<div style={{fontSize:10,color:C.warning,marginTop:4}}>⚠ Add customer email above to send automatically</div>}
                 </div>
               )}
 
-              {/* Send invoice reminder for DOR link path */}
-              {payMethod==="due_receipt"&&dorPath==="link"&&(
-                <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted}}>
-                  📧 After placing, send the customer a payment link from the order detail.
+              {/* ── DOR: Collect Card — Stripe Terminal or Online ── */}
+              {payMethod==="due_receipt"&&dorPath==="card"&&!charged&&(
+                <div style={{background:C.surface2,border:"1px solid "+C.warning+"40",borderRadius:10,padding:"14px",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.warning,marginBottom:10}}>💳 Collect Payment — {fmtMoney(totals.grand||0)}</div>
+
+                  {/* Mode toggle */}
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+                    {[["online","💳 Charge Card Now"],["terminal","📱 Stripe Terminal"]].map(function(m){
+                      var sel=cardMode===m[0];
+                      return (
+                        <div key={m[0]} onClick={function(){setCardMode(m[0]);setChargeErr("");}}
+                          style={{padding:"9px 12px",borderRadius:8,border:"2px solid "+(sel?C.accent:C.border),
+                                  background:sel?C.accent+"08":C.surface,cursor:"pointer",textAlign:"center"}}>
+                          <div style={{fontSize:12,fontWeight:sel?700:400,color:sel?C.accent:C.muted}}>{m[1]}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Online — Stripe Elements */}
+                  {cardMode==="online"&&(
+                    <div>
+                      <Field label="Name on Card" value={cardName} onChange={setCardName} placeholder="Jane Smith"/>
+                      <div style={{marginBottom:8}}>
+                        <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:5}}>Card Number</div>
+                        <div id="stripe-card-element" style={{background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"10px 12px",fontSize:13,minHeight:38}}/>
+                        <div style={{fontSize:10,color:C.dim,marginTop:3}}>Powered by Stripe — card number never touches our servers</div>
+                      </div>
+                      {chargeErr&&<div style={{padding:"7px 10px",background:C.danger+"12",borderRadius:6,fontSize:11,color:C.danger,marginBottom:8}}>{chargeErr}</div>}
+                    </div>
+                  )}
+
+                  {/* Terminal */}
+                  {cardMode==="terminal"&&(
+                    <div>
+                      <div style={{padding:"10px 12px",background:C.surface,borderRadius:8,fontSize:12,color:C.muted,lineHeight:1.7,marginBottom:8}}>
+                        Customer taps/swipes card on your Stripe Terminal reader. Have the reader ready before clicking Place Order.
+                      </div>
+                      {chargeErr&&<div style={{padding:"7px 10px",background:C.danger+"12",borderRadius:6,fontSize:11,color:C.danger}}>{chargeErr}</div>}
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* ── DOR: Card charged confirmation ── */}
+              {payMethod==="due_receipt"&&dorPath==="card"&&charged&&(
+                <div style={{background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.success}}>✓ Payment Captured — {fmtMoney(totals.grand||0)}</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:4}}>{charged.brand} ····{charged.last4} · ID: {charged.id}</div>
+                </div>
+              )}
+
+
 
               {/* Invoice auto-send for net terms */}
               {(function(){
@@ -7303,7 +7438,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 👁 Preview Invoice
               </Btn>
               <Btn onClick={place} disabled={!agreed||placing}>
-                {placing?"Placing…":isEdit?"Save Changes":"Place Order"}
+                {placing?(dorPath==="card"&&cardMode==="online"&&!charged?"Processing payment…":"Placing…"):isEdit?"Save Changes":dorPath==="link"&&sendOnPlace&&placeEmail?"Place & Send Invoice →":"Place Order"}
               </Btn>
             </div>
           )}
