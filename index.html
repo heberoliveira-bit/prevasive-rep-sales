@@ -6,7 +6,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
-<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;transition:background .2s,color .2s;}#root{min-height:100vh}#err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}input,button,select,textarea,details,summary{font-family:"Inter",system-ui,-apple-system,sans-serif;}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#1e2d40;border-radius:2px}::-webkit-scrollbar-thumb:hover{background:#635bff}@keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}</style>
+<style>*{box-sizing:border-box;margin:0;padding:0}body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}#root{min-height:100vh}#err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}input,button,select,textarea,details,summary{font-family:"Inter",system-ui,-apple-system,sans-serif;}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#1e2d40;border-radius:2px}::-webkit-scrollbar-thumb:hover{background:#635bff}@keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}</style>
 </head><body><div id="err"></div><div id="root"></div>
 <script id="c0" type="text/plain">
 /* PreVasive Rep Sales CRM — v1 */
@@ -1668,7 +1668,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
           subject:subject, html:htmlBody,
           fromName:cfg.fromName||"PreVasive USA",
           fromEmail:cfg.fromEmail,
-          user:cfg.user, pass:cfg.pass,
+          tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:cfg.clientSecret,
         }),
       }).then(function(r){return r.json();}).then(function(d){
         if(d.ok){addToast("✓ Invoice sent to "+toEmail.trim()+(repEmail?" (CC: "+repEmail+")":""),"success");onClose();}
@@ -5986,17 +5986,17 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
           </div>
 
           <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>Office 365 Credentials</div>
-            <div style={{padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:7,marginBottom:12,fontSize:11,color:C.muted,lineHeight:1.7}}>
-              Use an <strong style={{color:C.text}}>App Password</strong>, not your login password.<br/>
-              Microsoft Account → Security → Advanced security → App passwords
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Microsoft Graph API Credentials</div>
+            <div style={{padding:"8px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:7,marginBottom:12,fontSize:11,color:C.muted,lineHeight:1.7}}>
+              From your Azure App Registration (see setup guide above).
             </div>
-            <Field label="O365 Username" value={(emailCfg&&emailCfg.user)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{user:v});});}} placeholder="noreply@prevasive.com" type="email"/>
+            <Field label="Directory (Tenant) ID" value={(emailCfg&&emailCfg.tenantId)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{tenantId:v});});}} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
+            <Field label="Application (Client) ID" value={(emailCfg&&emailCfg.clientId)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{clientId:v});});}} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
             <div style={{marginBottom:12}}>
-              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>App Password</div>
-              <input type="password" value={(emailCfg&&emailCfg.pass)||""}
-                onChange={function(e){var v=e.target.value;onSaveEmail(function(p){return Object.assign({},p,{pass:v});});}}
-                placeholder="16-character app password"
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Client Secret</div>
+              <input type="password" value={(emailCfg&&emailCfg.clientSecret)||""}
+                onChange={function(e){var v=e.target.value;onSaveEmail(function(p){return Object.assign({},p,{clientSecret:v});});}}
+                placeholder="Client secret value from Azure"
                 style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
             </div>
           </div>
@@ -6025,7 +6025,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
           </div>
 
           {/* Test email */}
-          {(emailCfg&&emailCfg.edgeFnUrl&&emailCfg.fromEmail)&&(
+          {(emailCfg&&emailCfg.edgeFnUrl&&emailCfg.fromEmail&&emailCfg.tenantId)&&(
             <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Test Connection</div>
               <div style={{display:"flex",gap:8}}>
@@ -6040,11 +6040,12 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                     body:JSON.stringify({
                       to:emailCfg.testTo,
                       subject:"PreVasive CRM — Email Test",
-                      html:"<h2>Email integration working!</h2><p>Your Office 365 email is configured correctly in the PreVasive CRM.</p>",
+                      html:"<h2>Email integration working!</h2><p>Microsoft Graph API email is configured correctly.</p>",
                       fromName:emailCfg.fromName||"PreVasive USA",
                       fromEmail:emailCfg.fromEmail,
-                      user:emailCfg.user,
-                      pass:emailCfg.pass,
+                      tenantId:emailCfg.tenantId,
+                      clientId:emailCfg.clientId,
+                      clientSecret:emailCfg.clientSecret,
                     }),
                   }).then(function(r){return r.json();}).then(function(d){
                     if(d.ok){addToast("✓ Test email sent successfully!","success");}
@@ -6055,7 +6056,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
             </div>
           )}
 
-          {(emailCfg&&emailCfg.fromEmail&&emailCfg.edgeFnUrl)?(
+          {(emailCfg&&emailCfg.fromEmail&&emailCfg.tenantId&&emailCfg.clientId&&emailCfg.edgeFnUrl)?(
             <div style={{padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
               ✓ Email configured — invoices will send from {emailCfg.fromEmail} with rep CC
             </div>
@@ -6765,7 +6766,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         var repEmail3 = currentUser&&currentUser.email ? currentUser.email : null;
         fetch(emailCfg2.edgeFnUrl,{
           method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({to:placeEmail.trim(),cc:repEmail3||undefined,subject:"Invoice from "+payD2.company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due",html:emailHtml,fromName:emailCfg2.fromName||"PreVasive USA",fromEmail:emailCfg2.fromEmail,user:emailCfg2.user,pass:emailCfg2.pass}),
+          body:JSON.stringify({to:placeEmail.trim(),cc:repEmail3||undefined,subject:"Invoice from "+payD2.company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due",html:emailHtml,fromName:emailCfg2.fromName||"PreVasive USA",fromEmail:emailCfg2.fromEmail,tenantId:emailCfg2.tenantId,clientId:emailCfg2.clientId,clientSecret:emailCfg2.clientSecret}),
         }).then(function(r){return r.json();}).then(function(d){
           if(d.ok){addToast("✓ Invoice sent to "+placeEmail.trim(),"success");}
           else{addToast("Order placed — email failed: "+(d.error||"check settings"),"warning");}
@@ -8232,7 +8233,7 @@ function App() {
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",enabled:false});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
   const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
-  const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",user:"",pass:"",edgeFnUrl:""});
+  const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",tenantId:"",clientId:"",clientSecret:"",edgeFnUrl:""});
   const [discountCodes, setDiscountCodes] = useLS("discountCodes", [{id:"dc1",code:"PREVA10",type:"percent",value:10,active:true,uses:0},{id:"dc2",code:"PREVA50",type:"fixed",value:50,active:true,uses:0}]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [toasts,      setToasts]      = useState([]);
