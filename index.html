@@ -1651,9 +1651,33 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
   function copyLink(){var l=genLink();navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");});}
   function openMail(){
     if(!toEmail.trim()){addToast("Enter a customer email address first","warning");return;}
-    var l=genLink(); var txt=body.replace("[PAYMENT_LINK]",l);
-    window.open("mailto:"+encodeURIComponent(toEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(txt),"_blank");
-    addToast("Opening email client…","info");
+    var l=genLink();
+    var txt=body.replace("[PAYMENT_LINK]",l);
+    var cfg=null;
+    try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&cfg.pass){
+      // Send via Edge Function
+      var repEmail = currentUser&&currentUser.email ? currentUser.email : null;
+      var htmlBody = txt.split("\n").join("<br/>");
+      fetch(cfg.edgeFnUrl,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          to:toEmail.trim(), cc:repEmail||undefined,
+          subject:subject, html:htmlBody,
+          fromName:cfg.fromName||"PreVasive USA",
+          fromEmail:cfg.fromEmail,
+          user:cfg.user, pass:cfg.pass,
+        }),
+      }).then(function(r){return r.json();}).then(function(d){
+        if(d.ok){addToast("✓ Invoice sent to "+toEmail.trim()+(repEmail?" (CC: "+repEmail+")":""),"success");onClose();}
+        else{addToast("Email error: "+(d.error||"Unknown — check Edge Function logs"),"danger");}
+      }).catch(function(){addToast("Could not reach email server — check Edge Function URL","danger");});
+    } else {
+      // Fallback to mailto:
+      window.open("mailto:"+encodeURIComponent(toEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(txt),"_blank");
+      addToast("Opening email client… (configure Email in Settings for direct send)","info");
+    }
   }
 
   return (
@@ -1663,7 +1687,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose}>Close</Btn>
           <Btn variant="ghost" onClick={copyLink}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-          <Btn onClick={openMail}>✉ Open in Mail →</Btn>
+          <Btn onClick={openMail}>{(function(){try{var cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg&&cfg.edgeFnUrl&&cfg.pass?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
         </div>
       </div>}>
 
@@ -5680,7 +5704,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,orders,customers,commissions,reps,addToast}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -5694,7 +5718,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
   const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
@@ -5943,6 +5967,102 @@ function AdminSettings({supabaseCfg,onSaveSupabase,discountCodes,onSaveDiscountC
           <TextArea label="Invoice Footer" value={invFooter} onChange={setInvFooter} rows={3}
             hint="Appears at the bottom of every invoice"/>
           <Btn onClick={function(){onSaveInvoice({prefix:invPrefix,company:invComp,footer:invFooter,paymentTerms:invTerms});addToast("Invoice settings saved","success");}}>Save</Btn>
+        </div>
+      )}
+
+
+      {tab==="email"&&(
+        <div style={{maxWidth:600}}>
+          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Email — Office 365</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.6}}>
+            Emails send from <strong style={{color:C.text}}>noreply@prevasive.com</strong> with the rep automatically CC'd on every send.
+          </div>
+
+          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Sender Identity</div>
+            <Field label="From Name" value={(emailCfg&&emailCfg.fromName)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{fromName:v});});}} placeholder="PreVasive USA"/>
+            <Field label="From Email" value={(emailCfg&&emailCfg.fromEmail)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{fromEmail:v});});}} placeholder="noreply@prevasive.com" type="email"/>
+          </div>
+
+          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>Office 365 Credentials</div>
+            <div style={{padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:7,marginBottom:12,fontSize:11,color:C.muted,lineHeight:1.7}}>
+              Use an <strong style={{color:C.text}}>App Password</strong>, not your login password.<br/>
+              Microsoft Account → Security → Advanced security → App passwords
+            </div>
+            <Field label="O365 Username" value={(emailCfg&&emailCfg.user)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{user:v});});}} placeholder="noreply@prevasive.com" type="email"/>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>App Password</div>
+              <input type="password" value={(emailCfg&&emailCfg.pass)||""}
+                onChange={function(e){var v=e.target.value;onSaveEmail(function(p){return Object.assign({},p,{pass:v});});}}
+                placeholder="16-character app password"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+            </div>
+          </div>
+
+          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Supabase Edge Function URL</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>Deploy the function below to Supabase, then paste the URL here.</div>
+            <Field label="Function URL" value={(emailCfg&&emailCfg.edgeFnUrl)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{edgeFnUrl:v});});}} placeholder="https://xxx.supabase.co/functions/v1/send-email"/>
+          </div>
+
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"16px",marginBottom:14}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:C.text}}>Edge Function — copy to Supabase</div>
+                <div style={{fontSize:10,color:C.muted,marginTop:2}}>supabase/functions/send-email/index.ts</div>
+              </div>
+              <Btn small variant="ghost" onClick={function(){
+                var lines=["import { serve } from \"https://deno.land/std@0.168.0/http/server.ts\";","","const cors = { \"Access-Control-Allow-Origin\": \"*\", \"Access-Control-Allow-Headers\": \"authorization,x-client-info,apikey,content-type\" };","","serve(async (req) => {","  if (req.method === \"OPTIONS\") return new Response(\"ok\", { headers: cors });","  try {","    const { to, cc, subject, html, fromName, fromEmail, user, pass } = await req.json();","    const { createTransport } = await import(\"npm:nodemailer@6.9.9\");","    const transport = createTransport({","      host: \"smtp.office365.com\", port: 587, secure: false,","      auth: { user, pass }, tls: { ciphers: \"SSLv3\" },","    });","    await transport.sendMail({ from: fromName + \" <\" + fromEmail + \">\", to, cc, subject, html });","    return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, \"Content-Type\": \"application/json\" } });","  } catch(e) {","    return new Response(JSON.stringify({ error: e.message }), { status: 500, headers: { ...cors, \"Content-Type\": \"application/json\" } });","  }","});"]; var code=lines.join("\n");
+                navigator.clipboard.writeText(code).then(function(){addToast("Edge function code copied!","success");});
+              }}>📋 Copy</Btn>
+            </div>
+            <pre style={{background:C.surface2,borderRadius:7,padding:"12px",fontSize:10,color:C.muted,overflow:"auto",maxHeight:180,lineHeight:1.7,margin:0,whiteSpace:"pre-wrap"}}>{["import { serve } from \"https://deno.land/std@0.168.0/http/server.ts\";","","const cors = { \"Access-Control-Allow-Origin\": \"*\" };","","serve(async (req) => {","  if (req.method === \"OPTIONS\") return new Response(\"ok\", { headers: cors });","  const { to,cc,subject,html,fromName,fromEmail,user,pass } = await req.json();","  const { createTransport } = await import(\"npm:nodemailer@6.9.9\");","  const t = createTransport({ host:\"smtp.office365.com\", port:587,","    secure:false, auth:{user,pass}, tls:{ciphers:\"SSLv3\"} });","  await t.sendMail({ from:fromName+\" <\"+fromEmail+\">\", to,cc,subject,html });","  return new Response(JSON.stringify({ok:true}), { headers:{...cors} });","});"].join("\n")}</pre>
+            <div style={{marginTop:10,fontSize:10,color:C.muted,lineHeight:1.7}}>
+              Deploy: <code style={{background:C.surface2,padding:"1px 5px",borderRadius:3,color:C.accent}}>supabase functions deploy send-email</code>
+            </div>
+          </div>
+
+          {/* Test email */}
+          {(emailCfg&&emailCfg.edgeFnUrl&&emailCfg.fromEmail)&&(
+            <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Test Connection</div>
+              <div style={{display:"flex",gap:8}}>
+                <div style={{flex:1}}>
+                  <Field label="Send test to" value={(emailCfg&&emailCfg.testTo)||""} onChange={function(v){onSaveEmail(function(p){return Object.assign({},p,{testTo:v});});}} placeholder="your@email.com" type="email"/>
+                </div>
+                <Btn onClick={function(){
+                  if(!emailCfg||!emailCfg.edgeFnUrl||!emailCfg.testTo){addToast("Fill in Function URL and test email first","warning");return;}
+                  fetch(emailCfg.edgeFnUrl,{
+                    method:"POST",
+                    headers:{"Content-Type":"application/json"},
+                    body:JSON.stringify({
+                      to:emailCfg.testTo,
+                      subject:"PreVasive CRM — Email Test",
+                      html:"<h2>Email integration working!</h2><p>Your Office 365 email is configured correctly in the PreVasive CRM.</p>",
+                      fromName:emailCfg.fromName||"PreVasive USA",
+                      fromEmail:emailCfg.fromEmail,
+                      user:emailCfg.user,
+                      pass:emailCfg.pass,
+                    }),
+                  }).then(function(r){return r.json();}).then(function(d){
+                    if(d.ok){addToast("✓ Test email sent successfully!","success");}
+                    else{addToast("Error: "+(d.error||"Unknown error"),"danger");}
+                  }).catch(function(e){addToast("Failed to reach Edge Function","danger");});
+                }} style={{marginTop:22}}>Send Test</Btn>
+              </div>
+            </div>
+          )}
+
+          {(emailCfg&&emailCfg.fromEmail&&emailCfg.edgeFnUrl)?(
+            <div style={{padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
+              ✓ Email configured — invoices will send from {emailCfg.fromEmail} with rep CC
+            </div>
+          ):(
+            <div style={{padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:11,color:C.warning}}>
+              ⚠ Complete all fields above to enable email sending
+            </div>
+          )}
         </div>
       )}
 
@@ -7949,6 +8069,7 @@ function App() {
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",enabled:false});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
   const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
+  const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",user:"",pass:"",edgeFnUrl:""});
   const [discountCodes, setDiscountCodes] = useLS("discountCodes", [{id:"dc1",code:"PREVA10",type:"percent",value:10,active:true,uses:0},{id:"dc2",code:"PREVA50",type:"fixed",value:50,active:true,uses:0}]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [toasts,      setToasts]      = useState([]);
@@ -8368,6 +8489,7 @@ function App() {
             shipStationCfg={shipStationCfg} onSaveShipStation={setShipStationCfg}
             taxCfg={taxCfg} onSaveTax={setTaxCfg}
             googleCfg={googleCfg} onSaveGoogle={setGoogleCfg}
+            emailCfg={emailCfg} onSaveEmail={setEmailCfg}
             creditAgreementTemplate={creditAgreementTemplate} setCreditAgreementTemplate={setCreditAgreementTemplate}
             stripeLinks={stripeLinks} setStripeLinks={setStripeLinks}
             stripeAccountA={stripeAccountA} setStripeAccountA={setStripeAccountA}
