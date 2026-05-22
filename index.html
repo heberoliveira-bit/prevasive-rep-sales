@@ -6372,12 +6372,12 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
                       <div>
                         <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Rule Name</div>
-                        <input value={rule.label||""} onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{label:v}):r;});});}}
+                        <input value={rule.label||""} onChange={function(e){var v=e.target.value;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{label:v}):r;});});}}
                           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
                       </div>
                       <div>
                         <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Type</div>
-                        <select value={rule.type||"flat"} onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{type:v}):r;});});}}
+                        <select value={rule.type||"flat"} onChange={function(e){var v=e.target.value;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{type:v}):r;});});}}
                           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit"}}>
                           <option value="flat">Flat Rate</option>
                           <option value="free">Free Shipping</option>
@@ -6388,14 +6388,14 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                       {(rule.type==="flat"||(rule.type!=="pickup"&&rule.type!=="carrier"&&rule.type!=="free"))&&(
                         <div>
                           <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Rate ($)</div>
-                          <input type="number" value={rule.rate||""} onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{rate:parseFloat(v)||0}):r;});});}}
+                          <input type="number" value={rule.rate||""} onChange={function(e){var v=e.target.value;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{rate:parseFloat(v)||0}):r;});});}}
                             style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
                         </div>
                       )}
                       {rule.type==="free"&&(
                         <div>
                           <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Min Order ($)</div>
-                          <input type="number" value={rule.minOrder||""} placeholder="0 = always free" onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{minOrder:parseFloat(v)||0}):r;});});}}
+                          <input type="number" value={rule.minOrder||""} placeholder="0 = always free" onChange={function(e){var v=e.target.value;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{minOrder:parseFloat(v)||0}):r;});});}}
                             style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
                         </div>
                       )}
@@ -6406,7 +6406,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                             {["UPS","FedEx","USPS","DHL"].map(function(ca){
                               var sel = !rule.carriers||(rule.carriers||[]).indexOf(ca)>=0;
                               return (
-                                <span key={ca} onClick={function(){onSaveShipping(function(prev){return prev.map(function(r,ri){
+                                <span key={ca} onClick={function(){onSaveShippingRules(function(prev){return prev.map(function(r,ri){
                                   if(ri!==ridx) return r;
                                   var cur = r.carriers||(["UPS","FedEx","USPS","DHL"]);
                                   var next = cur.indexOf(ca)>=0 ? cur.filter(function(x){return x!=ca;}) : cur.concat([ca]);
@@ -6425,23 +6425,23 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                       {rule.type==="pickup"&&(
                         <div>
                           <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Pickup Note</div>
-                          <input value={rule.pickupNote||""} placeholder="Call to schedule pickup" onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{pickupNote:v}):r;});});}}
+                          <input value={rule.pickupNote||""} placeholder="Call to schedule pickup" onChange={function(e){var v=e.target.value;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{pickupNote:v}):r;});});}}
                             style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
                         </div>
                       )}
                       <div>
                         <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Max Order ($)</div>
-                        <input type="number" value={rule.maxOrder===999999?"":rule.maxOrder||""} placeholder="∞ unlimited" onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{maxOrder:v?parseFloat(v):999999}):r;});});}}
+                        <input type="number" value={rule.maxOrder===999999?"":rule.maxOrder||""} placeholder="∞ unlimited" onChange={function(e){var v=e.target.value;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{maxOrder:v?parseFloat(v):999999}):r;});});}}
                           style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
                       </div>
                     </div>
                   </div>
                   <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}>
                     <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-                      <input type="checkbox" checked={rule.active!==false} onChange={function(e){var v=e.target.checked;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{active:v}):r;});});}} style={{accentColor:C.accent}}/>
+                      <input type="checkbox" checked={rule.active!==false} onChange={function(e){var v=e.target.checked;onSaveShippingRules(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{active:v}):r;});});}} style={{accentColor:C.accent}}/>
                       <span style={{fontSize:11,color:C.muted}}>Active</span>
                     </label>
-                    <button onClick={function(){onSaveShipping(function(prev){return prev.filter(function(_,ri){return ri!==ridx;});});}}
+                    <button onClick={function(){onSaveShippingRules(function(prev){return prev.filter(function(_,ri){return ri!==ridx;});});}}
                       style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontSize:11,fontFamily:"inherit",padding:"2px 6px"}}>
                       Remove
                     </button>
@@ -6451,7 +6451,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
             );
           })}
 
-          <Btn onClick={function(){onSaveShipping(function(prev){return (prev||[]).concat([{id:"sr"+Date.now(),label:"New Rule",type:"flat",rate:0,maxOrder:999999,active:true}]);});}}>
+          <Btn onClick={function(){onSaveShippingRules(function(prev){return (prev||[]).concat([{id:"sr"+Date.now(),label:"New Rule",type:"flat",rate:0,maxOrder:999999,active:true}]);});}}>
             + Add Rule
           </Btn>
         </div>
