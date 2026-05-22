@@ -1665,14 +1665,14 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          to:toEmail.trim(), cc:repEmail||undefined,
+          to:toEmail.trim(),
           subject:subject, html:htmlBody,
           fromName:cfg.fromName||"PreVasive USA",
           fromEmail:cfg.fromEmail,
           tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:cfg.clientSecret,
         }),
       }).then(function(r){return r.json();}).then(function(d){
-        if(d.ok){addToast("✓ Invoice sent to "+toEmail.trim()+(repEmail?" (CC: "+repEmail+")":""),"success");onClose();}
+        if(d.ok){addToast("✓ Invoice sent to "+toEmail.trim(),"success");onClose();}
         else{addToast("Email error: "+(d.error||"Unknown — check Edge Function logs"),"danger");}
       }).catch(function(){addToast("Could not reach email server — check Edge Function URL","danger");});
     } else {
@@ -6462,13 +6462,11 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
     }
     setSending(true);
     var htmlBody = body.split("\n").join("<br/>");
-    var repEmail = currentUser&&currentUser.email ? currentUser.email : null;
     fetch(cfg.edgeFnUrl,{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         to:toEmail.trim(),
-        cc:repEmail||undefined,
         subject:subject,
         html:htmlBody,
         fromName:cfg.fromName||"PreVasive USA",
@@ -6917,10 +6915,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         localStorage.setItem("__pv__pay_"+payTok2,JSON.stringify(payD2));
         var payLinkUrl = window.location.origin+window.location.pathname+"#pay="+payTok2;
         var emailHtml  = "<h2>Invoice from "+(payD2.company)+"</h2><p>Hi "+(cname||"there")+",</p><p>Please find your invoice for order <strong>"+id+"</strong> below.</p><p><strong>Total Due: "+fmtMoney(order.totals&&order.totals.grand||0)+"</strong></p><p><a href='"+payLinkUrl+"' style='background:#635bff;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;margin:16px 0'>Pay Invoice →</a></p><p style='color:#6b7c93;font-size:12px'>"+payD2.company+" · Do not reply to this email.</p>";
-        var repEmail3 = currentUser&&currentUser.email ? currentUser.email : null;
         fetch(emailCfg2.edgeFnUrl,{
           method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({to:placeEmail.trim(),cc:repEmail3||undefined,subject:"Invoice from "+payD2.company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due",html:emailHtml,fromName:emailCfg2.fromName||"PreVasive USA",fromEmail:emailCfg2.fromEmail,tenantId:emailCfg2.tenantId,clientId:emailCfg2.clientId,clientSecret:emailCfg2.clientSecret}),
+          body:JSON.stringify({to:placeEmail.trim(),subject:"Invoice from "+payD2.company+" — "+fmtMoney(order.totals&&order.totals.grand||0)+" due",html:emailHtml,fromName:emailCfg2.fromName||"PreVasive USA",fromEmail:emailCfg2.fromEmail,tenantId:emailCfg2.tenantId,clientId:emailCfg2.clientId,clientSecret:emailCfg2.clientSecret}),
         }).then(function(r){return r.json();}).then(function(d){
           if(d.ok){addToast("✓ Invoice sent to "+placeEmail.trim(),"success");}
           else{addToast("Order placed — email failed: "+(d.error||"check settings"),"warning");}
