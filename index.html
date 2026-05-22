@@ -440,20 +440,12 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
         dimL:parseFloat(ss.dimL)||12,
         dimW:parseFloat(ss.dimW)||10,
         dimH:parseFloat(ss.dimH)||6,
+        carrierCodes:ss.carrierFilter ? ss.carrierFilter.split(",").map(function(x){return x.trim();}).filter(Boolean) : null,
       }),
     }).then(function(r){return r.json();}).then(function(d){
       setLoading(false);
       if(d.ok){
-        // Apply carrier filter if set
         var allRates = d.rates||[];
-        var filter = (ss.carrierFilter||"").trim();
-        if(filter){
-          var filters = filter.split(",").map(function(f){return f.trim().toLowerCase();}).filter(Boolean);
-          allRates = allRates.filter(function(r){
-            var cn = (r.carrierName||"").toLowerCase();
-            return filters.some(function(f){return cn.indexOf(f)>=0;});
-          });
-        }
         // Deduplicate by serviceCode+cost
         var seen = {};
         var deduped = allRates.filter(function(r){
@@ -6263,8 +6255,8 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
 
           <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Carrier Filter <span style={{fontWeight:400,color:C.dim}}>(optional)</span></div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Only show rates from these carriers. Leave blank to show all. Separate multiple with commas.</div>
-            <Field label="Show only carriers" value={ssCarrierFilter} onChange={setSsCarrierFilter} placeholder="Worldwide Express"/>
+            <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Enter carrier codes from ShipStation (e.g. <code style={{background:C.surface,padding:"1px 4px",borderRadius:3,color:C.accent}}>se-1308020</code>) or carrier names. Separate multiple with commas. Leave blank to show all.</div>
+            <Field label="Show only carriers" value={ssCarrierFilter} onChange={setSsCarrierFilter} placeholder="se-1308020"/>
             {ssCarrierFilter&&<div style={{fontSize:10,color:C.accent,marginTop:4}}>Only showing: {ssCarrierFilter}</div>}
           </div>
 
