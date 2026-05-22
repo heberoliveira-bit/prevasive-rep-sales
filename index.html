@@ -444,10 +444,18 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
     }).then(function(r){return r.json();}).then(function(d){
       setLoading(false);
       if(d.ok){
-        setRates(d.rates||[]);
-        if(d.rates&&d.rates.length>0&&!selected) onSelect(d.rates[0]);
+        // Deduplicate by serviceCode+cost, keep cheapest per serviceCode
+        var seen = {};
+        var deduped = (d.rates||[]).filter(function(r){
+          var key = r.serviceCode+"_"+r.shipmentCost;
+          if(seen[key]) return false;
+          seen[key] = true;
+          return true;
+        });
+        setRates(deduped);
+        if(deduped.length>0&&!selected) onSelect(deduped[0]);
       } else { setError(d.error||"Failed to get rates"); }
-    }).catch(function(){setLoading(false);setError("Could not reach shipping server");});
+    }).catch(function(e){setLoading(false);setError("Could not reach shipping server: "+e.message);});
   }, [toZip]);
 
   if(loading) return (
