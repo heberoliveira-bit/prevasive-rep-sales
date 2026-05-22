@@ -1656,7 +1656,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     var txt=body.replace("[PAYMENT_LINK]",l);
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&cfg.pass){
+    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&(cfg.clientSecret||cfg.pass)){
       // Send via Edge Function
       var repEmail = currentUser&&currentUser.email ? currentUser.email : null;
       var htmlBody = txt.split("\n").join("<br/>");
@@ -1688,7 +1688,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={onClose}>Close</Btn>
           <Btn variant="ghost" onClick={copyLink}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-          <Btn onClick={openMail}>{(function(){try{var cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg&&cfg.edgeFnUrl&&cfg.pass?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
+          <Btn onClick={openMail}>{(function(){try{var cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass)?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
         </div>
       </div>}>
 
@@ -6025,7 +6025,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
           </div>
 
           {/* Test email */}
-          {(emailCfg&&emailCfg.edgeFnUrl&&emailCfg.fromEmail&&emailCfg.tenantId)&&(
+          {(emailCfg&&emailCfg.edgeFnUrl&&emailCfg.fromEmail&&(emailCfg.tenantId||emailCfg.pass))&&(
             <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
               <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:8}}>Test Connection</div>
               <div style={{display:"flex",gap:8}}>
@@ -6788,7 +6788,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(payMethod==="due_receipt"&&dorPath==="link"&&sendOnPlace&&placeEmail.trim()) {
       var emailCfg2=null;
       try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-      if(emailCfg2&&emailCfg2.edgeFnUrl&&emailCfg2.pass) {
+      if(emailCfg2&&emailCfg2.edgeFnUrl&&(emailCfg2.clientSecret||emailCfg2.pass)) {
         var payTok2 = id+"_"+Math.random().toString(36).slice(2,9);
         var payD2   = {token:payTok2,status:"pending",order:order,customer:selCust||{name:cname},company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",products:products,createdAt:new Date().toISOString()};
         localStorage.setItem("__pv__pay_"+payTok2,JSON.stringify(payD2));
