@@ -414,7 +414,7 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
 
 
 /* ─── ShippingRatePicker ─────────────────────────────────────────── */
-function ShippingRatePicker({toZip, toState, onSelect, selected}) {
+function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
   const [rates,    setRates]    = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
@@ -435,7 +435,7 @@ function ShippingRatePicker({toZip, toState, onSelect, selected}) {
         apiKey:ss.apiKey, apiSecret:ss.apiSecret,
         fromZip:ss.warehouseZip,
         toZip:toZip, toState:toState||"",
-        weight:parseFloat(ss.defaultWeight)||1,
+        weight:parseFloat(totalWeight||ss.defaultWeight)||1,
         weightUnit:ss.weightUnit||"pounds",
         dimL:parseFloat(ss.dimL)||12,
         dimW:parseFloat(ss.dimW)||10,
@@ -448,7 +448,7 @@ function ShippingRatePicker({toZip, toState, onSelect, selected}) {
         if(d.rates&&d.rates.length>0&&!selected) onSelect(d.rates[0]);
       } else { setError(d.error||"Failed to get rates"); }
     }).catch(function(){setLoading(false);setError("Could not reach shipping server");});
-  });
+  }, [toZip]);
 
   if(loading) return (
     <div style={{padding:"12px",background:C.surface2,borderRadius:10,fontSize:12,color:C.muted}}>
@@ -5070,15 +5070,25 @@ function AdminProducts({products,setProducts,addToast}) {
   const [desc,     setDesc]     = useState("");
   const [active,   setActive]   = useState(true);
   const [imgUrl,   setImgUrl]   = useState("");
+  const [weight,   setWeight]   = useState("");
+  const [dimL,     setDimL]     = useState("");
+  const [dimW,     setDimW]     = useState("");
+  const [dimH,     setDimH]     = useState("");
+  const [barcode,  setBarcode]  = useState("");
+  const [stock,    setStock]    = useState("");
 
-  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setShowForm(true); }
-  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setShowForm(true); }
+  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setShowForm(true); }
+  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setShowForm(true); }
 
   function save() {
     if(!name.trim()||!price){return;}
     var data = {id:editing?editing.id:genId("prod"),name:name.trim(),sku:sku.trim(),
                 price:parseFloat(price)||0,category:category.trim(),
-                description:desc.trim(),active:active,imageUrl:imgUrl.trim(),updatedAt:new Date().toISOString()};
+                description:desc.trim(),active:active,imageUrl:imgUrl.trim(),
+                weight:parseFloat(weight)||0,
+                dimL:parseFloat(dimL)||0,dimW:parseFloat(dimW)||0,dimH:parseFloat(dimH)||0,
+                barcode:barcode.trim(),stock:stock!==""?parseInt(stock):null,
+                updatedAt:new Date().toISOString()};
     if(!editing) data.createdAt = new Date().toISOString();
     setProducts(function(prev){
       return editing ? prev.map(function(p){return p.id===editing.id?data:p;}) : [data].concat(prev);
@@ -5153,8 +5163,25 @@ function AdminProducts({products,setProducts,addToast}) {
             <Field label="SKU" value={sku} onChange={setSku} placeholder="PV-X100"/>
             <Field label="Price *" value={price} onChange={setPrice} type="number" placeholder="299.00"/>
             <Field label="Category" value={category} onChange={setCategory} placeholder="Device, Supply…"/>
-            <div/>
+            <Field label="Barcode / UPC" value={barcode} onChange={setBarcode} placeholder="012345678901"/>
             <div style={{gridColumn:"1/-1"}}><TextArea label="Description" value={desc} onChange={setDesc} rows={3}/></div>
+
+            {/* Shipping info */}
+            <div style={{gridColumn:"1/-1",borderTop:"1px solid "+C.border,paddingTop:14,marginTop:2}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>📦 Shipping Info <span style={{fontWeight:400,color:C.dim}}>(used for live carrier rates)</span></div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+                <Field label="Weight (lbs)" value={weight} onChange={setWeight} type="number" placeholder="1.5"/>
+                <Field label="Length (in)" value={dimL} onChange={setDimL} type="number" placeholder="12"/>
+                <Field label="Width (in)" value={dimW} onChange={setDimW} type="number" placeholder="10"/>
+                <Field label="Height (in)" value={dimH} onChange={setDimH} type="number" placeholder="6"/>
+              </div>
+            </div>
+
+            {/* Inventory */}
+            <div style={{gridColumn:"1/-1",borderTop:"1px solid "+C.border,paddingTop:14,marginTop:2}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>📊 Inventory</div>
+              <Field label="Stock Quantity (optional)" value={stock} onChange={setStock} type="number" placeholder="Leave blank if unlimited"/>
+            </div>
           </div>
           <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginTop:4}}>
             <input type="checkbox" checked={active} onChange={function(e){setActive(e.target.checked);}} style={{accentColor:C.accent}}/>
@@ -7444,6 +7471,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     <div style={{marginBottom:12}}>
                       <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Live carrier rates to {shipAddr.zip}:</div>
                       <ShippingRatePicker toZip={shipAddr.zip} toState={shipAddr.state}
+                        totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products&&products.find(function(px){return px.id===it.prodId;});return s+(p&&p.weight?parseFloat(p.weight)*it.qty:1);},0)||1;})()}
                         selected={selectedRate}
                         onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);}}/>
                     </div>
