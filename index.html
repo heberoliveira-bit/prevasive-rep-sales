@@ -6352,47 +6352,108 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
       )}
 
       {tab==="shipping"&&(
-        <div style={{maxWidth:640}}>
+        <div style={{maxWidth:680}}>
           <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Shipping Rules</div>
-          <div style={{fontSize:12,color:C.muted,marginBottom:16}}>Define free shipping thresholds and flat rates by order amount.</div>
-          {(shippingRules||[]).map(function(rule,i){return (
-            <div key={i} style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:10}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,flex:1}}>
-                  <div>
-                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Min Order ($)</div>
-                    <input type="number" value={rule.minOrder||0}
-                      onChange={function(e){var updated=(shippingRules||[]).map(function(r,j){return j===i?Object.assign({},r,{minOrder:parseFloat(e.target.value)||0}):r;});onSaveShippingRules(updated);}}
-                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+          <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.6}}>
+            Rules are shown to reps at checkout. Live carrier rates (from ShipStation) are always shown when configured. Rules appear below them.
+          </div>
+
+          {(shippingRules||[]).map(function(rule,ridx){
+            var typeColor = rule.type==="pickup"?C.warning:rule.type==="free"?C.success:rule.type==="carrier"?C.accent:C.muted;
+            var typeLabel = rule.type==="pickup"?"🚗 Pickup":rule.type==="free"?"🎁 Free":rule.type==="carrier"?"📦 Carrier":"💰 Flat Rate";
+            return (
+              <div key={rule.id} style={{background:C.surface2,border:"1px solid "+(rule.active!==false?C.border:C.border),borderRadius:10,padding:"14px 16px",marginBottom:10,opacity:rule.active===false?0.5:1}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <span style={{fontSize:11,fontWeight:700,padding:"2px 8px",borderRadius:20,background:typeColor+"15",color:typeColor}}>{typeLabel}</span>
+                      {rule.active===false&&<span style={{fontSize:10,color:C.dim,fontStyle:"italic"}}>Inactive</span>}
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                      <div>
+                        <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Rule Name</div>
+                        <input value={rule.label||""} onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{label:v}):r;});});}}
+                          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Type</div>
+                        <select value={rule.type||"flat"} onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{type:v}):r;});});}}
+                          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit"}}>
+                          <option value="flat">Flat Rate</option>
+                          <option value="free">Free Shipping</option>
+                          <option value="carrier">Carrier Rate</option>
+                          <option value="pickup">Local Pickup</option>
+                        </select>
+                      </div>
+                      {(rule.type==="flat"||(rule.type!=="pickup"&&rule.type!=="carrier"&&rule.type!=="free"))&&(
+                        <div>
+                          <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Rate ($)</div>
+                          <input type="number" value={rule.rate||""} onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{rate:parseFloat(v)||0}):r;});});}}
+                            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                        </div>
+                      )}
+                      {rule.type==="free"&&(
+                        <div>
+                          <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Min Order ($)</div>
+                          <input type="number" value={rule.minOrder||""} placeholder="0 = always free" onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{minOrder:parseFloat(v)||0}):r;});});}}
+                            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                        </div>
+                      )}
+                      {rule.type==="carrier"&&(
+                        <div>
+                          <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Carriers</div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                            {["UPS","FedEx","USPS","DHL"].map(function(ca){
+                              var sel = !rule.carriers||(rule.carriers||[]).indexOf(ca)>=0;
+                              return (
+                                <span key={ca} onClick={function(){onSaveShipping(function(prev){return prev.map(function(r,ri){
+                                  if(ri!==ridx) return r;
+                                  var cur = r.carriers||(["UPS","FedEx","USPS","DHL"]);
+                                  var next = cur.indexOf(ca)>=0 ? cur.filter(function(x){return x!=ca;}) : cur.concat([ca]);
+                                  return Object.assign({},r,{carriers:next});
+                                });});}}
+                                  style={{padding:"2px 8px",borderRadius:12,fontSize:10,fontWeight:600,cursor:"pointer",
+                                    background:sel?C.accent+"20":C.surface,color:sel?C.accent:C.dim,
+                                    border:"1px solid "+(sel?C.accent:C.border)}}>
+                                  {ca}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {rule.type==="pickup"&&(
+                        <div>
+                          <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Pickup Note</div>
+                          <input value={rule.pickupNote||""} placeholder="Call to schedule pickup" onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{pickupNote:v}):r;});});}}
+                            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                        </div>
+                      )}
+                      <div>
+                        <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Max Order ($)</div>
+                        <input type="number" value={rule.maxOrder===999999?"":rule.maxOrder||""} placeholder="∞ unlimited" onChange={function(e){var v=e.target.value;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{maxOrder:v?parseFloat(v):999999}):r;});});}}
+                          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"6px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Max Order ($)</div>
-                    <input type="number" value={rule.maxOrder||0}
-                      onChange={function(e){var updated=(shippingRules||[]).map(function(r,j){return j===i?Object.assign({},r,{maxOrder:parseFloat(e.target.value)||0}):r;});onSaveShippingRules(updated);}}
-                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
-                  </div>
-                  <div>
-                    <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Shipping Cost ($)</div>
-                    <input type="number" value={rule.cost||0}
-                      onChange={function(e){var updated=(shippingRules||[]).map(function(r,j){return j===i?Object.assign({},r,{cost:parseFloat(e.target.value)||0}):r;});onSaveShippingRules(updated);}}
-                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                  <div style={{display:"flex",flexDirection:"column",gap:6,alignItems:"flex-end"}}>
+                    <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+                      <input type="checkbox" checked={rule.active!==false} onChange={function(e){var v=e.target.checked;onSaveShipping(function(prev){return prev.map(function(r,ri){return ri===ridx?Object.assign({},r,{active:v}):r;});});}} style={{accentColor:C.accent}}/>
+                      <span style={{fontSize:11,color:C.muted}}>Active</span>
+                    </label>
+                    <button onClick={function(){onSaveShipping(function(prev){return prev.filter(function(_,ri){return ri!==ridx;});});}}
+                      style={{background:"none",border:"none",cursor:"pointer",color:C.danger,fontSize:11,fontFamily:"inherit",padding:"2px 6px"}}>
+                      Remove
+                    </button>
                   </div>
                 </div>
-                <button onClick={function(){onSaveShippingRules((shippingRules||[]).filter(function(_,j){return j!==i;}));}}
-                  style={{padding:"6px 10px",borderRadius:6,border:"1px solid "+C.danger+"30",background:C.danger+"10",color:C.danger,cursor:"pointer",fontSize:12,fontWeight:700,flexShrink:0}}>×</button>
               </div>
-              <div style={{fontSize:11,color:C.muted,marginTop:6}}>
-                Orders {rule.minOrder>0?"$"+rule.minOrder+" –":"up"} to ${rule.maxOrder||"∞"}: {rule.cost===0?"Free shipping":"$"+rule.cost+" flat rate"}
-              </div>
-            </div>
-          );})}
-          <button onClick={function(){onSaveShippingRules((shippingRules||[]).concat([{minOrder:0,maxOrder:999999,cost:0}]));}}
-            style={{padding:"8px 16px",borderRadius:8,border:"1px dashed "+C.border,background:"transparent",color:C.accent,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit",marginBottom:16}}>
-            + Add Shipping Rule
-          </button>
-          <div style={{padding:"10px 14px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.7}}>
-            Rules are applied by order subtotal. Set cost to 0 for free shipping. Lowest matching maxOrder wins.
-          </div>
+            );
+          })}
+
+          <Btn onClick={function(){onSaveShipping(function(prev){return (prev||[]).concat([{id:"sr"+Date.now(),label:"New Rule",type:"flat",rate:0,maxOrder:999999,active:true}]);});}}>
+            + Add Rule
+          </Btn>
         </div>
       )}
 
@@ -6942,9 +7003,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(shippingOverride!==null) return parseFloat(shippingOverride)||0;
     if(!shippingRules||!shippingRules.length) return 0;
     var active = (shippingRules||[]).filter(function(r){return r.active!==false;})
-      .sort(function(a,b){return a.maxOrder-b.maxOrder;});
-    var rule = active.find(function(r){return subtotal<=r.maxOrder;});
-    return rule ? (rule.rate||0) : 0;
+      .sort(function(a,b){return (a.maxOrder||999999)-(b.maxOrder||999999);});
+    var rule = active.find(function(r){return subtotal<=(r.maxOrder||999999);});
+    if(!rule) return 0;
+    if(rule.type==="free") return (subtotal>=(rule.minOrder||0)) ? 0 : (rule.rate||0);
+    if(rule.type==="pickup") return 0;
+    if(rule.type==="carrier") return shippingOverride||0;
+    return rule.rate||0;
   }
 
   function calcTotals() {
@@ -7544,15 +7609,32 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   return (
                     <div>
                       {active.length>0&&(
-                        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+                        <div style={{marginBottom:10}}>
                           {active.map(function(r){
                             var isMatch=autoRule&&autoRule.id===r.id&&shippingOverride===null;
+                            var isSel = shippingOverride!==null ? (
+                              r.type==="pickup"||r.type==="free" ? shippingOverride==0 && autoRule&&autoRule.id===r.id : false
+                            ) : isMatch;
+                            var icon = r.type==="pickup"?"🚗":r.type==="free"?"🎁":r.type==="carrier"?"📦":"💰";
+                            var cost = r.type==="pickup"||r.type==="free"?"Free":("$"+(r.rate||0));
+                            var note = r.type==="pickup"&&r.pickupNote?" — "+r.pickupNote:
+                                       r.type==="free"&&r.minOrder?" (min $"+r.minOrder+")":"";
                             return (
-                              <div key={r.id} style={{padding:"6px 10px",borderRadius:8,fontSize:11,
-                                background:isMatch?C.accent+"12":C.surface2,
-                                border:"1px solid "+(isMatch?C.accent:C.border),
-                                color:isMatch?C.accent:C.muted,fontWeight:isMatch?700:400}}>
-                                {r.label}: <strong>{r.rate===0?"Free":"$"+r.rate}</strong>
+                              <div key={r.id} onClick={function(){
+                                setShippingOverride(r.type==="pickup"||r.type==="free"?0:(r.rate||0));
+                              }} style={{padding:"10px 14px",borderRadius:8,fontSize:12,marginBottom:6,cursor:"pointer",
+                                display:"flex",justifyContent:"space-between",alignItems:"center",
+                                background:isSel?C.accent+"12":C.surface2,
+                                border:"1px solid "+(isSel?C.accent:C.border)}}>
+                                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                  <div style={{width:14,height:14,borderRadius:"50%",flexShrink:0,
+                                    border:"2px solid "+(isSel?C.accent:C.border),
+                                    background:isSel?C.accent:"transparent"}}/>
+                                  <span style={{color:isSel?C.accent:C.text,fontWeight:isSel?700:400}}>
+                                    {icon} {r.label}{note}
+                                  </span>
+                                </div>
+                                <strong style={{color:isSel?C.accent:C.text}}>{cost}</strong>
                               </div>
                             );
                           })}
@@ -8555,9 +8637,9 @@ function App() {
   const [quotes,        setQuotes]        = useState([]);
   const [termsRequests, setTermsRequests] = useState([]);
   const [shippingRules, setShippingRules] = useLS("shippingRules", [
-    {id:"sr1",label:"Under $500",maxOrder:500,rate:25,active:true},
-    {id:"sr2",label:"$500 – $2,000",maxOrder:2000,rate:15,active:true},
-    {id:"sr3",label:"Over $2,000",maxOrder:999999,rate:0,label2:"Free",active:true},
+    {id:"sr1",label:"Under $500",type:"flat",maxOrder:500,rate:25,active:true},
+    {id:"sr2",label:"$500 – $2,000",type:"flat",maxOrder:2000,rate:15,active:true},
+    {id:"sr3",label:"Over $2,000",type:"free",maxOrder:999999,rate:0,label2:"Free",active:true},
   ]);
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",apiSecret:"",enabled:false,warehouseAddr:"",warehouseCity:"",warehouseState:"",warehouseZip:"",defaultWeight:"1",weightUnit:"pounds",dimL:"12",dimW:"10",dimH:"6",ratesFnUrl:""});
