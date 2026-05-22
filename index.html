@@ -6933,7 +6933,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [billState,  setBillState]  = useState("");
   const [billZip,    setBillZip]    = useState("");
   const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1}]);
-  const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"pay_later");
+  const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"due_receipt");
   const [commRate,   setCommRate]   = useState((editOrder&&editOrder.commissionRate)||(repData&&repData.defaultCommissionRate)||10);
   const [notes,      setNotes]      = useState((editOrder&&editOrder.notes)||"");
   const [agreed,     setAgreed]     = useState(false);
@@ -7080,7 +7080,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(!items.some(function(it){return it.prodId;})) errs.push("Select at least one product");
     return errs;
   }
-  function step2Valid() { return items.some(function(it){return it.prodId;}); }
+  function step2Valid() {
+    if(!items.some(function(it){return it.prodId;})) return false;
+    return true;
+  }
 
   function getStripeKey(){
     try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").publishableKey||"";}catch(e){return "";}
