@@ -6450,15 +6450,45 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
 
   function send() {
     if(!toEmail.trim()||!body.trim()) return;
+    var cfg=null;
+    try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    if(!cfg||!cfg.edgeFnUrl||!(cfg.clientSecret||cfg.pass)){
+      addToast("Email not configured — go to Admin → Settings → Email","warning");
+      return;
+    }
     setSending(true);
-    setTimeout(function(){
+    var htmlBody = body.split("\n").join("<br/>");
+    var repEmail = currentUser&&currentUser.email ? currentUser.email : null;
+    fetch(cfg.edgeFnUrl,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        to:toEmail.trim(),
+        cc:repEmail||undefined,
+        subject:subject,
+        html:htmlBody,
+        fromName:cfg.fromName||"PreVasive USA",
+        fromEmail:cfg.fromEmail,
+        tenantId:cfg.tenantId,
+        clientId:cfg.clientId,
+        clientSecret:cfg.clientSecret,
+        user:cfg.user,
+        pass:cfg.pass,
+      }),
+    }).then(function(r){return r.json();}).then(function(d){
       setSending(false);
-      var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
-      setSentLog(function(prev){return [entry].concat(prev);});
-      addToast("Email sent to "+(selCust?selCust.name:toEmail),"success");
-      showResult({type:"email",title:"Email Sent!",subtitle:"Message delivered successfully.",rows:[["To",selCust?selCust.name+" <"+toEmail+">":toEmail],["Subject",subject||"(no subject)"],["Sent",new Date().toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"})]],cta:"Done"});
-      setSubject(""); setBody(""); setToId(""); setToEmail(""); setTmpl("custom");
-    },800);
+      if(d.ok){
+        var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
+        setSentLog(function(prev){return [entry].concat(prev);});
+        addToast("✓ Email sent to "+(selCust?selCust.name:toEmail),"success");
+        setToId(""); setToEmail(""); setSubject(""); setBody(""); setTmpl("custom");
+      } else {
+        addToast("Email failed: "+(d.error||"Unknown error"),"danger");
+      }
+    }).catch(function(){
+      setSending(false);
+      addToast("Could not reach email server — check Settings → Email","danger");
+    });
   }
 
   return (
