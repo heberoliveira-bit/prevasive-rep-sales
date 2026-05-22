@@ -412,6 +412,80 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
 }
 
 
+
+/* ─── ShippingRatePicker ─────────────────────────────────────────── */
+function ShippingRatePicker({toZip, toState, onSelect, selected}) {
+  const [rates,    setRates]    = useState([]);
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+  const [fetched,  setFetched]  = useState("");
+
+  function getSS(){
+    try{return JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"{}");}catch(e){return {};}
+  }
+
+  useEffect(function(){
+    if(!toZip||toZip===fetched) return;
+    var ss = getSS();
+    if(!ss.ratesFnUrl||!ss.apiKey||!ss.warehouseZip) return;
+    setLoading(true); setError(""); setFetched(toZip);
+    fetch(ss.ratesFnUrl,{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        apiKey:ss.apiKey, apiSecret:ss.apiSecret,
+        fromZip:ss.warehouseZip,
+        toZip:toZip, toState:toState||"",
+        weight:parseFloat(ss.defaultWeight)||1,
+        weightUnit:ss.weightUnit||"pounds",
+        dimL:parseFloat(ss.dimL)||12,
+        dimW:parseFloat(ss.dimW)||10,
+        dimH:parseFloat(ss.dimH)||6,
+      }),
+    }).then(function(r){return r.json();}).then(function(d){
+      setLoading(false);
+      if(d.ok){
+        setRates(d.rates||[]);
+        if(d.rates&&d.rates.length>0&&!selected) onSelect(d.rates[0]);
+      } else { setError(d.error||"Failed to get rates"); }
+    }).catch(function(){setLoading(false);setError("Could not reach shipping server");});
+  });
+
+  if(loading) return (
+    <div style={{padding:"12px",background:C.surface2,borderRadius:10,fontSize:12,color:C.muted}}>
+      ⏳ Loading live rates from ShipStation…
+    </div>
+  );
+  if(error) return (
+    <div style={{padding:"12px",background:C.danger+"10",borderRadius:10,fontSize:11,color:C.danger}}>{error}</div>
+  );
+  if(rates.length===0) return null;
+
+  return (
+    <div style={{background:C.surface2,borderRadius:10,overflow:"hidden"}}>
+      {rates.slice(0,6).map(function(r){
+        var isSel = selected&&selected.serviceCode===r.serviceCode&&selected.carrierCode===r.carrierCode;
+        return (
+          <div key={r.carrierCode+r.serviceCode} onClick={function(){onSelect(r);}}
+            style={{padding:"10px 14px",cursor:"pointer",borderBottom:"1px solid "+C.border,
+                    background:isSel?C.accent+"12":"transparent",display:"flex",justifyContent:"space-between",alignItems:"center"}}
+            onMouseEnter={function(e){if(!isSel)e.currentTarget.style.background=C.surface;}}
+            onMouseLeave={function(e){if(!isSel)e.currentTarget.style.background="transparent";}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:16,height:16,borderRadius:"50%",border:"2px solid "+(isSel?C.accent:C.border),
+                           background:isSel?C.accent:"transparent",flexShrink:0}}/>
+              <div>
+                <div style={{fontSize:12,fontWeight:isSel?700:400,color:C.text}}>{r.carrierName||r.carrierCode} — {r.serviceName}</div>
+                {r.transitDays&&<div style={{fontSize:10,color:C.muted}}>{r.transitDays} business day{r.transitDays!==1?"s":""}</div>}
+              </div>
+            </div>
+            <div style={{fontSize:13,fontWeight:700,color:isSel?C.accent:C.text}}>${(r.shipmentCost||0).toFixed(2)}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─── Order Status Flow ───────────────────────────────────────────────── */
 var CARRIER_URLS = {
   UPS:   "https://www.ups.com/track?tracknum=",
@@ -964,6 +1038,9 @@ function RepAgreementModal({repName,onAgree,onDecline}) {
 }
 
 
+
+</script>
+<script id="c1" type="text/plain">
 function RepSubscriptionWall({rep,onActivate,onLogout}) {
   const [selPlan, setSelPlan] = useState("starter");
   var now = Date.now();
@@ -1070,9 +1147,6 @@ function ApplyForm({onSubmit,onCancel}) {
   );
 }
 
-
-</script>
-<script id="c1" type="text/plain">
 function InviteModal({rep,onClose,addToast}) {
   var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
   var baseUrl = window.location.origin+window.location.pathname;
@@ -3499,6 +3573,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var total = calcTotal();
     var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
               repName:currentUser&&currentUser.name,
+              shipping:quoteShip||0,shippingService:quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):"",
               custId:custId,custName:selCust?selCust.name:"",
               items:items.filter(function(it){return it.prodId;}).map(function(it){
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
@@ -3613,7 +3688,27 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               <Drop label="Customer *" value={custId} onChange={setCustId}
                 opts={[{v:"",label:"Select customer…"}].concat(customers.filter(function(c2){return !isAdmin?c2.repId===(currentUser&&(currentUser.rep_id||currentUser.id)):true;}).map(function(c2){return {v:c2.id,label:c2.name+(c2.company?" — "+c2.company:"")};}))}/>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <Field label="Valid For (days)" value={validDays} onChange={setValidDays} type="number"/>
+              <Field label="Valid For (days)" value={validDays} onChange={setValidDays} type="number"/>
+              {/* Live shipping rates */}
+              {(function(){
+                var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
+                if(!ss||!ss.ratesFnUrl||!ss.apiKey) return null;
+                var cust = customers&&customers.find(function(cx){return cx.id===custId;});
+                var toZip = cust&&(cust.zip||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].zip))||"";
+                var toState = cust&&(cust.state||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].state))||"";
+                if(!toZip) return <div style={{fontSize:10,color:C.muted,marginTop:8}}>Select a customer to see shipping rates</div>;
+                return (
+                  <div style={{marginTop:12}}>
+                    <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Shipping to {toZip}</div>
+                    <ShippingRatePicker toZip={toZip} toState={toState}
+                      selected={quoteRate}
+                      onSelect={function(r){setQuoteRate(r);setQuoteShip(r.shipmentCost||0);}}/>
+                    {quoteRate&&<div style={{fontSize:11,color:C.accent,marginTop:6,fontWeight:600}}>
+                      + ${(quoteShip||0).toFixed(2)} shipping included in total
+                    </div>}
+                  </div>
+                );
+              })()}
                 <div>
                   <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission %</div>
                   <input type="range" min="0" max="25" step="0.5" value={commRate}
@@ -7331,6 +7426,30 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               {/* Shipping */}
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Shipping</div>
+
+                {/* Live ShipStation rates */}
+                {(function(){
+                  var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
+                  var shipAddr = (function(){
+                    if(selCust&&selCust.addresses&&selCust.addresses.length>0){
+                      var a=selCust.addresses.find(function(x){return x.isPrimary;})||selCust.addresses[0];
+                      return {zip:a.zip,state:a.state};
+                    }
+                    if(selCust&&selCust.zip) return {zip:selCust.zip,state:selCust.state};
+                    if(custZip) return {zip:custZip,state:custState2};
+                    return null;
+                  })();
+                  if(!ss||!ss.ratesFnUrl||!ss.apiKey||!shipAddr||!shipAddr.zip) return null;
+                  return (
+                    <div style={{marginBottom:12}}>
+                      <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Live carrier rates to {shipAddr.zip}:</div>
+                      <ShippingRatePicker toZip={shipAddr.zip} toState={shipAddr.state}
+                        selected={selectedRate}
+                        onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);}}/>
+                    </div>
+                  );
+                })()}
+
                 {(function(){
                   var active=(shippingRules||[]).filter(function(r){return r.active!==false;})
                     .sort(function(a,b){return a.maxOrder-b.maxOrder;});
@@ -8354,7 +8473,7 @@ function App() {
     {id:"sr3",label:"Over $2,000",maxOrder:999999,rate:0,label2:"Free",active:true},
   ]);
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
-  const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",enabled:false});
+  const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",apiSecret:"",enabled:false,warehouseAddr:"",warehouseCity:"",warehouseState:"",warehouseZip:"",defaultWeight:"1",weightUnit:"pounds",dimL:"12",dimW:"10",dimH:"6",ratesFnUrl:""});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
   const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
   const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",tenantId:"",clientId:"",clientSecret:"",edgeFnUrl:""});
