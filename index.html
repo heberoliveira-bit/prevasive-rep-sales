@@ -1726,14 +1726,20 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
   function genLink() {
     if(link) return link;
     var tok=order.id+"_"+Math.random().toString(36).slice(2,9);
-    var pd={token:tok,status:"pending",order:order,customer:cust,company:company,products:products||[],createdAt:new Date().toISOString()};
-    // Save locally for same-device access
-    localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));
-    // Save to Supabase so customer can access from any device
+    var pd={
+      token:tok,status:"pending",
+      orderId:order.id,
+      custId:order.custId,
+      custName:cust.name||"",
+      custEmail:cust.email||"",
+      company:company||"PreVasive USA",
+      items:(order.items||[]).map(function(it){return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:it.name||it.prodId||""};}),
+      totals:order.totals||{},
+      createdAt:new Date().toISOString()
+    };
+    try{localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));}catch(e){}
     var sb=getSB();
-    if(sb){
-      sb.from("crm_pay_tokens").upsert({id:tok,data:pd,created_at:new Date().toISOString()}).then(function(){});
-    }
+    if(sb){sb.from("crm_pay_tokens").upsert({id:tok,data:pd,created_at:pd.createdAt}).then(function(){});}
     var l=getSiteUrl()+"#pay="+tok;
     setLink(l);
     return l;
@@ -1933,8 +1939,13 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
 }
 
 function CustomerPaymentPage({payData,onPaid,onDecline}) {
-  var order=payData.order||{},customer=payData.customer||{},company=payData.company||"PreVasive USA",
-      totals=order.totals||{},items=order.items||[],products=payData.products||[];
+  // Support both old format (order/customer objects) and new simplified format
+  var order=payData.order||payData,
+      customer=payData.customer||{name:payData.custName||"",email:payData.custEmail||""},
+      company=payData.company||"PreVasive USA",
+      totals=payData.totals||order.totals||{},
+      items=payData.items||order.items||[],
+      products=payData.products||[];
   var isTerms = customer.termsStatus==="active";
   var stripeConf = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
   var pubKey = stripeConf.publishableKey||"";
