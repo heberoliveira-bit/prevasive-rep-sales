@@ -1730,7 +1730,6 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));
     var l=getSiteUrl()+"#pay="+tok;
     setLink(l);
-    setBody(function(prev){return prev.replace("[PAYMENT_LINK]",l);});
     return l;
   }
   function copyLink(){var l=genLink();navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");});}
