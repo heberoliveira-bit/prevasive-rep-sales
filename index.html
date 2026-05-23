@@ -8825,6 +8825,30 @@ function App() {
   const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
   const [payToken,     setPayToken]     = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]pay=([^&]+)/);return m?m[1]:null;})());
   const [payDataFromDB,setPayDataFromDB] = useState(null);
+  const [payDataLoading,setPayDataLoading] = useState(false);
+  const [payDataNotFound,setPayDataNotFound] = useState(false);
+
+  // Fetch payment token from Supabase if not in localStorage
+  useEffect(function(){
+    if(!payToken) return;
+    var local = null;
+    try{local=JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null");}catch(e){}
+    if(local){setPayDataFromDB(local);return;}
+    var sb2=getSB();
+    if(!sb2){setPayDataNotFound(true);return;}
+    setPayDataLoading(true);
+    sb2.from("crm_pay_tokens").select("*").eq("id",payToken).single()
+      .then(function(result){
+        setPayDataLoading(false);
+        if(result.data&&result.data.data){
+          var pd=result.data.data;
+          localStorage.setItem("__pv__pay_"+payToken,JSON.stringify(pd));
+          setPayDataFromDB(pd);
+        } else {
+          setPayDataNotFound(true);
+        }
+      }).catch(function(){setPayDataLoading(false);setPayDataNotFound(true);});
+  },[payToken]);
   const [receiptToken, setReceiptToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]receipt=([^&]+)/);return m?m[1]:null;})());
 
   // Handle Stripe Connect return — update rep stripeConnectId
@@ -8936,24 +8960,18 @@ function App() {
   // Invoice payment page — no auth required
   if(payToken) {
     var payData2 = payDataFromDB;
-    if(!payData2) {
-      try { payData2 = JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null"); } catch(e){}
-    }
-    if(!payData2) {
-      var sb2=getSB();
-      if(sb2){
-        return React.createElement(PayTokenLoader,{token:payToken,sb:sb2,
-          onLoaded:function(pd){
-            localStorage.setItem("__pv__pay_"+payToken,JSON.stringify(pd));
-            setPayDataFromDB(pd);
-          }
-        });
-      }
-      return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
-        React.createElement("div",{style:{fontSize:32}},"⚙️"),
-        React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Configure Supabase in Settings to enable payment links")
-      );
-    }
+    if(!payData2 && payDataLoading) return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:40}},"⏳"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading payment details…")
+    );
+    if(!payData2 && payDataNotFound) return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:40}},"❌"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Payment link not found or expired")
+    );
+    if(!payData2) return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:32}},"⏳"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading…")
+    );
     if(payData2 && payData2.status!=="paid") {
       return React.createElement(CustomerPaymentPage, {
         payData: payData2,
