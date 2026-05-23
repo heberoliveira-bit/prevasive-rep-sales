@@ -1727,7 +1727,15 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     if(link) return link;
     var tok=order.id+"_"+Math.random().toString(36).slice(2,9);
     var pd={token:tok,status:"pending",order:order,customer:cust,company:company,products:products||[],createdAt:new Date().toISOString()};
+    // Save locally for same-device access
     localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));
+    // Save to Supabase so customer can access from any device
+    var sb=getSB();
+    if(sb){
+      sb.from("crm_pay_tokens").upsert({id:tok,data:pd,created_at:new Date().toISOString()}).then(function(){});
+      // Also update order with payToken reference
+      sb.from("crm_orders").update({pay_token:tok,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(){});
+    }
     var l=getSiteUrl()+"#pay="+tok;
     setLink(l);
     return l;
@@ -8747,8 +8755,35 @@ function getSiteUrl(){
 }
 
 
+/* ─── PayTokenLoader ─────────────────────────────────────────────────────── */
+
 </script>
 <script id="c15" type="text/plain">
+function PayTokenLoader({token, sb, onLoaded, onNotFound}) {
+  const [notFound, setNotFound] = useState(false);
+  useEffect(function(){
+    if(!token||!sb) return;
+    sb.from("crm_pay_tokens").select("*").eq("id",token).single()
+      .then(function(result){
+        var data = result.data;
+        if(data&&data.data){
+          onLoaded(data.data);
+        } else {
+          setNotFound(true);
+        }
+      }).catch(function(){setNotFound(true);});
+  },[]);
+  if(notFound) return React.createElement("div",{style:{textAlign:"center",padding:32,fontFamily:"Inter,system-ui,sans-serif"}},
+    React.createElement("div",{style:{fontSize:32,marginBottom:8}},"❌"),
+    React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e",marginBottom:4}},"Payment link not found"),
+    React.createElement("div",{style:{fontSize:13,color:"#6b7c93"}})
+  );
+  return React.createElement("div",{style:{textAlign:"center",padding:32,fontFamily:"Inter,system-ui,sans-serif"}},
+    React.createElement("div",{style:{fontSize:32,marginBottom:8}},"⏳"),
+    React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading payment details…")
+  );
+}
+
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -8902,6 +8937,28 @@ function App() {
   if(payToken) {
     var payData2 = null;
     try { payData2 = JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null"); } catch(e){}
+    // If not in localStorage (customer's device), fetch from Supabase
+    if(!payData2) {
+      var sb2=getSB();
+      if(sb2){
+        // Show loading while fetching
+        return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif"}},
+          React.createElement(PayTokenLoader,{token:payToken,sb:sb2,onLoaded:function(pd){
+            localStorage.setItem("__pv__pay_"+payToken,JSON.stringify(pd));
+            window.location.reload();
+          },onNotFound:function(){
+            return React.createElement("div",{style:{textAlign:"center",padding:32}},
+              React.createElement("div",{style:{fontSize:24,marginBottom:8}},"❌"),
+              React.createElement("div",{style:{fontWeight:700,color:"#1a1a2e"}},"Payment link not found or expired")
+            );
+          }})
+        );
+      }
+      return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+        React.createElement("div",{style:{fontSize:32}},"⏳"),
+        React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading payment details…")
+      );
+    }
     if(payData2 && payData2.status!=="paid") {
       return React.createElement(CustomerPaymentPage, {
         payData: payData2,
