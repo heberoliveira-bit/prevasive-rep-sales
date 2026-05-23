@@ -1159,7 +1159,7 @@ function ApplyForm({onSubmit,onCancel}) {
 
 function InviteModal({rep,onClose,addToast}) {
   var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
-  var baseUrl = window.location.origin+window.location.pathname;
+  var baseUrl = getSiteUrl();
   var link = baseUrl+"#invite="+token;
   const [copied, setCopied] = useState(false);
   function copy() {
@@ -1728,7 +1728,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     var tok=order.id+"_"+Math.random().toString(36).slice(2,9);
     var pd={token:tok,status:"pending",order:order,customer:cust,company:company,products:products||[],createdAt:new Date().toISOString()};
     localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));
-    var l=window.location.origin+window.location.pathname+"#pay="+tok;
+    var l=getSiteUrl()+"#pay="+tok;
     setLink(l);
     setBody(function(prev){return prev.replace("[PAYMENT_LINK]",l);});
     return l;
@@ -2858,7 +2858,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             var co3=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
             var cust3=customers.find(function(x){return x.id===collectTarget.custId;})||{name:collectTarget.custName||""};
             var rTok=generateReceiptToken(collectTarget,cust3,payRef,co3);
-            var rLink=window.location.origin+window.location.pathname+"#receipt="+rTok;
+            var rLink=getSiteUrl()+"#receipt="+rTok;
             var updated=addAuditEntry(Object.assign({},collectTarget,{
               status:"Paid",paidAt:new Date().toISOString(),
               paymentRef:payRef,paymentType:payRef.type,
@@ -3106,7 +3106,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                             var cust=customers&&customers.find(function(x){return x.id===req.custId;});
                             var token=cust&&cust.termsSigningToken;
                             if(token){
-                              var link=window.location.origin+window.location.pathname+"#sign="+token;
+                              var link=getSiteUrl()+"#sign="+token;
                               navigator.clipboard.writeText(link).then(function(){addToast("Signing link copied!","success");});
                             }
                           }}>📋 Copy Signing Link</Btn>
@@ -4170,7 +4170,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 
   function copyInvite() {
     var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
-    var link = window.location.origin+window.location.pathname+"#invite="+token;
+    var link = getSiteUrl()+"#invite="+token;
     navigator.clipboard.writeText(link).then(function(){addToast("Invite link copied","success");});
   }
 
@@ -4866,7 +4866,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
             var co4=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
             var cust4=customers.find(function(x){return x.id===collectTarget2.custId;})||{name:collectTarget2.custName||""};
             var rTok2=generateReceiptToken(collectTarget2,cust4,payRef,co4);
-            var rLink2=window.location.origin+window.location.pathname+"#receipt="+rTok2;
+            var rLink2=getSiteUrl()+"#receipt="+rTok2;
             var updated=addAuditEntry(Object.assign({},collectTarget2,{
               status:"Paid",paidAt:new Date().toISOString(),
               paymentRef:payRef,paymentType:payRef.type,
@@ -6105,6 +6105,13 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
           <div style={{padding:"12px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:20,fontSize:12,color:C.muted}}>
             These settings apply to all generated invoices.
           </div>
+
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Site URL <span style={{fontWeight:400,color:C.dim}}>(required for payment links)</span></div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Payment links in emails will use this URL. Set it to your production domain so customers don't land on a preview URL.</div>
+            <Field label="Site URL" value={(invoiceCfg&&invoiceCfg.siteUrl)||""} onChange={function(v){onSaveInvoice(function(p){return Object.assign({},p,{siteUrl:v});});}} placeholder="https://prevasive-rep-sales.vercel.app"/>
+            {invoiceCfg&&invoiceCfg.siteUrl&&<div style={{fontSize:10,color:C.success,marginTop:4}}>✓ Links will use: {invoiceCfg.siteUrl}</div>}
+          </div>
           <Field label="Invoice Number Prefix" value={invPrefix} onChange={setInvPrefix} placeholder="INV" hint="e.g. INV → INV-20205"/>
           <Field label="Company Name" value={invComp} onChange={setInvComp} placeholder="PreVasive USA"/>
           <Drop label="Default Payment Terms" value={invTerms} onChange={setInvTerms}
@@ -7172,7 +7179,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         var payTok2 = id+"_"+Math.random().toString(36).slice(2,9);
         var payD2   = {token:payTok2,status:"pending",order:order,customer:selCust||{name:cname},company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",products:products,createdAt:new Date().toISOString()};
         localStorage.setItem("__pv__pay_"+payTok2,JSON.stringify(payD2));
-        var payLinkUrl = window.location.origin+window.location.pathname+"#pay="+payTok2;
+        var payLinkUrl = getSiteUrl()+"#pay="+payTok2;
         var emailHtml  = "<h2>Invoice from "+(payD2.company)+"</h2><p>Hi "+(cname||"there")+",</p><p>Please find your invoice for order <strong>"+id+"</strong> below.</p><p><strong>Total Due: "+fmtMoney(order.totals&&order.totals.grand||0)+"</strong></p><p><a href='"+payLinkUrl+"' style='background:#635bff;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;margin:16px 0'>Pay Invoice →</a></p><p style='color:#6b7c93;font-size:12px'>"+payD2.company+" · Do not reply to this email.</p>";
         fetch(emailCfg2.edgeFnUrl,{
           method:"POST",headers:{"Content-Type":"application/json"},
@@ -8623,6 +8630,11 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
 
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
+function getSiteUrl(){
+  try{var cfg=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}");if(cfg.siteUrl&&cfg.siteUrl.trim()) return cfg.siteUrl.trim().replace(/\/+$/,"");}catch(e){}
+  return getSiteUrl().replace(/\/+$/,"");
+}
+
 
 </script>
 <script id="c15" type="text/plain">
@@ -8787,7 +8799,7 @@ function App() {
           // Generate receipt token
           var co2 = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
           var rToken = generateReceiptToken(payData2.order,payData2.customer,{type:result.method},co2);
-          var rLink  = window.location.origin+window.location.pathname+"#receipt="+rToken;
+          var rLink  = getSiteUrl()+"#receipt="+rToken;
           updated.receiptToken = rToken;
           updated.receiptLink  = rLink;
           localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
