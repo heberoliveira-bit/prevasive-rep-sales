@@ -7988,7 +7988,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
 </script>
 <script id="c13" type="text/plain">
-function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast}) {
+function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast,reps,currentUser}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
   var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
@@ -9214,7 +9214,7 @@ function App() {
         {/* Rep Modules */}
         {!isAdmin&&activeTab==="dashboard"&&(
           <RepDashboard repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
-            orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast}/>
+            orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast} reps={reps} currentUser={effectiveUser}/>
         )}
         {!isAdmin&&(activeTab==="orders"||activeTab==="new_order")&&(
           <RepOrders repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
