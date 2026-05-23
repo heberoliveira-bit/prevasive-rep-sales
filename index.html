@@ -1923,80 +1923,174 @@ function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
 function CustomerPaymentPage({payData,onPaid,onDecline}) {
   var order=payData.order||{},customer=payData.customer||{},company=payData.company||"PreVasive USA",
       totals=order.totals||{},items=order.items||[],products=payData.products||[];
-  const [method,     setMethod]     = useState(customer.termsStatus==="active"?customer.termsType||"net_30":"due_receipt");
+  var isTerms = customer.termsStatus==="active";
+  var stripeConf = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
+  var pubKey = stripeConf.publishableKey||"";
+  var edgeFn = stripeConf.edgeFnUrl||"";
+
   const [cardHolder, setCardHolder] = useState(customer.name||"");
-  const [cardLast4,  setCardLast4]  = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
   const [agreed,     setAgreed]     = useState(false);
   const [paying,     setPaying]     = useState(false);
   const [done,       setDone]       = useState(false);
-  var isTerms=method==="net_15"||method==="net_30"||method==="net_45"||method==="due_receipt";
-  var canPay=agreed&&(isTerms||(cardLast4.length===4&&cardExpiry.length===5));
-  function pay(){if(!canPay) return;setPaying(true);setTimeout(function(){setPaying(false);onPaid({method:method,cardRef:!isTerms?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder}:null,paidAt:new Date().toISOString()});setDone(true);},800);}
+  const [err,        setErr]        = useState("");
+  const stripeRef = {stripe:null, card:null};
+
+  useEffect(function(){
+    if(isTerms||!pubKey||!window.Stripe) return;
+    var s = window.Stripe(pubKey);
+    stripeRef.stripe = s;
+    var elements = s.elements();
+    var card = elements.create("card",{style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"15px",color:"#1a1a2e","::placeholder":{color:"#a0aec0"}},invalid:{color:"#e53e3e"}}});
+    card.mount("#cpe-card-element");
+    stripeRef.card = card;
+    card.on("change",function(e){if(e.error){setErr(e.error.message);}else{setErr("");}});
+    return function(){card.destroy();};
+  },[]);
+
+  function pay(){
+    if(paying) return;
+    if(!agreed){setErr("Please agree to the terms.");return;}
+    setErr(""); setPaying(true);
+
+    if(isTerms){
+      onPaid({method:customer.termsType||"net_30",paidAt:new Date().toISOString(),terms:true});
+      setDone(true); setPaying(false); return;
+    }
+
+    if(!stripeRef.stripe||!stripeRef.card){setErr("Stripe not loaded — contact support.");setPaying(false);return;}
+    if(!edgeFn){setErr("Payment processor not configured — contact support.");setPaying(false);return;}
+
+    stripeRef.stripe.createPaymentMethod({type:"card",card:stripeRef.card,billing_details:{name:cardHolder}})
+      .then(function(result){
+        if(result.error){setErr(result.error.message);setPaying(false);return;}
+        return fetch(edgeFn,{
+          method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            action:"charge",
+            paymentMethodId:result.paymentMethod.id,
+            amount:Math.round((totals.grand||0)*100),
+            currency:"usd",
+            description:company+" — Order "+order.id,
+          }),
+        }).then(function(r){return r.json();}).then(function(d){
+          if(d.ok){
+            onPaid({method:"credit_card",chargeId:d.chargeId,paidAt:new Date().toISOString(),
+              cardRef:{holder:cardHolder}});
+            setDone(true); setPaying(false);
+          } else {
+            setErr(d.error||"Payment failed — please try again.");
+            setPaying(false);
+          }
+        });
+      }).catch(function(e){setErr("Payment error: "+e.message);setPaying(false);});
+  }
+
+  var canPay = agreed&&(isTerms||(cardHolder.trim().length>0));
+  var grand = totals.grand||0;
+
   if(done) return (
     <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderRadius:14,padding:"48px 40px",maxWidth:460,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
-        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
-        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Payment Confirmed</div>
-        <div style={{fontSize:13,color:"#6b7c93",marginBottom:20}}>Thank you, <strong>{customer.name||"Customer"}</strong>. Your payment for order <strong>{order.id}</strong> has been received.</div>
-        {window.__rcptLink&&<a href={window.__rcptLink} style={{display:"block",padding:"10px",borderRadius:8,background:"#635bff",color:"#fff",textDecoration:"none",fontWeight:700,fontSize:13,marginBottom:10}}>View Receipt →</a>}
-        <div style={{fontSize:11,color:"#a0aec0"}}>You may close this page.</div>
+      <div style={{background:"#fff",borderRadius:16,padding:"40px 32px",maxWidth:440,width:"100%",textAlign:"center",boxShadow:"0 8px 40px rgba(0,0,0,.10)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>✅</div>
+        <div style={{fontWeight:800,fontSize:22,color:"#1a1a2e",marginBottom:8}}>Payment {isTerms?"Confirmed!":"Successful!"}</div>
+        <div style={{fontSize:14,color:"#6b7c93",marginBottom:24,lineHeight:1.6}}>
+          {isTerms?"Your order is confirmed under "+fmtTerms(customer.termsType||"net_30")+" terms.":"Your payment of $"+grand.toFixed(2)+" has been processed."}
+        </div>
+        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",fontSize:13,color:"#6b7c93"}}>Order: <strong style={{color:"#1a1a2e"}}>{order.id}</strong></div>
       </div>
     </div>
   );
+
   return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</div>
-        <div style={{fontSize:11,color:"#6b7c93"}}>Invoice {order.id} · {fmtMoney(totals.grand||0)} due</div>
-      </div>
-      <div style={{maxWidth:700,margin:"0 auto",padding:"28px 20px",display:"grid",gridTemplateColumns:"1fr 320px",gap:20,alignItems:"start"}}>
-        <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",overflow:"hidden"}}>
-          <div style={{padding:"18px 22px",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between"}}>
-            <div><div style={{fontSize:10,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".06em"}}>Invoice</div><div style={{fontSize:20,fontWeight:900,color:"#635bff"}}>{order.id}</div></div>
-            <div style={{textAlign:"right",fontSize:12,color:"#6b7c93"}}><div>{fmtDate(order.createdAt)}</div><div>Rep: {order.repName||"—"}</div></div>
-          </div>
-          <div style={{padding:"14px 22px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc"}}>
-            <div style={{fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".07em",color:"#6b7c93",marginBottom:4}}>Bill To</div>
-            <div style={{fontWeight:700,fontSize:14,color:"#1a1a2e"}}>{customer.name||"Customer"}</div>
-            {customer.company&&<div style={{fontSize:12,color:"#6b7c93"}}>{customer.company}</div>}
-          </div>
-          <table style={{width:"100%",borderCollapse:"collapse"}}>
-            <thead><tr style={{background:"#f6f9fc"}}>{["Product","Qty","Price","Total"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:"#6b7c93",textTransform:"uppercase",fontWeight:600}}>{h}</th>;})}</tr></thead>
-            <tbody>{items.map(function(it,i){var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};var cup=it.customerPrice||p.price||0;return (<tr key={i} style={{borderTop:"1px solid #e8ecef"}}><td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:"#1a1a2e"}}>{p.name}</td><td style={{padding:"10px 14px",fontSize:12,color:"#6b7c93"}}>{it.qty}</td><td style={{padding:"10px 14px",fontFamily:"monospace",fontSize:12,color:"#6b7c93"}}>{fmtMoney(cup)}</td><td style={{padding:"10px 14px",fontFamily:"monospace",fontWeight:700,color:"#1a1a2e"}}>{fmtMoney(cup*it.qty)}</td></tr>);})}</tbody>
-          </table>
-          <div style={{padding:"14px 22px",borderTop:"2px solid #e8ecef"}}>
-            {totals.discount>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#1ea672",marginBottom:4}}><span>Discount</span><span>-{fmtMoney(totals.discount)}</span></div>}
-            {totals.shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span>{fmtMoney(totals.shipping)}</span></div>}
-            {totals.tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Tax</span><span>{fmtMoney(totals.tax)}</span></div>}
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:18,fontWeight:900,color:"#635bff"}}><span>Total Due</span><span>{fmtMoney(totals.grand||0)}</span></div>
+    <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{maxWidth:520,margin:"0 auto"}}>
+
+        {/* Header */}
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#1a1a2e",marginBottom:4}}>{company}</div>
+          <div style={{fontSize:13,color:"#6b7c93"}}>Secure Payment</div>
+        </div>
+
+        {/* Order Summary */}
+        <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>Order {order.id}</div>
+          {items.map(function(it,i){
+            var prod=products.find(function(p){return p.id===it.prodId;})||{name:it.prodId,price:it.unitPrice||0};
+            return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:8}}>
+                <span>{it.qty}× {prod.name}</span>
+                <span style={{fontWeight:600,color:"#1a1a2e"}}>${((it.unitPrice||prod.price||0)*it.qty).toFixed(2)}</span>
+              </div>
+            );
+          })}
+          <div style={{borderTop:"1px solid #e8ecef",marginTop:12,paddingTop:12}}>
+            {totals.shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span>${(totals.shipping||0).toFixed(2)}</span></div>}
+            {totals.tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Tax</span><span>${(totals.tax||0).toFixed(2)}</span></div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,color:"#1a1a2e",marginTop:8}}>
+              <span>Total Due</span><span style={{color:"#635bff"}}>${grand.toFixed(2)}</span>
+            </div>
           </div>
         </div>
-        <div style={{background:"#fff",borderRadius:12,border:"1px solid #e8ecef",padding:"20px"}}>
-          <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:14}}>Pay This Invoice</div>
-          <div style={{marginBottom:14}}>
-            {[["due_receipt","💵 Due on Receipt","Pay on delivery"],
-              ...(customer.termsStatus==="active"?[[customer.termsType||"net_30","📋 "+fmtTerms(customer.termsType||"net_30"),"Credit account · $"+(customer.termsLimit||0).toLocaleString()+" limit"]]:[]),
-            ].map(function(opt){var sel=method===opt[0];return (
-              <div key={opt[0]} onClick={function(){setMethod(opt[0]);}} style={{padding:"10px 12px",borderRadius:8,border:"2px solid "+(sel?"#635bff":"#e8ecef"),background:sel?"rgba(99,91,255,.05)":"#fff",cursor:"pointer",marginBottom:8}}>
-                <div style={{fontWeight:700,fontSize:12,color:sel?"#635bff":"#1a1a2e"}}>{opt[1]}</div>
-                <div style={{fontSize:10,color:"#6b7c93",marginTop:1}}>{opt[2]}</div>
+
+        {/* Payment Form */}
+        <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+          {isTerms?(
+            <div style={{textAlign:"center",padding:"16px 0"}}>
+              <div style={{fontSize:24,marginBottom:8}}>📋</div>
+              <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e",marginBottom:4}}>Terms Account</div>
+              <div style={{fontSize:13,color:"#6b7c93",lineHeight:1.6}}>This order will be billed under your <strong>{fmtTerms(customer.termsType||"net_30")}</strong> credit terms. No payment required now.</div>
+            </div>
+          ):(
+            <div>
+              <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14}}>💳 Card Details</div>
+              {!pubKey&&(
+                <div style={{padding:"10px 14px",background:"#fff5f5",border:"1px solid #fed7d7",borderRadius:8,fontSize:12,color:"#e53e3e",marginBottom:12}}>
+                  Payment not configured. Please contact support.
+                </div>
+              )}
+              <div style={{marginBottom:12}}>
+                <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Name on Card</div>
+                <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}}
+                  placeholder="Full name" style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"10px 12px",fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"}}/>
               </div>
-            );})}
-          </div>
-          <label style={{display:"flex",alignItems:"flex-start",gap:7,marginBottom:14,cursor:"pointer"}}>
+              <div style={{marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Card Number</div>
+                <div id="cpe-card-element" style={{border:"1px solid #e8ecef",borderRadius:7,padding:"11px 12px",background:"#fff"}}/>
+              </div>
+              <div style={{fontSize:10,color:"#a0aec0",marginTop:4}}>🔒 Secured by Stripe — your card details never touch our servers</div>
+            </div>
+          )}
+
+          {err&&<div style={{marginTop:12,padding:"8px 12px",background:"#fff5f5",borderRadius:7,fontSize:12,color:"#e53e3e"}}>{err}</div>}
+
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:16,cursor:"pointer"}}>
             <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{marginTop:2,accentColor:"#635bff"}}/>
-            <span style={{fontSize:11,color:"#6b7c93",lineHeight:1.5}}>I confirm the amount of <strong>{fmtMoney(totals.grand||0)}</strong> and authorize payment.</span>
+            <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6}}>I confirm this order and authorize payment of <strong style={{color:"#1a1a2e"}}>${grand.toFixed(2)}</strong>.</span>
           </label>
-          <button onClick={pay} disabled={!canPay||paying} style={{width:"100%",padding:"13px",borderRadius:8,border:"none",background:canPay&&!paying?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",color:canPay&&!paying?"#fff":"#a0aec0",cursor:canPay&&!paying?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:800,fontSize:15}}>
-            {paying?"Processing…":"Confirm Payment →"}
+        </div>
+
+        {/* Buttons */}
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onDecline} style={{flex:1,padding:"13px",borderRadius:8,border:"1px solid #e8ecef",background:"#fff",color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14}}>
+            Decline
+          </button>
+          <button onClick={pay} disabled={!canPay||paying}
+            style={{flex:3,padding:"13px",borderRadius:8,border:"none",fontFamily:"inherit",fontWeight:800,fontSize:15,cursor:canPay&&!paying?"pointer":"not-allowed",
+              background:canPay&&!paying?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",
+              color:canPay&&!paying?"#fff":"#a0aec0"}}>
+            {paying?"Processing…":isTerms?"Confirm Order →":"Pay $"+grand.toFixed(2)+" →"}
           </button>
         </div>
+
       </div>
     </div>
   );
 }
 
+
+
+</script>
+<script id="c3" type="text/plain">
 function CustomerSigningPage({signingData,onSigned,onDecline}) {
   var customer=signingData.customer||{},req=signingData.req||{},company=signingData.company||"PreVasive USA";
   const [signerName,  setSignerName]  = useState("");
@@ -2061,9 +2155,6 @@ function CustomerSigningPage({signingData,onSigned,onDecline}) {
   );
 }
 
-
-</script>
-<script id="c3" type="text/plain">
 function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,commRate,payMethod,onClose}) {
   var cust=selCust||{name:custName||"Customer"};
   var company=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
@@ -2334,6 +2425,9 @@ function MultiAddressManager({addresses,onChange}) {
   );
 }
 
+
+</script>
+<script id="c4" type="text/plain">
 function CollectPaymentModal({order,onCollect,onClose,addToast}) {
   var totals=order.totals||{};
   const [method,     setMethod]     = useState("card");
@@ -2407,9 +2501,6 @@ function CollectPaymentModal({order,onCollect,onClose,addToast}) {
   );
 }
 
-
-</script>
-<script id="c4" type="text/plain">
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
   const [carrier,  setCarrier]  = useState("UPS");
   const [trackNum, setTrackNum] = useState(order.trackingNumber||"");
