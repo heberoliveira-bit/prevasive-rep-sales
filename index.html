@@ -1770,9 +1770,18 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
       footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center",flexWrap:"wrap"}}>
         <Btn variant="ghost" onClick={function(){generateInvoice(order,customers||[],products||[],currentUser);}}>⬇ Download</Btn>
         <div style={{display:"flex",gap:8}}>
-          <Btn variant="ghost" onClick={onClose}>Close</Btn>
-          <Btn variant="ghost" onClick={copyLink}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-          <Btn onClick={openMail}>{(function(){try{var cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass)?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
+          <Btn variant="ghost" onClick={function(){onClose();}}>Close</Btn>
+          <Btn variant="ghost" onClick={function(){
+            try{
+              var l=genLink();
+              if(navigator.clipboard){
+                navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}).catch(function(){
+                  window.prompt("Copy this link:",l);
+                });
+              } else { window.prompt("Copy this link:",l); }
+            }catch(e){addToast("Copy failed: "+e.message,"danger");}
+          }}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+          <Btn onClick={function(){openMail();}}>{(function(){try{var cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass)?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
         </div>
       </div>}>
 
@@ -1807,7 +1816,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
             <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Payment Link</div>
             <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>Secure link — customer pays online, no login needed.</div>
             {!link?(
-              <Btn onClick={genLink} fullWidth={true}>⚡ Generate Link</Btn>
+              <Btn onClick={function(){try{genLink();}catch(e){addToast("Link error: "+e.message,"danger");}}} fullWidth={true}>⚡ Generate Link</Btn>
             ):(
               <div>
                 <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"7px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",lineHeight:1.6,marginBottom:8}}>{link}</div>
