@@ -5773,14 +5773,43 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 
   function payCommission(order) {
     var rep = reps.find(function(r){return r.id===order.repId;})||{name:"Unknown"};
+    var amount = order.totals&&order.totals.commission||0;
+    var connectFn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+    var platformFee = (function(){try{return parseFloat(JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").platformFee)||0;}catch(e){return 0;}})();
+    var connectId = rep.stripeConnectId;
+
     var rec = {id:genId("pay"),orderId:order.id,repId:order.repId,repName:rep.name,
-               amount:order.totals&&order.totals.commission||0,paidAt:new Date().toISOString(),note:"Manual payout"};
-    setCommissions(function(prev){return [rec].concat(prev||[]);});
-    dbSave("crm_commission_payouts",rec.id,rec);
-    addToast("Commission of "+fmtMoney(rec.amount)+" paid to "+rep.name,"success");
-    showResult({type:"commission",title:"Commission Released",subtitle:"Payment recorded successfully.",
-      rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(rec.amount)],["Date",fmtDate(new Date().toISOString())]],
-      nextStep:"Rep will see this in their Commissions tab.",cta:"Done"});
+               amount:amount,paidAt:new Date().toISOString(),note:connectId?"Stripe Connect transfer":"Manual payout"};
+
+    if(connectFn&&connectId){
+      var netAmount = Math.round(amount*(1-platformFee/100)*100);
+      fetch(connectFn,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"transfer",connectAccountId:connectId,amount:netAmount,
+          currency:"usd",description:"Commission — Order "+order.id+" — "+rep.name}),
+      }).then(function(r){return r.json();}).then(function(d){
+        if(d.ok){
+          rec.stripeTransferId = d.transferId;
+          rec.note = "Stripe Connect — Transfer "+d.transferId;
+          setCommissions(function(prev){return [rec].concat(prev||[]);});
+          dbSave("crm_commission_payouts",rec.id,rec);
+          addToast("✓ "+fmtMoney(amount)+" transferred to "+rep.name+" via Stripe","success");
+          showResult({type:"commission",title:"Commission Paid via Stripe",subtitle:"Transfer sent to rep's bank account.",
+            rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(amount)],["Net (after "+platformFee+"% fee)",fmtMoney(netAmount/100)],["Transfer ID",d.transferId],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
+        } else {
+          addToast("Stripe transfer failed: "+(d.error||"Unknown error"),"danger");
+        }
+      }).catch(function(){addToast("Could not reach Connect function","danger");});
+    } else {
+      setCommissions(function(prev){return [rec].concat(prev||[]);});
+      dbSave("crm_commission_payouts",rec.id,rec);
+      if(connectFn&&!connectId){
+        addToast("Commission recorded — "+rep.name+" hasn't connected Stripe yet","warning");
+      } else {
+        addToast("Commission of "+fmtMoney(amount)+" recorded for "+rep.name,"success");
+      }
+      showResult({type:"commission",title:"Commission Released",subtitle:connectId?"":connectFn?"Rep needs to connect Stripe account.":"Configure Stripe Connect in Settings to enable direct transfers.",
+        rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(amount)],["Method",rec.note],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
+    }
   }
 
   var totalUnpaid = unpaid.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
@@ -5887,10 +5916,23 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
                       <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
                       <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.gold}}>{fmtMoney(o.totals&&o.totals.commission||0)}</td>
                       <td style={{padding:"10px 14px"}}>
-                        <Btn small onClick={function(){
-                          var rep2=reps.find(function(r){return r.id===o.repId;})||{name:"Rep"};
-                          setPayTarget({order:o,rep:rep2});
-                        }}>Pay Commission</Btn>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          {(function(){
+                            var rep2=reps.find(function(r){return r.id===o.repId;})||{};
+                            var connectFn=(function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+                            return connectFn?(
+                              <span style={{fontSize:9,padding:"2px 5px",borderRadius:8,fontWeight:700,
+                                background:rep2.stripeConnectId?C.success+"15":C.warning+"15",
+                                color:rep2.stripeConnectId?C.success:C.warning}}>
+                                {rep2.stripeConnectId?"⚡ Ready":"No Stripe"}
+                              </span>
+                            ):null;
+                          })()}
+                          <Btn small onClick={function(){
+                            var rep2=reps.find(function(r){return r.id===o.repId;})||{name:"Rep"};
+                            setPayTarget({order:o,rep:rep2});
+                          }}>Pay Commission</Btn>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -6048,159 +6090,92 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
       )}
 
       {tab==="stripe"&&(
-        <div style={{maxWidth:520}}>
-          <div style={{padding:"14px 16px",background:"rgba(99,91,255,.08)",border:"1px solid rgba(99,91,255,.2)",borderRadius:10,marginBottom:20}}>
-            <div style={{fontWeight:700,fontSize:13,color:C.accent,marginBottom:4}}>⚡ Stripe Integration</div>
-            <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>Configure API keys and Payment Links for rep subscription plans.</div>
-          </div>
+        <div style={{maxWidth:600}}>
+          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Stripe Settings</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:24,lineHeight:1.6}}>Two separate accounts — one for customer payments and rep payouts, one for rep memberships.</div>
 
-          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>API Keys</div>
-          <Field label="Publishable Key" value={stripeKey} onChange={setStripeKey} placeholder="pk_live_…"
-            hint="Used client-side for Stripe.js Elements"/>
-          <Field label="Secret Key" value={stripeSec} onChange={setStripeSec} type="password" placeholder="sk_live_…"
-            hint="Edge Function only — never expose in browser"/>
-          {stripeMsg&&<div style={{padding:"9px 12px",borderRadius:8,fontSize:12,fontWeight:600,marginBottom:14,background:C.success+"12",color:C.success}}>{stripeMsg}</div>}
-          <Btn onClick={function(){localStorage.setItem("__stripe_pk__",stripeKey.trim());localStorage.setItem("__stripe_sk__",stripeSec.trim());addToast("Stripe keys saved","success");setStripeMsg("Saved!");setTimeout(function(){setStripeMsg("");},3000);}}>Save Keys</Btn>
-
-          <div style={{height:1,background:C.border,margin:"20px 0"}}/>
-          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Account A — Business Payments & Rep Payouts</div>
-          <div style={{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.6}}>
-            This account collects customer payments and funds rep commission payouts via Stripe Connect. Deploy the Edge Function below to enable automatic transfers.
-          </div>
-          <Field label="Publishable Key (Account A)" value={stripeAccountA&&stripeAccountA.publishableKey||""}
-            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{publishableKey:v});});}}
-            placeholder="pk_live_…" hint="Used in CustomerPaymentPage for card collection"/>
-          <Field label="Secret Key (Account A)" value={stripeAccountA&&stripeAccountA.secretKey||""}
-            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{secretKey:v});});}}
-            type="password" placeholder="sk_live_…" hint="Edge Function only — never exposed in browser"/>
-          <Field label="Webhook Secret (Account A)" value={stripeAccountA&&stripeAccountA.webhookSecret||""}
-            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{webhookSecret:v});});}}
-            type="password" placeholder="whsec_…" hint="From Stripe Dashboard → Webhooks → Signing secret"/>
-          <Field label="Edge Function URL" value={stripeAccountA&&stripeAccountA.edgeFnUrl||""}
-            onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
-            placeholder="https://PROJECT.supabase.co/functions/v1/stripe-payouts"
-            hint="Deploy the Edge Function below, then paste its URL here"/>
-          <Btn onClick={function(){addToast("Account A settings saved","success");}}>Save Account A</Btn>
-
-          <div style={{marginTop:20,padding:"14px 16px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10}}>
-            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:8}}>Stripe Connect Setup Checklist</div>
-            {[
-              ["Enable Stripe Connect in your Stripe Dashboard","Dashboard → Connect → Get started"],
-              ["Set your platform name and branding","Dashboard → Connect → Settings → Branding"],
-              ["Deploy the Supabase Edge Function","See code below → copy to /supabase/functions/stripe-payouts/index.ts"],
-              ["Paste the Edge Function URL above","After deploy: supabase functions deploy stripe-payouts"],
-              ["Each rep clicks Connect Bank Account in their profile","Rep Profile → Subscription tab → Bank Account section"],
-            ].map(function(item,i){return (
-              <div key={i} style={{display:"flex",gap:8,marginBottom:6,fontSize:11}}>
-                <span style={{color:C.dim,flexShrink:0}}>{i+1}.</span>
-                <div><div style={{color:C.text,fontWeight:600}}>{item[0]}</div><div style={{color:C.dim}}>{item[1]}</div></div>
-              </div>
-            );})}
-          </div>
-
-          <div style={{marginTop:14}}>
-            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:8}}>Edge Function Code</div>
-            <div style={{fontWeight:600,fontSize:11,color:C.muted,marginBottom:6}}>/supabase/functions/stripe-payouts/index.ts</div>
-            <div style={{background:"#0d1117",borderRadius:8,padding:"14px",fontSize:10,fontFamily:"monospace",color:"#c9d1d9",lineHeight:1.7,overflowX:"auto",whiteSpace:"pre",maxHeight:220,overflowY:"auto"}}>
-              {["import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';",
-                "import Stripe from 'https://esm.sh/stripe@12.0.0?target=deno';",
-                "",
-                "const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, { apiVersion: '2023-10-16' });",
-                "",
-                "serve(async (req) => {",
-                "  const { action, repId, amount, currency, stripeAccountId, returnUrl } = await req.json();",
-                "  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };",
-                "",
-                "  if (action === 'create_account_link') {",
-                "    const account = await stripe.accounts.create({ type: 'express' });",
-                "    const link = await stripe.accountLinks.create({",
-                "      account: account.id, refresh_url: returnUrl,",
-                "      return_url: returnUrl + '?connected=true&account=' + account.id,",
-                "      type: 'account_onboarding',",
-                "    });",
-                "    return new Response(JSON.stringify({ url: link.url, accountId: account.id }), { headers });",
-                "  }",
-                "",
-                "  if (action === 'transfer') {",
-                "    const transfer = await stripe.transfers.create({",
-                "      amount: Math.round(amount * 100), currency: currency || 'usd',",
-                "      destination: stripeAccountId,",
-                "      metadata: { repId },",
-                "    });",
-                "    return new Response(JSON.stringify({ transferId: transfer.id, status: transfer.object }), { headers });",
-                "  }",
-                "",
-                "  if (action === 'account_status') {",
-                "    const account = await stripe.accounts.retrieve(stripeAccountId);",
-                "    return new Response(JSON.stringify({",
-                "      payoutsEnabled: account.payouts_enabled,",
-                "      chargesEnabled: account.charges_enabled,",
-                "      country: account.country,",
-                "    }), { headers });",
-                "  }",
-                "",
-                "  return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers });",
-                "});",
-              ].join("\n")}
+          {/* ── Account 1 ────────────────────────────────────────── */}
+          <div style={{background:C.surface2,borderRadius:12,padding:"18px",marginBottom:20,border:"1px solid "+C.border}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:C.accent}}/>
+              <div style={{fontWeight:700,fontSize:13,color:C.text}}>Account 1 — Customer Payments & Rep Payouts</div>
             </div>
-            <Btn small variant="ghost" onClick={function(){
-              var code=["import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';",
-                "import Stripe from 'https://esm.sh/stripe@12.0.0?target=deno';",
-                "const stripe = new Stripe(Deno.env.get('STRIPE_SECRET_KEY')!, { apiVersion: '2023-10-16' });",
-                "serve(async (req) => {",
-                "  const { action, repId, amount, currency, stripeAccountId, returnUrl } = await req.json();",
-                "  const headers = { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' };",
-                "  if (action === 'create_account_link') {",
-                "    const account = await stripe.accounts.create({ type: 'express' });",
-                "    const link = await stripe.accountLinks.create({ account: account.id, refresh_url: returnUrl, return_url: returnUrl + '?connected=true&account=' + account.id, type: 'account_onboarding' });",
-                "    return new Response(JSON.stringify({ url: link.url, accountId: account.id }), { headers });",
-                "  }",
-                "  if (action === 'transfer') {",
-                "    const transfer = await stripe.transfers.create({ amount: Math.round(amount * 100), currency: currency || 'usd', destination: stripeAccountId, metadata: { repId } });",
-                "    return new Response(JSON.stringify({ transferId: transfer.id }), { headers });",
-                "  }",
-                "  if (action === 'account_status') {",
-                "    const account = await stripe.accounts.retrieve(stripeAccountId);",
-                "    return new Response(JSON.stringify({ payoutsEnabled: account.payouts_enabled, chargesEnabled: account.charges_enabled }), { headers });",
-                "  }",
-                "  return new Response(JSON.stringify({ error: 'Unknown action' }), { status: 400, headers });",
-                "});"].join("\n");
-              navigator.clipboard.writeText(code).then(function(){addToast("Edge Function code copied!","success");});
-            }}>📋 Copy Edge Function Code</Btn>
-          </div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:16,lineHeight:1.6}}>
+              Receives order payments from customers. Pays rep commissions via Stripe Connect transfers.
+            </div>
 
-          <div style={{height:1,background:C.border,margin:"20px 0"}}/>
-          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Rep Subscription Payment Links</div>
-          <div style={{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.6}}>
-            Create in <strong style={{color:C.text}}>Stripe Dashboard → Payment Links → New</strong>. Set as recurring monthly subscriptions. Paste URLs here — reps see these in their Profile → Subscription tab.
-          </div>
-          <Field label="Starter Plan Link ($100/mo)" value={stripeLinks&&stripeLinks.starter||""}
-            onChange={function(v){setStripeLinks(function(prev){return Object.assign({},prev,{starter:v});});}}
-            placeholder="https://buy.stripe.com/…" hint="Starter — $1,000/mo commission ceiling"/>
-          <Field label="Pro Plan Link ($200/mo)" value={stripeLinks&&stripeLinks.pro||""}
-            onChange={function(v){setStripeLinks(function(prev){return Object.assign({},prev,{pro:v});});}}
-            placeholder="https://buy.stripe.com/…" hint="Pro — $10,000/mo commission ceiling"/>
-          <Field label="Customer Portal Link" value={stripeLinks&&stripeLinks.portal||""}
-            onChange={function(v){setStripeLinks(function(prev){return Object.assign({},prev,{portal:v});});}}
-            placeholder="https://billing.stripe.com/p/…" hint="Reps click this to manage card, view invoices, cancel"/>
-          <Btn onClick={function(){addToast("Stripe links saved","success");}}>Save Links</Btn>
+            <div style={{background:C.bg,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:11,color:C.muted,lineHeight:1.7,border:"1px solid "+C.border}}>
+              <strong style={{color:C.text}}>Secret key goes in Supabase — not here:</strong><br/>
+              <code style={{color:C.accent}}>supabase secrets set STRIPE_SECRET_KEY=sk_live_...</code>
+            </div>
 
-          <div style={{height:1,background:C.border,margin:"20px 0"}}/>
-          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Setup Checklist</div>
-          <div style={{background:C.surface2,borderRadius:10,border:"1px solid "+C.border,padding:"14px 16px"}}>
-            {[
-              ["Create two Stripe Products (Starter & Pro)","Products → Add product → Recurring"],
-              ["Create Payment Links for each plan","Payment Links → Create link → select product"],
-              ["Enable Customer Portal","Settings → Billing → Customer portal → Activate"],
-              ["Paste all three links above","Starter link, Pro link, Portal link"],
-              ["Test with a Stripe test mode key first","pk_test_ / sk_test_"],
-            ].map(function(item,i){return (
-              <div key={i} style={{display:"flex",gap:10,marginBottom:8,fontSize:12}}>
-                <span style={{color:C.dim,flexShrink:0}}>□</span>
-                <div><div style={{color:C.text,fontWeight:600}}>{item[0]}</div><div style={{color:C.dim,fontSize:11}}>{item[1]}</div></div>
+            <Field label="Publishable Key" value={(stripeAccountA&&stripeAccountA.publishableKey)||""}
+              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{publishableKey:v});});}}
+              placeholder="pk_live_…" hint="Shows the card form on customer payment page"/>
+            <Field label="Charge Edge Function URL" value={(stripeAccountA&&stripeAccountA.edgeFnUrl)||""}
+              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
+              placeholder="https://xxx.supabase.co/functions/v1/stripe-charge"
+              hint="Processes customer card payments — deploy stripe-charge function first"/>
+            <Field label="Connect Edge Function URL" value={(stripeAccountA&&stripeAccountA.connectFnUrl)||""}
+              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{connectFnUrl:v});});}}
+              placeholder="https://xxx.supabase.co/functions/v1/stripe-connect"
+              hint="Onboards reps and sends commission payouts — deploy stripe-connect function first"/>
+            <Field label="Platform Fee %" value={String((stripeAccountA&&stripeAccountA.platformFee)||"0")}
+              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{platformFee:parseFloat(v)||0});});}}
+              type="number" placeholder="0" hint="Optional: % withheld from each payout (0 = no fee)"/>
+
+            {(stripeAccountA&&stripeAccountA.publishableKey&&stripeAccountA.edgeFnUrl)&&(
+              <div style={{marginTop:12,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
+                ✓ Customer payments ready
+                {stripeAccountA.connectFnUrl&&" · ✓ Rep payouts ready"}
               </div>
-            );})}
+            )}
           </div>
+
+          {/* ── Account 2 ────────────────────────────────────────── */}
+          <div style={{background:C.surface2,borderRadius:12,padding:"18px",marginBottom:20,border:"1px solid "+C.border}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:C.warning}}/>
+              <div style={{fontWeight:700,fontSize:13,color:C.text}}>Account 2 — Rep Memberships</div>
+            </div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:16,lineHeight:1.6}}>
+              Separate company. Reps pay membership fees here. Create payment links in the Stripe Dashboard and paste them below.
+            </div>
+
+            <Field label="Company Name" value={(stripeLinks&&stripeLinks.membershipCompany)||""}
+              onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{membershipCompany:v});});}}
+              placeholder="e.g. PreVasive Connect LLC"/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <Field label="Monthly Plan Link" value={(stripeLinks&&stripeLinks.membershipMonthly)||""}
+                onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{membershipMonthly:v});});}}
+                placeholder="https://buy.stripe.com/…"/>
+              <Field label="Annual Plan Link" value={(stripeLinks&&stripeLinks.membershipAnnual)||""}
+                onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{membershipAnnual:v});});}}
+                placeholder="https://buy.stripe.com/…"/>
+            </div>
+            <div style={{fontSize:10,color:C.muted,marginTop:4,lineHeight:1.7}}>
+              To create: Stripe Dashboard → Payment Links → Create. Share the link URL here.
+            </div>
+
+            {(stripeLinks&&stripeLinks.membershipMonthly)&&(
+              <div style={{marginTop:12,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
+                ✓ Membership links configured
+              </div>
+            )}
+          </div>
+
+          {/* ── Legacy Payment Links (Rep Plans) ─────────────────── */}
+          <details style={{marginBottom:20}}>
+            <summary style={{cursor:"pointer",fontSize:11,color:C.muted,fontWeight:600,padding:"8px 0"}}>
+              ▸ Legacy — Rep subscription plan links (advanced)
+            </summary>
+            <div style={{paddingTop:12}}>
+              <Field label="Starter Plan Link" value={(stripeLinks&&stripeLinks.starter)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{starter:v});});}} placeholder="https://buy.stripe.com/…"/>
+              <Field label="Pro Plan Link" value={(stripeLinks&&stripeLinks.pro)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{pro:v});});}} placeholder="https://buy.stripe.com/…"/>
+              <Field label="Customer Portal Link" value={(stripeLinks&&stripeLinks.portal)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{portal:v});});}} placeholder="https://billing.stripe.com/…"/>
+            </div>
+          </details>
+
         </div>
       )}
 
@@ -8032,6 +8007,34 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
   return (
     <div>
       <PageHeader title={"Welcome back, "+(repName&&repName.split(" ")[0])||"Rep"+"!"} subtitle="Your sales dashboard"/>
+
+      {/* ── Stripe Connect banner ── */}
+      {(function(){
+        var connectFn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+        var repData2 = reps&&reps.find(function(r){return r.id===repId||r.userId===repId;});
+        var hasConnect = repData2&&repData2.stripeConnectId;
+        if(!connectFn) return null;
+        return (
+          <div style={{background:hasConnect?C.success+"10":C.accent+"10",border:"1px solid "+(hasConnect?C.success:C.accent)+"30",borderRadius:10,padding:"12px 16px",marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+            <div>
+              <div style={{fontWeight:700,fontSize:13,color:hasConnect?C.success:C.accent}}>{hasConnect?"✓ Stripe Account Connected":"💳 Connect Your Stripe Account"}</div>
+              <div style={{fontSize:11,color:C.muted,marginTop:2}}>{hasConnect?"Commission payouts will be sent directly to your bank account.":"Required to receive commission payouts directly to your bank."}</div>
+            </div>
+            {!hasConnect&&(
+              <Btn small onClick={function(){
+                var fn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+                if(!fn){addToast("Connect not configured — contact admin","warning");return;}
+                fetch(fn,{method:"POST",headers:{"Content-Type":"application/json"},
+                  body:JSON.stringify({action:"onboard",repId:repId,repName:repName,repEmail:currentUser&&currentUser.email||""})
+                }).then(function(r){return r.json();}).then(function(d){
+                  if(d.url) window.open(d.url,"_blank");
+                  else addToast(d.error||"Could not start onboarding","danger");
+                }).catch(function(){addToast("Could not reach server","danger");});
+              }}>Set Up Payouts →</Btn>
+            )}
+          </div>
+        );
+      })()}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:14,marginBottom:24}}>
         <KpiCard label="My Orders" value={myOrds.length} sub={myOrds.filter(function(o){return o.status==="Submitted";}).length+" pending"} color={C.accent}/>
         <KpiCard label="Total Earned" value={fmtMoney(totalEarned)} sub="Paid out" color={C.success}/>
@@ -8810,9 +8813,10 @@ function App() {
   }, []);
   const [creditAgreementTemplate,setCreditAgreementTemplate] = useLS("creditAgreementTemplate","");
   const [stripeAccountA, setStripeAccountA] = useLS("stripeAccountA",{
-    publishableKey:"", secretKey:"", webhookSecret:"", edgeFnUrl:"",
+    publishableKey:"", secretKey:"", webhookSecret:"", edgeFnUrl:"", connectFnUrl:"", platformFee:0,
   });
   const [stripeLinks, setStripeLinks] = useLS("stripeLinks",{
+    membershipMonthly:"", membershipAnnual:"", membershipCompany:"",
     starter:"", pro:"", portal:"",
     starterPriceId:"", proPriceId:"",
   });
