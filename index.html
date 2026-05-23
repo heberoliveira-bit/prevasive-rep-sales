@@ -1740,7 +1740,6 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     var txt=body.replace("[PAYMENT_LINK]",l);
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    addToast("cfg check: edgeFn="+(cfg&&cfg.edgeFnUrl?"✓":"✗")+" secret="+(cfg&&cfg.clientSecret?"✓":"✗")+" from="+(cfg&&cfg.fromEmail?"✓":"✗"),"info");
     if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&(cfg.clientSecret||cfg.pass)){
       // Send via Edge Function
       var repEmail = currentUser&&currentUser.email ? currentUser.email : null;
