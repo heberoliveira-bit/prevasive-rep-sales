@@ -1806,7 +1806,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
           <Field label="Subject" value={subject} onChange={setSubject}/>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Message</div>
-            <textarea value={body} onChange={function(e){setBody(e.target.value);}} rows={9}
+            <textarea value={link ? body.replace("[PAYMENT_LINK]",link) : body} onChange={function(e){setBody(e.target.value);}} rows={9}
               style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
           </div>
         </div>
@@ -1819,7 +1819,13 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
             ):(
               <div>
                 <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"7px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",lineHeight:1.6,marginBottom:8}}>{link}</div>
-                <Btn small onClick={copyLink} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+                <Btn small onClick={function(){
+                  try{
+                    var l=link||genLink();
+                    if(navigator.clipboard){navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}).catch(function(){window.prompt("Copy:",l);});}
+                    else{window.prompt("Copy:",l);}
+                  }catch(e){addToast("Copy failed: "+e.message,"danger");}
+                }} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
                 <div style={{fontSize:10,color:C.success,marginTop:6,fontWeight:600}}>✓ Paste into email or text</div>
               </div>
             )}
