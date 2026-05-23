@@ -8824,6 +8824,7 @@ function App() {
   const [inviteToken,  setInviteToken]  = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]invite=([^&]+)/);return m?m[1]:null;})());
   const [signingToken, setSigningToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]sign=([^&]+)/);return m?m[1]:null;})());
   const [payToken,     setPayToken]     = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]pay=([^&]+)/);return m?m[1]:null;})());
+  const [payDataFromDB,setPayDataFromDB] = useState(null);
   const [receiptToken, setReceiptToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]receipt=([^&]+)/);return m?m[1]:null;})());
 
   // Handle Stripe Connect return — update rep stripeConnectId
@@ -8934,17 +8935,17 @@ function App() {
 
   // Invoice payment page — no auth required
   if(payToken) {
-    var payData2 = null;
-    try { payData2 = JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null"); } catch(e){}
-    // If not in localStorage (customer's device), fetch from Supabase
+    var payData2 = payDataFromDB;
+    if(!payData2) {
+      try { payData2 = JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null"); } catch(e){}
+    }
     if(!payData2) {
       var sb2=getSB();
       if(sb2){
         return React.createElement(PayTokenLoader,{token:payToken,sb:sb2,
           onLoaded:function(pd){
             localStorage.setItem("__pv__pay_"+payToken,JSON.stringify(pd));
-            setPayToken(null);
-            setTimeout(function(){setPayToken(payToken);},50);
+            setPayDataFromDB(pd);
           }
         });
       }
