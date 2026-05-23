@@ -8096,7 +8096,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
           currentUser={currentUser} addToast={addToast} showResult={showResult}
           onClose={function(){setShowSendInv(false);}}/>
       )}
-      {showForm&&React.createElement(OrderForm,{me,products:products,customers:customers,
+      {showForm&&React.createElement(OrderForm,{repId:repId,repName:repName,products:products,customers:customers,
         setCustomers:setCustomers,setOrders:setOrders,
         editOrder:null,onClose:function(){setShowForm(false);},
         addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,currentUser:currentUser,repData:repData,
