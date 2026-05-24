@@ -4857,6 +4857,28 @@ function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
 }
 
 /* ─── Admin Orders ───────────────────────────────────────────────────────── */
+
+/* ─── Payment Status Helpers ────────────────────────────────────────────── */
+function getPaymentStatus(o) {
+  if(o.paidAt) return {key:"paid",label:"✅ Paid",color:"#22c55e",date:o.paidAt};
+  if(o.payMethod==="net_30"||o.payMethod==="net_60"||o.payMethod==="terms") {
+    var days = o.payMethod==="net_60"?60:30;
+    var dueDate = new Date((o.deliveredAt||o.createdAt));
+    dueDate.setDate(dueDate.getDate()+days);
+    var now = Date.now();
+    var diff = Math.round((dueDate.getTime()-now)/(1000*60*60*24));
+    if(diff<0) return {key:"overdue",label:"⚠ "+Math.abs(diff)+"d overdue",color:"#ef4444",dueDate:dueDate};
+    return {key:"terms",label:"📋 Due in "+diff+"d",color:"#f59e0b",dueDate:dueDate};
+  }
+  if(o.invoiceSentAt) {
+    var due2 = new Date(o.invoiceSentAt);
+    due2.setDate(due2.getDate()+30);
+    var diff2 = Math.round((due2.getTime()-Date.now())/(1000*60*60*24));
+    if(diff2<0) return {key:"overdue",label:"⚠ "+Math.abs(diff2)+"d overdue",color:"#ef4444",dueDate:due2};
+    return {key:"invoice_sent",label:"📧 Due in "+diff2+"d",color:"#8b5cf6",dueDate:due2};
+  }
+  return {key:"awaiting",label:"⏳ Awaiting",color:"#6b7280"};
+}
 function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResult,currentUser}) {
   const [search,      setSearch]      = useState("");
   const [filter,      setFilter]      = useState("all");
@@ -4954,7 +4976,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
         <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{background:C.surface2}}>
-              {["","Order","Date","Rep","Customer","Items","Total","Commission","Status",""].map(function(h,hi){return (
+              {["","Order","Date","Rep","Customer","Items","Total","Commission","Status","Payment","Shipping",""].map(function(h,hi){return (
                 <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,
                                    textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
               );})}
@@ -4978,6 +5000,39 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                       </Btn>
                     )}
                   </td>
+
+                  {/* ── Payment Status ── */}
+                  <td style={{padding:"10px 14px",minWidth:140}} onClick={function(e){e.stopPropagation();}}>
+                    {(function(){
+                      var ps=getPaymentStatus(o);
+                      return (
+                        <div>
+                          <div style={{fontSize:11,fontWeight:600,color:ps.color,marginBottom:ps.key!=="paid"?4:0,whiteSpace:"nowrap"}}>{ps.label}</div>
+                          {ps.key!=="paid"&&(
+                            <Btn small onClick={function(){setShowSendInv(true);setViewOrder(o);}}>Collect →</Btn>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
+
+                  {/* ── Shipping Status ── */}
+                  <td style={{padding:"10px 14px",minWidth:140}} onClick={function(e){e.stopPropagation();}}>
+                    {(function(){
+                      var shipped = o.trackingNum||o.shippingStatus;
+                      var delivered = o.status==="Delivered"||o.shippingStatus==="delivered";
+                      if(delivered) return <div style={{fontSize:11,fontWeight:600,color:"#22c55e"}}>✅ Delivered</div>;
+                      if(o.trackingNum) return (
+                        <div>
+                          <div style={{fontSize:11,fontWeight:600,color:"#3b82f6",marginBottom:2}}>🚚 In Transit</div>
+                          <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{o.trackingNum}</div>
+                        </div>
+                      );
+                      if(o.labelCreated) return <div style={{fontSize:11,color:C.muted}}>📦 Label Created</div>;
+                      return <div style={{fontSize:11,color:C.dim}}>— Not Shipped</div>;
+                    })()}
+                  </td>
+
                 </tr>
               );})}
             </tbody>
@@ -7277,8 +7332,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
       if(emailCfg2&&emailCfg2.edgeFnUrl&&(emailCfg2.clientSecret||emailCfg2.pass)) {
         var payTok2 = id+"_"+Math.random().toString(36).slice(2,9);
-        var payD2   = {token:payTok2,status:"pending",order:order,customer:selCust||{name:cname},company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",products:products,createdAt:new Date().toISOString()};
+        var payD2   = {token:payTok2,status:"pending",orderId:id,custId:order.custId,custName:order.custName||"",custEmail:placeEmail,company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",items:(order.items||[]).map(function(it){var p=(products||[]).find(function(px){return px.id===it.prodId;})||{};return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:p.name||it.prodId||""};}) ,totals:order.totals||{},createdAt:new Date().toISOString()};
         localStorage.setItem("__pv__pay_"+payTok2,JSON.stringify(payD2));
+        // Mark invoice as sent on the order
+        var updatedWithInv = Object.assign({},order,{invoiceSentAt:new Date().toISOString(),payToken:payTok2});
+        setOrders(function(prev){return prev.map(function(o){return o.id===id?updatedWithInv:o;});});
+        dbSave("crm_orders",id,updatedWithInv);
+        var sb3=getSB();if(sb3){sb3.from("crm_pay_tokens").upsert({id:payTok2,data:payD2,created_at:payD2.createdAt}).then(function(){});}
         var payLinkUrl = getSiteUrl()+"#pay="+payTok2;
         var emailHtml  = "<h2>Invoice from "+(payD2.company)+"</h2><p>Hi "+(cname||"there")+",</p><p>Please find your invoice for order <strong>"+id+"</strong> below.</p><p><strong>Total Due: "+fmtMoney(order.totals&&order.totals.grand||0)+"</strong></p><p><a href='"+payLinkUrl+"' style='background:#635bff;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;margin:16px 0'>Pay Invoice →</a></p><p style='color:#6b7c93;font-size:12px'>"+payD2.company+" · Do not reply to this email.</p>";
         fetch(emailCfg2.edgeFnUrl,{
