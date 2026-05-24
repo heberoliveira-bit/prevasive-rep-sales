@@ -8760,7 +8760,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
 function getSiteUrl(){
   try{var cfg=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}");if(cfg.siteUrl&&cfg.siteUrl.trim()) return cfg.siteUrl.trim().replace(/\/+$/,"");}catch(e){}
-  return getSiteUrl().replace(/\/+$/,"");
+  return window.location.origin+window.location.pathname.replace(/\/+$/,"");
 }
 
 
