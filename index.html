@@ -1633,6 +1633,119 @@ function PageHeader({title,subtitle,action}) {
 
 /* ─── SendInvoiceModal ───────────────────────────────────────────────────── */
 
+/* ─── Invoice PDF Generator ─────────────────────────────────────────────── */
+function buildInvoicePdf(order, cust, products, company, cb) {
+  // Load jsPDF dynamically
+  if(!window.jsPDF) {
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+    script.onload = function(){ buildInvoicePdf(order, cust, products, company, cb); };
+    document.head.appendChild(script);
+    return;
+  }
+  try {
+    var jsPDF = window.jsPDF.jsPDF || window.jspdf.jsPDF;
+    var doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+    var W = 210, margin = 20, y = 0;
+
+    // ── Header bar ──
+    doc.setFillColor(99, 91, 255);
+    doc.rect(0, 0, W, 30, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18); doc.setFont('helvetica','bold');
+    doc.text(company||'PreVasive USA', margin, 19);
+    doc.setFontSize(9); doc.setFont('helvetica','normal');
+    doc.text('INVOICE', W - margin, 19, {align:'right'});
+    y = 40;
+
+    // ── Invoice meta ──
+    doc.setTextColor(30, 30, 50);
+    doc.setFontSize(10); doc.setFont('helvetica','bold');
+    doc.text('Invoice Details', margin, y); y += 6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.setTextColor(80, 80, 100);
+    doc.text('Invoice #:  ' + order.id, margin, y); y += 5;
+    doc.text('Date:       ' + new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}), margin, y); y += 5;
+    doc.text('Status:     ' + (order.paidAt ? 'PAID' : 'DUE ON RECEIPT'), margin, y); y += 10;
+
+    // ── Bill To ──
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(30,30,50);
+    doc.text('Bill To', margin, y); y += 6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(80,80,100);
+    doc.text(cust.name || order.custName || 'Customer', margin, y); y += 5;
+    if(cust.email) { doc.text(cust.email, margin, y); y += 5; }
+    if(cust.phone) { doc.text(cust.phone, margin, y); y += 5; }
+    var addr = (cust.addresses&&cust.addresses[0])||cust;
+    if(addr.address) { doc.text(addr.address, margin, y); y += 5; }
+    if(addr.city) { doc.text((addr.city||'') + (addr.state ? ', '+addr.state : '') + (addr.zip ? ' '+addr.zip : ''), margin, y); y += 5; }
+    y += 6;
+
+    // ── Divider ──
+    doc.setDrawColor(200,200,220); doc.setLineWidth(0.3);
+    doc.line(margin, y, W-margin, y); y += 8;
+
+    // ── Items table header ──
+    doc.setFillColor(245,245,252);
+    doc.rect(margin, y-4, W-margin*2, 8, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(99,91,255);
+    doc.text('PRODUCT', margin+2, y+1);
+    doc.text('QTY', 120, y+1, {align:'right'});
+    doc.text('UNIT PRICE', 150, y+1, {align:'right'});
+    doc.text('TOTAL', W-margin-2, y+1, {align:'right'});
+    y += 8;
+
+    // ── Items ──
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(30,30,50);
+    var items = order.items||[];
+    var alt = false;
+    items.forEach(function(it) {
+      var prod = (products||[]).find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||'Product'};
+      var price = it.unitPrice||prod.price||0;
+      var total = price * (it.qty||1);
+      if(alt) { doc.setFillColor(250,250,255); doc.rect(margin, y-4, W-margin*2, 7, 'F'); }
+      alt = !alt;
+      doc.setTextColor(30,30,50);
+      doc.text(String(prod.name||'').slice(0,42), margin+2, y);
+      doc.text(String(it.qty||1), 120, y, {align:'right'});
+      doc.text('$'+price.toFixed(2), 150, y, {align:'right'});
+      doc.text('$'+total.toFixed(2), W-margin-2, y, {align:'right'});
+      y += 7;
+    });
+    y += 4;
+
+    // ── Totals ──
+    doc.setDrawColor(200,200,220); doc.line(margin, y, W-margin, y); y += 6;
+    var totals = order.totals||{};
+    var labelX = 145; var valX = W-margin-2;
+    doc.setFontSize(9); doc.setTextColor(80,80,100); doc.setFont('helvetica','normal');
+    if(totals.subtotal) { doc.text('Subtotal', labelX, y, {align:'right'}); doc.text('$'+totals.subtotal.toFixed(2), valX, y, {align:'right'}); y += 6; }
+    if(totals.discount>0) { doc.setTextColor(30,150,80); doc.text('Discount', labelX, y, {align:'right'}); doc.text('-$'+totals.discount.toFixed(2), valX, y, {align:'right'}); doc.setTextColor(80,80,100); y += 6; }
+    if(totals.shipping>0) { doc.text('Shipping', labelX, y, {align:'right'}); doc.text('$'+totals.shipping.toFixed(2), valX, y, {align:'right'}); y += 6; }
+    if(totals.tax>0) { doc.text('Tax', labelX, y, {align:'right'}); doc.text('$'+totals.tax.toFixed(2), valX, y, {align:'right'}); y += 6; }
+    doc.setDrawColor(99,91,255); doc.setLineWidth(0.5); doc.line(labelX-20, y, W-margin, y); y += 6;
+    doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(99,91,255);
+    doc.text('TOTAL DUE', labelX, y, {align:'right'}); doc.text('$'+(totals.grand||0).toFixed(2), valX, y, {align:'right'});
+    y += 14;
+
+    if(order.paidAt) {
+      doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(34,197,94);
+      doc.text('PAID', W/2, y, {align:'center'});
+      doc.setDrawColor(34,197,94); doc.setLineWidth(1);
+      doc.rect(W/2-14, y-10, 28, 14, 'S');
+      y += 10;
+    }
+
+    // ── Footer ──
+    doc.setFillColor(99,91,255);
+    doc.rect(0, 287-12, W, 12, 'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(255,255,255);
+    doc.text(company+' · Thank you for your business', W/2, 287-4, {align:'center'});
+
+    cb(null, doc.output('datauristring').split(',')[1]);
+  } catch(e) { cb(e.message, null); }
+}
+
+
 </script>
 <script id="c2" type="text/plain">
 function SendInvoiceModal({order,customers,products,currentUser,addToast,showResult,onClose,embedded}) {
@@ -1694,20 +1807,28 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&cfg.clientSecret){
       setSending(true);
       var html = buildEmailHtml(link, cust.name||"", body, grand.toFixed(2), order.id);
-      fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
-          clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
-          to:toEmail.trim(),toEmail:toEmail.trim(),
-          subject:subject,body:html,message:html,isHtml:true})
-      }).then(function(r){return r.json();}).then(function(d){
-        setSending(false);
-        if(d.ok||d.id){
-          try{var sb2=getSB();if(sb2)sb2.from("crm_orders").update({invoiceSentAt:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
-          addToast("Invoice sent to "+toEmail,"success");
-          setPreview(false);
-          onClose();
-        } else { addToast("Send failed: "+(d.error||"Unknown error"),"danger"); }
-      }).catch(function(){setSending(false);addToast("Could not reach email server","danger");});
+      // Generate PDF then send
+      buildInvoicePdf(order, cust, products, company, function(err, pdfBase64){
+        var attachments = [];
+        if(!err && pdfBase64) {
+          attachments = [{name:"Invoice-"+order.id+".pdf", contentType:"application/pdf", contentBytes:pdfBase64}];
+        }
+        fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
+            clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
+            to:toEmail.trim(),toEmail:toEmail.trim(),
+            subject:subject,body:html,message:html,isHtml:true,
+            attachments:attachments})
+        }).then(function(r){return r.json();}).then(function(d){
+          setSending(false);
+          if(d.ok||d.id){
+            try{var sb2=getSB();if(sb2)sb2.from("crm_orders").update({invoiceSentAt:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
+            addToast("Invoice sent to "+toEmail+(attachments.length?" with PDF":""),"success");
+            setPreview(false);
+            onClose();
+          } else { addToast("Send failed: "+(d.error||"Unknown error"),"danger"); }
+        }).catch(function(){setSending(false);addToast("Could not reach email server","danger");});
+      });
     } else {
       var ml="mailto:"+toEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body+"\n\nPay online: "+link);
       window.open(ml,"_blank");
