@@ -2008,46 +2008,184 @@ function FileUpload({files,onChange,label,maxFiles}) {
 
 /* ─── TermsRequestModal ────────────────────────────────────────────────── */
 function TermsRequestModal({customer,repId,repName,onClose,addToast}) {
-  const [termType, setTermType] = useState("net_30");
-  const [limit,    setLimit]    = useState("1000");
-  const [note,     setNote]     = useState("");
-  const [sending,  setSending]  = useState(false);
+  const [termType,   setTermType]   = useState("net_30");
+  const [limit,      setLimit]      = useState("1000");
+  const [bizName,    setBizName]    = useState(customer.company||"");
+  const [taxId,      setTaxId]      = useState("");
+  const [yearsInBiz, setYearsInBiz] = useState("");
+  const [revenue,    setRevenue]    = useState("");
+  const [note,       setNote]       = useState("");
+  const [files,      setFiles]      = useState([]);
+  const [refs,       setRefs]       = useState([{name:"",phone:"",email:""},{name:"",phone:"",email:""}]);
+  const [sending,    setSending]    = useState(false);
+
+  function updateRef(idx,field,val){setRefs(function(prev){return prev.map(function(r,i){return i===idx?Object.assign({},r,{[field]:val}):r;});});}
+  function addRef(){if(refs.length<5)setRefs(function(prev){return prev.concat([{name:"",phone:"",email:""}]);});}
+  function removeRef(idx){if(refs.length>2)setRefs(function(prev){return prev.filter(function(_,i){return i!==idx;});});}
+
+  function pickFiles(){
+    var inp=document.createElement("input");
+    inp.type="file";inp.multiple=true;
+    inp.accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xlsx,.csv";
+    inp.onchange=function(){
+      var arr=Array.prototype.slice.call(inp.files||[]);
+      arr.slice(0,5-files.length).forEach(function(f){
+        var rd=new FileReader();
+        rd.onload=function(e){
+          setFiles(function(prev){
+            if(prev.length>=5) return prev;
+            return prev.concat([{name:f.name,size:f.size,type:f.type,dataUrl:e.target.result}]);
+          });
+        };
+        rd.readAsDataURL(f);
+      });
+    };
+    inp.click();
+  }
+
+  function removeFile(idx){setFiles(function(prev){return prev.filter(function(_,j){return j!==idx;});});}
+
   function submit(){
+    var validRefs=refs.filter(function(r){return r.name.trim();});
+    if(validRefs.length<2){addToast("Please provide at least 2 trade references","warning");return;}
     setSending(true);
-    var req={id:genId("trq"),custId:customer.id,custName:customer.name,repId:repId,repName:repName,
-      termType:termType,creditLimit:parseFloat(limit)||1000,note:note.trim(),
-      status:"pending",createdAt:new Date().toISOString()};
-    try{var sb=getSB();if(sb)sb.from("crm_terms_requests").upsert({id:req.id,data:req}).then(function(){});}catch(e){}
+    var req={
+      id:genId("trq"),custId:customer.id,custName:customer.name,repId:repId,repName:repName,
+      termType:termType,creditLimit:parseFloat(limit)||1000,
+      bizName:bizName.trim(),taxId:taxId.trim(),yearsInBiz:yearsInBiz.trim(),revenue:revenue.trim(),
+      note:note.trim(),
+      files:files.map(function(f){return {name:f.name,size:f.size,type:f.type,dataUrl:f.dataUrl};}),
+      references:refs,
+      status:"pending",createdAt:new Date().toISOString()
+    };
+    try{var sb=getSB();if(sb)sb.from("crm_terms_requests").upsert({id:req.id,data:req,created_at:req.createdAt}).then(function(){});}catch(e){}
     setSending(false);
-    addToast("Terms request submitted for "+customer.name,"success");
+    addToast("Credit terms request submitted for "+customer.name,"success");
     onClose();
   }
+
+  var inputS={width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box",outline:"none"};
+  var terms=[["net_15","Net 15"],["net_30","Net 30"],["net_60","Net 60"],["net_90","Net 90"]];
+
   return (
     <Modal title={"Request Credit Terms — "+customer.name} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={submit} disabled={sending}>{sending?"Submitting…":"Submit Request"}</Btn>
+      footer={<div style={{display:"flex",gap:8,justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:11,color:C.muted}}>Approval typically takes 1–2 business days.</div>
+        <div style={{display:"flex",gap:8}}>
+          <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+          <Btn onClick={submit} disabled={sending}>{sending?"Submitting…":"Submit Request →"}</Btn>
+        </div>
       </div>}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+
+      {/* Info banner */}
+      <div style={{background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,padding:"10px 14px",marginBottom:18,fontSize:12,color:C.muted,lineHeight:1.6}}>
+        Credit terms allow <strong style={{color:C.text}}>{customer.name}</strong> to pay after delivery. Fill in the details below and attach any supporting documents.
+      </div>
+
+      {/* Terms type + limit */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
         <div>
           <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Terms Type</div>
-          <select value={termType} onChange={function(e){setTermType(e.target.value);}}
-            style={{width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,outline:"none"}}>
-            <option value="net_30">Net 30</option>
-            <option value="net_60">Net 60</option>
-            <option value="net_90">Net 90</option>
+          <select value={termType} onChange={function(e){setTermType(e.target.value);}} style={Object.assign({},inputS,{cursor:"pointer"})}>
+            {terms.map(function(t){return <option key={t[0]} value={t[0]}>{t[1]}</option>;})}
           </select>
         </div>
         <Field label="Credit Limit ($)" value={limit} onChange={setLimit} type="number" placeholder="1000"/>
-        <div style={{gridColumn:"1/-1"}}>
-          <TextArea label="Notes (optional)" value={note} onChange={setNote} rows={3} placeholder="Reason for credit terms request..."/>
+      </div>
+
+      {/* Business info */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+        <Field label="Business / Practice Name" value={bizName} onChange={setBizName} placeholder="e.g. Atlanta Medical Group"/>
+        <Field label="Tax ID / EIN" value={taxId} onChange={setTaxId} placeholder="XX-XXXXXXX"/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+        <Field label="Years in Business" value={yearsInBiz} onChange={setYearsInBiz} placeholder="e.g. 5"/>
+        <Field label="Annual Revenue (approx.)" value={revenue} onChange={setRevenue} placeholder="e.g. $500,000"/>
+      </div>
+
+      {/* Notes */}
+      <div style={{marginBottom:14}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Notes (optional)</div>
+        <textarea value={note} onChange={function(e){setNote(e.target.value);}} rows={2}
+          placeholder="Additional context for this request..."
+          style={Object.assign({},inputS,{resize:"vertical",lineHeight:1.6})}/>
+      </div>
+
+      {/* Trade References */}
+      <div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted}}>
+            Trade References <span style={{color:C.danger||"#ef4444",marginLeft:2}}>*</span>
+            <span style={{fontWeight:400,color:C.dim,marginLeft:4}}>(minimum 2 required)</span>
+          </div>
+          {refs.length<5&&<button onClick={addRef} style={{fontSize:11,color:C.accent,border:"1px solid "+C.accent+"40",background:"transparent",borderRadius:6,padding:"2px 10px",cursor:"pointer",fontFamily:"inherit"}}>+ Add</button>}
         </div>
+        {refs.map(function(ref,ri){return (
+          <div key={ri} style={{background:C.surface2,borderRadius:8,padding:"10px 12px",marginBottom:8,border:"1px solid "+C.border}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Reference {ri+1}{ri<2?" *":""}</div>
+              {ri>=2&&<button onClick={function(){removeRef(ri);}} style={{border:"none",background:"transparent",color:C.dim,cursor:"pointer",fontSize:14,padding:"0 4px"}}>×</button>}
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+              <div>
+                <div style={{fontSize:10,color:C.dim,marginBottom:3}}>Company / Name <span style={{color:C.danger||"#ef4444"}}>*</span></div>
+                <input value={ref.name} onChange={function(e){updateRef(ri,"name",e.target.value);}}
+                  placeholder="e.g. ABC Supplies"
+                  style={Object.assign({},inputS,{fontSize:12,padding:"7px 10px",border:"1px solid "+(ref.name.trim()?C.border:"#ef444460")})}/>
+              </div>
+              <div>
+                <div style={{fontSize:10,color:C.dim,marginBottom:3}}>Phone</div>
+                <input value={ref.phone} onChange={function(e){updateRef(ri,"phone",e.target.value);}}
+                  placeholder="(404) 555-0100"
+                  style={Object.assign({},inputS,{fontSize:12,padding:"7px 10px"})}/>
+              </div>
+              <div>
+                <div style={{fontSize:10,color:C.dim,marginBottom:3}}>Email</div>
+                <input value={ref.email} onChange={function(e){updateRef(ri,"email",e.target.value);}}
+                  placeholder="contact@company.com"
+                  style={Object.assign({},inputS,{fontSize:12,padding:"7px 10px"})}/>
+              </div>
+            </div>
+          </div>
+        );})}
+      </div>
+
+      {/* File upload */}
+      <div>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>
+          📎 Supporting Documents <span style={{fontWeight:400,color:C.dim}}>(optional — max 5 files)</span>
+        </div>
+        {files.length<5&&(
+          <div onClick={pickFiles} style={{border:"2px dashed "+C.border,borderRadius:8,padding:"14px",textAlign:"center",cursor:"pointer",marginBottom:8,transition:"border-color .15s"}}
+            onMouseOver={function(e){e.currentTarget.style.borderColor=C.accent;}}
+            onMouseOut={function(e){e.currentTarget.style.borderColor=C.border;}}>
+            <div style={{fontSize:13,color:C.muted}}>Click to attach files</div>
+            <div style={{fontSize:10,color:C.dim,marginTop:3}}>Business license · W-9 · Financial statements · Bank letter · PDF, DOC, JPG, PNG</div>
+          </div>
+        )}
+        {files.map(function(f,i){
+          var kb=Math.round(f.size/1024);
+          var icon=f.type.includes("pdf")?"📄":f.type.includes("image")?"🖼️":"📎";
+          return (
+            <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 10px",background:C.surface2,borderRadius:7,marginBottom:6,border:"1px solid "+C.border}}>
+              <span style={{fontSize:16}}>{icon}</span>
+              <div style={{flex:1,overflow:"hidden"}}>
+                <div style={{fontSize:12,color:C.text,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{f.name}</div>
+                <div style={{fontSize:10,color:C.dim}}>{kb}KB</div>
+              </div>
+              <button onClick={function(){removeFile(i);}} style={{border:"none",background:"transparent",color:C.muted,cursor:"pointer",fontSize:16,padding:"2px 6px",borderRadius:4,lineHeight:1}}>×</button>
+            </div>
+          );
+        })}
       </div>
     </Modal>
   );
 }
 
 /* ─── CustomerPaymentPage ──────────────────────────────────────────────── */
+
+</script>
+<script id="c3" type="text/plain">
 function CustomerPaymentPage({payData,onPaid,onDecline}) {
   var order=payData.order||payData,
       customer=payData.customer||{name:payData.custName||"",email:payData.custEmail||""},
@@ -2192,9 +2330,6 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
 }
 
 /* ─── CustomerSigningPage ──────────────────────────────────────────────── */
-
-</script>
-<script id="c3" type="text/plain">
 function CustomerSigningPage({signingData,onSigned,onDecline}) {
   var custName=signingData.custName||"";
   var repName=signingData.repName||"";
@@ -2320,6 +2455,9 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
   );
 }
 
+
+</script>
+<script id="c4" type="text/plain">
 function OrderEditModal({order,products,customers,onSave,onClose}) {
   const [note,setNote]=useState(order.note||"");
   const [status,setStatus]=useState(order.status||"Submitted");
@@ -2451,9 +2589,6 @@ function CustomerEditModal({customer,onSave,onClose,addToast}) {
 }
 
 /* ─── ReceiptPage ──────────────────────────────────────────────────────── */
-
-</script>
-<script id="c4" type="text/plain">
 function ReceiptPage({receiptData}) {
   var ord=receiptData.order||{};
   var cust=receiptData.customer||{};
@@ -2681,6 +2816,9 @@ function RepPayModal({order,rep,onConfirm,onClose}) {
 }
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function ReturnModal({order,currentUser,onProcess,onClose}) {
   const [reason,   setReason]   = useState("");
   const [type,     setType]     = useState("full");
@@ -2900,9 +3038,6 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
-
-</script>
-<script id="c5" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
@@ -3200,32 +3335,62 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             </div>
             <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
               {pendingTerms.map(function(req,i){return (
-                <div key={req.id} style={{padding:"14px 18px",borderBottom:i<pendingTerms.length-1?"1px solid "+C.border:"none"}}>
+                <div key={req.id} style={{padding:"16px 18px",borderBottom:i<pendingTerms.length-1?"1px solid "+C.border:"none"}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:10}}>
-                    <div>
-                      <div style={{fontWeight:700,fontSize:13,color:C.text}}>{req.custName}</div>
-                      <div style={{fontSize:11,color:C.muted,marginTop:2}}>
-                        Rep: {req.repName} · Requested: <strong style={{color:C.text}}>{fmtTerms(req.requestedTerms||"net_30")}</strong> · Limit: <strong style={{color:C.text}}>${(req.requestedLimit||0).toLocaleString()}</strong>
+                    <div style={{flex:1}}>
+                      <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:2}}>{req.custName}</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:6,lineHeight:1.7}}>
+                        Rep: <strong style={{color:C.text}}>{req.repName}</strong>
+                        {" · "}Terms: <strong style={{color:C.accent}}>{fmtTerms(req.termType||req.requestedTerms||"net_30")}</strong>
+                        {" · "}Limit: <strong style={{color:C.text}}>${((req.creditLimit||req.requestedLimit||0)).toLocaleString()}</strong>
                       </div>
-                      {req.bizType&&<div style={{fontSize:11,color:C.dim,marginTop:1}}>{req.bizType}</div>}
-                      {req.reason&&<div style={{fontSize:11,color:C.muted,marginTop:4,fontStyle:"italic"}}>"{req.reason}"</div>}
+                      {/* New fields */}
+                      {(req.bizName||req.taxId||req.yearsInBiz||req.revenue)&&(
+                        <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:6}}>
+                          {req.bizName&&<span style={{fontSize:11,color:C.muted}}>🏢 {req.bizName}</span>}
+                          {req.taxId&&<span style={{fontSize:11,color:C.muted}}>🪪 {req.taxId}</span>}
+                          {req.yearsInBiz&&<span style={{fontSize:11,color:C.muted}}>📅 {req.yearsInBiz} yrs in business</span>}
+                          {req.revenue&&<span style={{fontSize:11,color:C.muted}}>💰 Revenue: {req.revenue}</span>}
+                        </div>
+                      )}
+                      {(req.note||req.reason||req.bizType)&&(
+                        <div style={{fontSize:11,color:C.muted,fontStyle:"italic",marginBottom:4}}>"{req.note||req.reason||req.bizType}"</div>
+                      )}
+                      {/* Trade references */}
+                      {req.references&&req.references.length>0&&(
+                        <div style={{marginTop:6}}>
+                          <div style={{fontSize:10,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",marginBottom:4}}>Trade References</div>
+                          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                            {req.references.filter(function(r){return r.name;}).map(function(r,ri){return (
+                              <div key={ri} style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:6,padding:"4px 10px",fontSize:11}}>
+                                <strong style={{color:C.text}}>{r.name}</strong>
+                                {r.phone&&<span style={{color:C.muted}}> · {r.phone}</span>}
+                                {r.email&&<span style={{color:C.muted}}> · {r.email}</span>}
+                              </div>
+                            );})}
+                          </div>
+                        </div>
+                      )}
+                      {/* Files / documents */}
+                      {((req.files&&req.files.length>0)||(req.documents&&req.documents.length>0))&&(
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:6}}>
+                          {(req.files||req.documents||[]).map(function(doc,di){
+                            var icon=doc.type&&doc.type.includes("image")?"🖼️":doc.type&&doc.type.includes("pdf")?"📄":"📎";
+                            return (
+                              <a key={di} href={doc.dataUrl} download={doc.name} target="_blank"
+                                style={{padding:"4px 10px",borderRadius:6,border:"1px solid "+C.border,
+                                        background:C.surface2,color:C.accent,fontSize:11,fontWeight:600,
+                                        textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>
+                                {icon} {doc.name}
+                              </a>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <div style={{fontSize:10,color:C.dim,whiteSpace:"nowrap"}}>{fmtDate(req.submittedAt)}</div>
+                    <div style={{fontSize:10,color:C.dim,whiteSpace:"nowrap"}}>{fmtDate(req.createdAt||req.submittedAt)}</div>
                   </div>
-                  <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-                    {/* Document viewer */}
-                    {req.documents&&req.documents.length>0&&(
-                      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-                        {req.documents.map(function(doc,di){return (
-                          <a key={di} href={doc.dataUrl} download={doc.name} target="_blank"
-                            style={{padding:"3px 10px",borderRadius:6,border:"1px solid "+C.border,
-                                    background:C.surface2,color:C.accent,fontSize:11,fontWeight:600,
-                                    textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>
-                            📎 {doc.name}
-                          </a>
-                        );})}
-                      </div>
-                    )}
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginTop:4}}>
                     <Btn small variant="success" onClick={function(){
                       var updated=Object.assign({},req,{status:"approved_awaiting_signature",
                         approvedAt:new Date().toISOString(),
@@ -3263,6 +3428,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                       }
                       addToast("Terms denied for "+req.custName,"warning");
                     }}>Deny</Btn>
+                  </div>
                   {req.status==="approved_awaiting_signature"&&(
                       <div style={{marginTop:10,padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"25",borderRadius:8}}>
                         <div style={{fontSize:11,fontWeight:700,color:C.accent,marginBottom:8}}>
@@ -3319,7 +3485,6 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                         </div>
                       </div>
                     )}
-                  </div>
                 </div>
               );})}
             </div>
