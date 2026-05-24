@@ -8239,7 +8239,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                           <div>
                             <div style={{fontSize:11,fontWeight:600,color:ps.color,marginBottom:ps.key!=="paid"?3:0,whiteSpace:"nowrap"}}>{ps.label}</div>
                             {ps.key!=="paid"&&(
-                              <Btn small onClick={function(){setShowSendInv(true);}}>Collect →</Btn>
+                              <Btn small onClick={function(){setViewOrd(o); setShowSendInv(true);}}>Collect →</Btn>
                             )}
                           </div>
                         );
@@ -8330,9 +8330,11 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
         </Modal>
       )}
       {showSendInv&&viewOrd&&(
-        <SendInvoiceModal order={viewOrd} customers={customers} products={products}
+        <CollectPaymentModal order={viewOrd}
+          customers={customers} products={products}
           currentUser={currentUser} addToast={addToast} showResult={showResult}
-          onClose={function(){setShowSendInv(false);}}/>
+          setOrders={function(fn){setOrders(fn);}}
+          onClose={function(){setShowSendInv(false); setViewOrd(null);}}/>
       )}
       {showForm&&React.createElement(OrderForm,{repId:repId,repName:repName,products:products,customers:customers,
         setCustomers:setCustomers,setOrders:setOrders,
