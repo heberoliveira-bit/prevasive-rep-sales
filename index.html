@@ -1675,7 +1675,7 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
           clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
-          toEmail:toEmail.trim(),subject:subject,body:txt})
+          to:toEmail.trim(),toEmail:toEmail.trim(),subject:subject,body:txt,message:txt})
       }).then(function(r){return r.json();}).then(function(d){
         setSending(false);
         if(d.ok||d.id){
