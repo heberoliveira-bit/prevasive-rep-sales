@@ -5018,17 +5018,26 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                   {/* ── Shipping Status ── */}
                   <td style={{padding:"10px 14px",minWidth:140}} onClick={function(e){e.stopPropagation();}}>
                     {(function(){
-                      var shipped = o.trackingNum||o.shippingStatus;
-                      var delivered = o.status==="Delivered"||o.shippingStatus==="delivered";
+                      var delivered=o.status==="Delivered"||o.shippingStatus==="delivered";
                       if(delivered) return <div style={{fontSize:11,fontWeight:600,color:"#22c55e"}}>✅ Delivered</div>;
                       if(o.trackingNum) return (
                         <div>
                           <div style={{fontSize:11,fontWeight:600,color:"#3b82f6",marginBottom:2}}>🚚 In Transit</div>
-                          <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{o.trackingNum}</div>
+                          <a href={getTrackingUrl(o.trackingNum,o.carrier)} target="_blank" rel="noopener noreferrer"
+                            style={{fontSize:10,color:C.accent,fontFamily:"monospace",textDecoration:"none"}}
+                            onClick={function(e){e.stopPropagation();}}>{o.trackingNum}</a>
                         </div>
                       );
                       if(o.labelCreated) return <div style={{fontSize:11,color:C.muted}}>📦 Label Created</div>;
-                      return <div style={{fontSize:11,color:C.dim}}>— Not Shipped</div>;
+                      return (
+                        <div>
+                          <div style={{fontSize:11,color:C.dim,marginBottom:4}}>— Not Shipped</div>
+                          <Btn small onClick={function(){
+                            var url="https://ship.shipstation.com/orders?source=PreVasive&orderNumber="+encodeURIComponent(o.id);
+                            window.open(url,"_blank");
+                          }}>Ship →</Btn>
+                        </div>
+                      );
                     })()}
                   </td>
 
@@ -5043,9 +5052,11 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
         <CollectPaymentModal order={collectTarget2}
           customers={customers} products={products}
           currentUser={currentUser} addToast={addToast} showResult={showResult}
-          setOrders={function(fn){setOrders(fn);onUpdate&&onUpdate(fn([collectTarget2])[0]);}}
+          setOrders={function(fn){
+            var upd=fn([collectTarget2])[0];
+            if(upd&&onUpdate) onUpdate(upd);
+          }}
           onClose={function(){setCollectTarget2(null);}}/>
-      )}
       )}
       {fulfillTarget2&&(
         <FulfillmentModal order={fulfillTarget2} customers={customers} products={products}
@@ -6363,71 +6374,97 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
       )}
 
       {tab==="shipstation"&&(
-        <div style={{maxWidth:560}}>
-          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>ShipStation</div>
-          <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.6}}>Live carrier rates at checkout. Find your API credentials at <strong style={{color:C.text}}>shipstation.com → Account Settings → API</strong>.</div>
+        <div style={{maxWidth:600}}>
+          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>ShipStation Settings</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:24,lineHeight:1.6}}>Two connection methods — API for live rates, Custom Store for order sync and tracking updates.</div>
 
-          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>API Credentials</div>
-            <Field label="API Key" value={ssKey} onChange={setSsKey} placeholder="API Key"/>
-            <div style={{marginBottom:12}}>
-              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>API Secret</div>
-              <input type="password" value={ssSecret} onChange={function(e){setSsSecret(e.target.value);}} placeholder="API Secret"
-                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+          {/* ── Custom Store Connection ───────────────────────────────── */}
+          <div style={{background:C.surface2,borderRadius:12,padding:"18px",marginBottom:20,border:"1px solid "+C.border}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:C.accent}}/>
+              <div style={{fontWeight:700,fontSize:13,color:C.text}}>Custom Store Connection</div>
+              <span style={{fontSize:10,padding:"2px 7px",borderRadius:8,background:C.accent+"15",color:C.accent,fontWeight:700}}>RECOMMENDED</span>
             </div>
-          </div>
-
-          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Warehouse — Ship From</div>
-            <Field label="Street Address" value={ssWAddr} onChange={setSsWAddr} placeholder="456 Warehouse Blvd"/>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
-              <Field label="City" value={ssWCity} onChange={setSsWCity}/>
-              <Field label="State" value={ssWState} onChange={setSsWState} placeholder="TX"/>
-              <Field label="ZIP" value={ssWZip} onChange={setSsWZip} placeholder="78401"/>
+            <div style={{fontSize:11,color:C.muted,marginBottom:16,lineHeight:1.7}}>
+              ShipStation polls your endpoint for orders and posts tracking back automatically. No API key needed for order sync.
             </div>
-          </div>
 
-          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:12}}>Default Package</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-              <Field label="Weight (lbs)" value={ssWeight} onChange={setSsWeight} type="number" placeholder="2"/>
-              <Field label="L (in)" value={ssDimL} onChange={setSsDimL} type="number" placeholder="12"/>
-              <Field label="W (in)" value={ssDimW} onChange={setSsDimW} type="number" placeholder="10"/>
-              <Field label="H (in)" value={ssDimH} onChange={setSsDimH} type="number" placeholder="6"/>
+            <div style={{background:C.bg,borderRadius:8,padding:"10px 14px",marginBottom:16,border:"1px solid "+C.border}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Your Store Endpoint:</div>
+              <div style={{fontSize:11,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",marginBottom:8}}>
+                https://oafmlvotrhfyffjxjkwy.supabase.co/functions/v1/shipstation-store
+              </div>
+              <div style={{fontSize:10,color:C.muted,lineHeight:1.7}}>
+                In ShipStation: <strong>Connect → Add Store → Custom Store</strong> → paste URL above, enter username and password below.
+              </div>
             </div>
-          </div>
 
-          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Rates Edge Function URL</div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Deploy <code style={{background:C.surface,padding:"1px 5px",borderRadius:3,color:C.accent}}>get-shipping-rates</code> to Supabase then paste the URL.</div>
-            <Field label="Function URL" value={ssRatesFn} onChange={setSsRatesFn} placeholder="https://xxx.supabase.co/functions/v1/get-shipping-rates"/>
-          </div>
-
-          <div style={{background:C.surface2,borderRadius:10,padding:"16px",marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:6}}>Carrier Filter <span style={{fontWeight:400,color:C.dim}}>(optional)</span></div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Enter carrier codes from ShipStation (e.g. <code style={{background:C.surface,padding:"1px 4px",borderRadius:3,color:C.accent}}>se-1308020</code>) or carrier names. Separate multiple with commas. Leave blank to show all.</div>
-            <Field label="Show only carriers" value={ssCarrierFilter} onChange={setSsCarrierFilter} placeholder="se-1308020"/>
-            {ssCarrierFilter&&<div style={{fontSize:10,color:C.accent,marginTop:4}}>Only showing: {ssCarrierFilter}</div>}
-          </div>
-
-          <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:16,cursor:"pointer"}}>
-            <input type="checkbox" checked={ssEnabled} onChange={function(e){setSsEnabled(e.target.checked);}} style={{accentColor:C.accent}}/>
-            <span style={{fontSize:13,color:C.text}}>Enable ShipStation integration</span>
-          </label>
-
-          <Btn onClick={function(){
-            onSaveShipStation({apiKey:ssKey,apiSecret:ssSecret,enabled:ssEnabled,
-              warehouseAddr:ssWAddr,warehouseCity:ssWCity,warehouseState:ssWState,warehouseZip:ssWZip,
-              defaultWeight:ssWeight,weightUnit:"pounds",dimL:ssDimL,dimW:ssDimW,dimH:ssDimH,
-              ratesFnUrl:ssRatesFn,carrierFilter:ssCarrierFilter,savedAt:new Date().toISOString()});
-            addToast("ShipStation settings saved","success");
-          }}>Save</Btn>
-
-          {ssKey&&ssSecret&&ssWZip&&ssRatesFn&&(
-            <div style={{marginTop:12,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
-              ✓ Ready — live rates will appear in New Order Step 2 and Quotes
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <Field label="Store Username" value={(shipStationCfg&&shipStationCfg.storeUser)||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{storeUser:v}));}}
+                placeholder="prevasive"/>
+              <Field label="Store Password" value={(shipStationCfg&&shipStationCfg.storePass)||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{storePass:v}));}}
+                placeholder="your-secret-password" type="password"/>
             </div>
-          )}
+            <div style={{background:C.bg,borderRadius:8,padding:"10px 14px",border:"1px solid "+C.border,fontSize:11,color:C.muted,lineHeight:1.7}}>
+              <strong style={{color:C.text}}>Then set Supabase secrets:</strong><br/>
+              <code style={{color:C.accent,fontSize:10}}>
+                supabase secrets set SS_STORE_USER=prevasive SS_STORE_PASS=your-password
+              </code>
+            </div>
+
+            {(shipStationCfg&&shipStationCfg.storeUser)&&(
+              <div style={{marginTop:12,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
+                ✓ Custom Store configured — deploy shipstation-store Edge Function to activate
+              </div>
+            )}
+          </div>
+
+          {/* ── API for Live Rates ────────────────────────────────────── */}
+          <details open>
+            <summary style={{cursor:"pointer",fontSize:12,fontWeight:700,color:C.text,padding:"10px 0",listStyle:"none",display:"flex",alignItems:"center",gap:6}}>
+              <span>▸</span><span>API Connection (Live Shipping Rates)</span>
+            </summary>
+            <div style={{paddingTop:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+                <Field label="API Key" value={(shipStationCfg&&shipStationCfg.apiKey)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{apiKey:v}));}} placeholder="ss_api_key"/>
+                <Field label="API Secret" value={(shipStationCfg&&shipStationCfg.apiSecret)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{apiSecret:v}));}} placeholder="ss_api_secret" type="password"/>
+              </div>
+              <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Ship From (Warehouse)</div>
+              <Field label="Street Address" value={(shipStationCfg&&shipStationCfg.warehouseAddress)||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseAddress:v}));}}/>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:12,marginBottom:12}}>
+                <Field label="City" value={(shipStationCfg&&shipStationCfg.warehouseCity)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseCity:v}));}}/>
+                <Field label="State" value={(shipStationCfg&&shipStationCfg.warehouseState)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseState:v}));}}/>
+                <Field label="ZIP" value={(shipStationCfg&&shipStationCfg.warehouseZip)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseZip:v}));}}/>
+              </div>
+              <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Default Package</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:12}}>
+                <Field label="Weight (lbs)" value={(shipStationCfg&&shipStationCfg.defaultWeight)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{defaultWeight:v}));}} type="number"/>
+                <Field label="L (in)" value={(shipStationCfg&&shipStationCfg.defaultL)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{defaultL:v}));}} type="number"/>
+                <Field label="W (in)" value={(shipStationCfg&&shipStationCfg.defaultW)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{defaultW:v}));}} type="number"/>
+                <Field label="H (in)" value={(shipStationCfg&&shipStationCfg.defaultH)||""}
+                  onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{defaultH:v}));}} type="number"/>
+              </div>
+              <Field label="Function URL" value={(shipStationCfg&&shipStationCfg.edgeFnUrl)||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{edgeFnUrl:v}));}}
+                placeholder="https://xxx.supabase.co/functions/v1/get-shipping-rates"
+                hint="Edge Function for live rate lookup"/>
+              <Field label="Show only carriers" value={(shipStationCfg&&shipStationCfg.carrierFilter)||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{carrierFilter:v}));}}
+                placeholder="ups_walleted" hint="Carrier code — leave blank for all"/>
+            </div>
+          </details>
+
         </div>
       )}
 
