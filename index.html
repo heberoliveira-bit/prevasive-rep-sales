@@ -1636,17 +1636,14 @@ function PageHeader({title,subtitle,action}) {
 
 /* ─── Invoice PDF Generator ─────────────────────────────────────────────── */
 function buildInvoicePdf(order, cust, products, company, cb) {
-  // Load jsPDF dynamically
-  if(!window.jsPDF) {
-    var script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    script.onload = function(){ buildInvoicePdf(order, cust, products, company, cb); };
-    document.head.appendChild(script);
+  // jsPDF UMD exposes as window.jspdf (lowercase)
+  var jsPDFLib = (window.jspdf&&window.jspdf.jsPDF) || (window.jsPDF&&window.jsPDF.jsPDF) || window.jsPDF;
+  if(!jsPDFLib) {
+    cb("jsPDF not loaded", null);
     return;
   }
   try {
-    var jsPDF = window.jsPDF.jsPDF || window.jspdf.jsPDF;
-    var doc = new jsPDF({orientation:'portrait', unit:'mm', format:'a4'});
+    var doc = new jsPDFLib({orientation:'portrait', unit:'mm', format:'a4'});
     var W = 210, margin = 20, y = 0;
 
     // ── Header bar ──
