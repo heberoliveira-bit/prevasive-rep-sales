@@ -1733,7 +1733,10 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
       custName:cust.name||"",
       custEmail:cust.email||"",
       company:company||"PreVasive USA",
-      items:(order.items||[]).map(function(it){return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:it.name||it.prodId||""};}),
+      items:(order.items||[]).map(function(it){
+        var prod=(products||[]).find(function(p){return p.id===it.prodId;})||{};
+        return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:prod.name||it.prodId||""};
+      }),
       totals:order.totals||{},
       createdAt:new Date().toISOString()
     };
@@ -1956,7 +1959,8 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
   const [paying,     setPaying]     = useState(false);
   const [done,       setDone]       = useState(false);
   const [err,        setErr]        = useState("");
-  const stripeRef = {stripe:null, card:null};
+  var stripeRefArr = useState({stripe:null,card:null});
+  var stripeRef = stripeRefArr[0];
 
   useEffect(function(){
     if(isTerms||!pubKey||!window.Stripe) return;
