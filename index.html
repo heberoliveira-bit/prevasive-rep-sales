@@ -1807,27 +1807,39 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&cfg.clientSecret){
       setSending(true);
       var html = buildEmailHtml(link, cust.name||"", body, grand.toFixed(2), order.id);
-      // Generate PDF then send
-      buildInvoicePdf(order, cust, products, company, function(err, pdfBase64){
-        var attachments = [];
-        if(!err && pdfBase64) {
-          attachments = [{name:"Invoice-"+order.id+".pdf", contentType:"application/pdf", contentBytes:pdfBase64}];
-        }
+
+      function sendWithAttachments(attachments){
         fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
             clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
             to:toEmail.trim(),toEmail:toEmail.trim(),
             subject:subject,body:html,message:html,isHtml:true,
-            attachments:attachments})
+            attachments:attachments||[]})
         }).then(function(r){return r.json();}).then(function(d){
           setSending(false);
           if(d.ok||d.id){
             try{var sb2=getSB();if(sb2)sb2.from("crm_orders").update({invoiceSentAt:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
-            addToast("Invoice sent to "+toEmail+(attachments.length?" with PDF":""),"success");
+            addToast("Invoice sent to "+toEmail+(attachments&&attachments.length?" + PDF":""),"success");
             setPreview(false);
             onClose();
           } else { addToast("Send failed: "+(d.error||"Unknown error"),"danger"); }
         }).catch(function(){setSending(false);addToast("Could not reach email server","danger");});
+      }
+
+      // Try to generate PDF with 8s timeout — send without if it fails
+      var pdfDone = false;
+      var pdfTimer = setTimeout(function(){
+        if(!pdfDone){ pdfDone=true; sendWithAttachments([]); }
+      }, 8000);
+
+      buildInvoicePdf(order, cust, products, company, function(err, pdfBase64){
+        if(pdfDone) return;
+        pdfDone = true;
+        clearTimeout(pdfTimer);
+        var attachments = (!err && pdfBase64)
+          ? [{name:"Invoice-"+order.id+".pdf", contentType:"application/pdf", contentBytes:pdfBase64}]
+          : [];
+        sendWithAttachments(attachments);
       });
     } else {
       var ml="mailto:"+toEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body+"\n\nPay online: "+link);
