@@ -1639,54 +1639,77 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
   var cust=(customers||[]).find(function(c2){return c2.id===order.custId;})||{};
   var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
   var grand=order.totals&&order.totals.grand||0;
-  const [toEmail, setToEmail] = useState(cust.email||"");
-  const [subject, setSubject] = useState("Invoice from "+company+" — Order "+order.id);
-  const [body,    setBody]    = useState("Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+"\nTotal Due: $"+grand.toFixed(2)+"\n\nPay online: [PAYMENT_LINK]\n\nThank you,\n"+company);
-  const [link,    setLink]    = useState("");
-  const [copied,  setCopied]  = useState(false);
-  const [sending, setSending] = useState(false);
 
-  function genLink() {
-    if(link) return link;
-    var tok=order.id+"_"+Math.random().toString(36).slice(2,9);
-    var pd={token:tok,status:"pending",orderId:order.id,custId:order.custId,
-      custName:cust.name||"",custEmail:cust.email||"",company:company,
-      items:(order.items||[]).map(function(it){
-        var prod=(products||[]).find(function(p){return p.id===it.prodId;})||{};
-        return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:prod.name||it.prodId||""};
-      }),
-      totals:order.totals||{},createdAt:new Date().toISOString()};
-    try{localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));}catch(e){}
-    var sb=getSB();
-    if(sb){sb.from("crm_pay_tokens").upsert({id:tok,data:pd,created_at:pd.createdAt}).then(function(){});}
-    var l=getSiteUrl()+"#pay="+tok;
-    setLink(l);
-    return l;
+  // Auto-generate link on mount
+  var initTok = order.id+"_"+Math.random().toString(36).slice(2,9);
+  var initPd  = {token:initTok,status:"pending",orderId:order.id,custId:order.custId,
+    custName:cust.name||"",custEmail:cust.email||"",company:company,
+    items:(order.items||[]).map(function(it){
+      var prod=(products||[]).find(function(p){return p.id===it.prodId;})||{};
+      return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:prod.name||it.prodId||""};
+    }),totals:order.totals||{},createdAt:new Date().toISOString()};
+  try{localStorage.setItem("__pv__pay_"+initTok,JSON.stringify(initPd));}catch(e){}
+  var initLink = getSiteUrl()+"#pay="+initTok;
+  var sb0=getSB();if(sb0){sb0.from("crm_pay_tokens").upsert({id:initTok,data:initPd,created_at:initPd.createdAt}).then(function(){});}
+
+  var initBody = "Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+"\nTotal Due: $"+grand.toFixed(2)+"\n\nThank you,\n"+company;
+
+  const [toEmail,  setToEmail]  = useState(cust.email||"");
+  const [subject,  setSubject]  = useState("Invoice from "+company+" — Order "+order.id);
+  const [body,     setBody]     = useState(initBody);
+  const [link]                  = useState(initLink);
+  const [copied,   setCopied]   = useState(false);
+  const [sending,  setSending]  = useState(false);
+  const [preview,  setPreview]  = useState(false);
+
+  function buildEmailHtml(payLink, recipientName, messageText, total, orderid) {
+    var btnColor = "#635bff";
+    return "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+      +"<body style='margin:0;padding:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
+      +"<div style='max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
+      +"<div style='background:"+btnColor+";padding:24px 32px'>"
+      +"<div style='color:#fff;font-size:20px;font-weight:800;letter-spacing:-.03em'>"+company+"</div>"
+      +"<div style='color:rgba(255,255,255,.75);font-size:12px;margin-top:2px'>Invoice &amp; Payment</div>"
+      +"</div>"
+      +"<div style='padding:32px'>"
+      +"<div style='font-size:15px;color:#1a1a2e;line-height:1.7;white-space:pre-line;margin-bottom:28px'>"+messageText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>"
+      +"<div style='background:#f6f9fc;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center'>"
+      +"<div><div style='font-size:11px;color:#6b7c93;font-weight:700;text-transform:uppercase;letter-spacing:.06em'>Order Total</div>"
+      +"<div style='font-size:24px;font-weight:900;color:#1a1a2e'>$"+total+"</div></div>"
+      +"<div style='font-size:12px;color:#6b7c93'>"+orderid+"</div>"
+      +"</div>"
+      +"<div style='text-align:center;margin-bottom:24px'>"
+      +"<a href='"+payLink+"' style='display:inline-block;background:"+btnColor+";color:#fff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:16px;font-weight:800;letter-spacing:-.01em'>💳 Pay $"+total+" Now →</a>"
+      +"</div>"
+      +"<div style='font-size:11px;color:#a0aec0;text-align:center;line-height:1.6'>Secure payment powered by Stripe. Your card details never touch our servers.<br><a href='"+payLink+"' style='color:#635bff;font-size:10px'>"+payLink+"</a></div>"
+      +"</div>"
+      +"<div style='background:#f6f9fc;padding:16px 32px;border-top:1px solid #e8ecef;font-size:11px;color:#a0aec0;text-align:center'>"+company+" · This is an automated invoice email</div>"
+      +"</div></body></html>";
   }
 
   function openMail(){
-    if(!toEmail.trim()){addToast("Enter a customer email address first","warning");return;}
-    var l=genLink();
-    var txt=body.replace("[PAYMENT_LINK]",l);
+    if(!toEmail.trim()){addToast("Enter a customer email first","warning");return;}
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&(cfg.clientSecret||cfg.pass)){
+    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&cfg.clientSecret){
       setSending(true);
+      var html = buildEmailHtml(link, cust.name||"", body, grand.toFixed(2), order.id);
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
           clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
-          to:toEmail.trim(),toEmail:toEmail.trim(),subject:subject,body:txt,message:txt})
+          to:toEmail.trim(),toEmail:toEmail.trim(),
+          subject:subject,body:html,message:html,isHtml:true})
       }).then(function(r){return r.json();}).then(function(d){
         setSending(false);
         if(d.ok||d.id){
-          var upd=Object.assign({},order,{invoiceSentAt:new Date().toISOString()});
-          try{var sb2=getSB();if(sb2)sb2.from("crm_orders").update({invoiceSentAt:upd.invoiceSentAt}).eq("id",order.id).then(function(){});}catch(e){}
+          try{var sb2=getSB();if(sb2)sb2.from("crm_orders").update({invoiceSentAt:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
           addToast("Invoice sent to "+toEmail,"success");
+          setPreview(false);
           onClose();
         } else { addToast("Send failed: "+(d.error||"Unknown error"),"danger"); }
       }).catch(function(){setSending(false);addToast("Could not reach email server","danger");});
     } else {
-      var ml="mailto:"+toEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(txt);
+      var ml="mailto:"+toEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(body+"\n\nPay online: "+link);
       window.open(ml,"_blank");
     }
   }
@@ -1695,18 +1718,35 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     <div style={{padding:"8px 0"}}>
       <div style={{marginBottom:8}}>
         <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>To (Email)</div>
-        <input value={toEmail} onChange={function(e){setToEmail(e.target.value);}} style={{width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"inherit",background:C.bg,color:C.text,boxSizing:"border-box",outline:"none"}}/>
+        <input value={toEmail} onChange={function(e){setToEmail(e.target.value);}}
+          style={{width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"inherit",background:C.bg,color:C.text,boxSizing:"border-box",outline:"none"}}/>
       </div>
       <div style={{marginBottom:8}}>
         <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Payment Link</div>
-        {!link?(<Btn onClick={function(){try{genLink();}catch(e){addToast("Link error: "+e.message,"danger");}}} fullWidth={true}>⚡ Generate Link</Btn>):(
-          <div>
-            <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"6px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",marginBottom:6}}>{link}</div>
-            <Btn small onClick={function(){try{var l2=link||genLink();navigator.clipboard?navigator.clipboard.writeText(l2).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}):window.prompt("Copy:",l2);}catch(e){}}} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-          </div>
-        )}
+        <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"6px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",marginBottom:6}}>{link}</div>
+        <Btn small onClick={function(){try{navigator.clipboard?navigator.clipboard.writeText(link).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}):window.prompt("Copy:",link);}catch(e){}}} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
       </div>
-      <Btn onClick={function(){openMail();}} disabled={sending} fullWidth={true}>{sending?"Sending…":"✉ Send Email →"}</Btn>
+      <Btn onClick={function(){setPreview(true);}} fullWidth={true}>✉ Preview & Send Email</Btn>
+      {preview&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:C.surface,borderRadius:14,width:"100%",maxWidth:600,maxHeight:"90vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontWeight:700,fontSize:14,color:C.text}}>Email Preview</div>
+              <button onClick={function(){setPreview(false);}} style={{border:"none",background:"transparent",color:C.muted,cursor:"pointer",fontSize:18}}>×</button>
+            </div>
+            <div style={{padding:"12px 20px",background:C.surface2,borderBottom:"1px solid "+C.border,fontSize:12,color:C.muted}}>
+              <div><strong style={{color:C.text}}>To:</strong> {toEmail}</div>
+              <div><strong style={{color:C.text}}>Subject:</strong> {subject}</div>
+            </div>
+            <iframe srcDoc={buildEmailHtml(link,cust.name||"",body,grand.toFixed(2),order.id)}
+              style={{width:"100%",height:420,border:"none"}} title="Email Preview"/>
+            <div style={{padding:"12px 20px",borderTop:"1px solid "+C.border,display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <Btn variant="ghost" onClick={function(){setPreview(false);}}>Edit</Btn>
+              <Btn onClick={function(){openMail();}} disabled={sending}>{sending?"Sending…":"✉ Send Email →"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -1717,12 +1757,36 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={function(){onClose();}}>Close</Btn>
           <Btn variant="ghost" onClick={function(){
-            try{var l2=link||genLink();navigator.clipboard?navigator.clipboard.writeText(l2).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");}):window.prompt("Copy:",l2);}catch(e){addToast("Copy failed: "+e.message,"danger");}
+            try{navigator.clipboard?navigator.clipboard.writeText(link).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");}):window.prompt("Copy:",link);}catch(e){}
           }}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-          <Btn onClick={function(){openMail();}} disabled={sending}>{sending?"Sending…":(function(){try{var cfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg2&&cfg2.edgeFnUrl&&(cfg2.clientSecret||cfg2.pass)?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
+          <Btn onClick={function(){setPreview(true);}}>✉ Preview & Send →</Btn>
         </div>
       </div>}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:20}}>
+
+      {/* Preview modal */}
+      {preview&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div style={{background:C.surface,borderRadius:14,width:"100%",maxWidth:620,maxHeight:"90vh",overflow:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.3)"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontWeight:700,fontSize:15,color:C.text}}>✉ Email Preview</div>
+              <button onClick={function(){setPreview(false);}} style={{border:"none",background:"transparent",color:C.muted,cursor:"pointer",fontSize:20,lineHeight:1}}>×</button>
+            </div>
+            <div style={{padding:"10px 20px",background:C.surface2,borderBottom:"1px solid "+C.border,fontSize:12,color:C.muted,lineHeight:2}}>
+              <div><strong style={{color:C.text,minWidth:60,display:"inline-block"}}>To:</strong> {toEmail}</div>
+              <div><strong style={{color:C.text,minWidth:60,display:"inline-block"}}>Subject:</strong> {subject}</div>
+            </div>
+            <iframe srcDoc={buildEmailHtml(link,cust.name||"",body,grand.toFixed(2),order.id)}
+              style={{width:"100%",height:480,border:"none"}} title="Email Preview"/>
+            <div style={{padding:"14px 20px",borderTop:"1px solid "+C.border,display:"flex",gap:10,justifyContent:"flex-end",alignItems:"center"}}>
+              <div style={{fontSize:11,color:C.muted,flex:1}}>Looks good? Click Send to deliver this email.</div>
+              <Btn variant="ghost" onClick={function(){setPreview(false);}}>← Edit</Btn>
+              <Btn onClick={function(){openMail();}} disabled={sending}>{sending?"Sending…":"✉ Send Email →"}</Btn>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:20}}>
         <div>
           <div style={{background:C.surface2,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -1749,23 +1813,17 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
           </div>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Message</div>
-            <textarea value={link ? body.replace("[PAYMENT_LINK]",link) : body} onChange={function(e){setBody(e.target.value);}} rows={9}
+            <textarea value={body} onChange={function(e){setBody(e.target.value);}} rows={7}
               style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
+            <div style={{fontSize:10,color:C.muted,marginTop:4}}>The payment button is added automatically to the email.</div>
           </div>
         </div>
         <div>
           <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:12}}>
-            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:8}}>Payment Link</div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>Secure link — customer pays online, no login needed.</div>
-            {!link?(
-              <Btn onClick={function(){try{genLink();}catch(e){addToast("Link error: "+e.message,"danger");}}} fullWidth={true}>⚡ Generate Link</Btn>
-            ):(
-              <div>
-                <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"7px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",lineHeight:1.6,marginBottom:8}}>{link}</div>
-                <Btn small onClick={function(){try{var l2=link||genLink();navigator.clipboard?navigator.clipboard.writeText(l2).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}):window.prompt("Copy:",l2);}catch(e){}}} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-                <div style={{fontSize:10,color:C.success,marginTop:6,textAlign:"center"}}>✓ Link ready to send</div>
-              </div>
-            )}
+            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:6}}>Payment Link</div>
+            <div style={{fontSize:10,color:C.muted,marginBottom:10,lineHeight:1.6}}>Auto-generated — included as a button in the email.</div>
+            <div style={{background:C.bg,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"7px 10px",fontSize:9,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",lineHeight:1.6,marginBottom:8}}>{link}</div>
+            <Btn small onClick={function(){try{navigator.clipboard?navigator.clipboard.writeText(link).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}):window.prompt("Copy:",link);}catch(e){}}} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
           </div>
           <div style={{background:C.surface2,borderRadius:10,padding:"14px"}}>
             <div style={{fontWeight:700,fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Summary</div>
@@ -1773,8 +1831,7 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
               ["Shipping","$"+((order.totals&&order.totals.shipping)||0).toFixed(2)],
               ["Tax","$"+((order.totals&&order.totals.tax)||0).toFixed(2)],
               ["Total","$"+grand.toFixed(2)]].map(function(row,ri){return (
-              <div key={ri} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6,
-                color:row[0]==="Total"?C.accent:C.muted,fontWeight:row[0]==="Total"?700:400}}>
+              <div key={ri} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6,color:C.muted,fontWeight:row[0]==="Total"?700:400}}>
                 <span style={{color:C.muted}}>{row[0]}</span><span style={{color:row[0]==="Total"?C.accent:C.text}}>{row[1]}</span>
               </div>
             );})}
@@ -1785,7 +1842,6 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
   );
 }
 
-/* ─── FileUpload ─────────────────────────────────────────────────────────── */
 
 function FileUpload({files,onChange,label,maxFiles}) {
   function pick(){
