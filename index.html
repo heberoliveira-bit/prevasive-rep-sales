@@ -1618,128 +1618,44 @@ function AppLanding({onLogin}) {
   );
 }
 
-/* ─── Sidebar Shell ──────────────────────────────────────────────────────── */
-function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount,legalBadge}) {
-  var isAdmin = user&&user.role==="admin";
-  return (
-    <div style={{width:220,flexShrink:0,background:C.bg,
-                 borderRight:"1px solid "+C.border,display:"flex",flexDirection:"column",
-                 height:"100vh",position:"sticky",top:0,overflowY:"auto"}}>
-      {/* Logo */}
-      <div style={{padding:"18px 16px 14px",borderBottom:"1px solid "+C.border}}>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          <div style={{width:26,height:26,borderRadius:6,background:"#635bff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>P</div>
-          <div>
-            <div style={{fontWeight:700,fontSize:13,letterSpacing:"-.02em",color:C.text}}>PreVasive</div>
-            <div style={{fontSize:9,color:"#a49dff",fontWeight:600,letterSpacing:".03em"}}>REP SALES</div>
-          </div>
-        </div>
-      </div>
-      {/* User */}
-      <div style={{padding:"12px 14px",borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",gap:10}}>
-        <Avatar name={user&&user.name} size={30}/>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{user&&user.name}</div>
-          {user&&user._impersonating
-            ?<div style={{fontSize:9,color:C.gold,fontWeight:700}}>👁 Admin: {user._impersonating}</div>
-            :<div style={{fontSize:10,color:C.dim,textTransform:"capitalize"}}>{user&&user.role}</div>}
-        </div>
-        <div style={{width:7,height:7,borderRadius:"50%",background:C.success,flexShrink:0}}/>
-      </div>
-      {/* Nav */}
-      <nav style={{flex:1,padding:"10px 8px"}}>
-        {modules.map(function(m){
-          if(m.divider) return <div key={m.id} style={{height:1,background:C.border,margin:"8px 6px"}} />;
-          if(m.label&&!m.id) return <div key={m.label} style={{fontSize:9,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:".08em",padding:"8px 8px 4px"}}>{m.label}</div>;
-          var isActive = active===m.id;
-          return (
-            <button key={m.id} onClick={function(){onNav(m.id);}}
-              style={{width:"100%",padding:"8px 10px",borderRadius:8,border:"none",
-                      background:isActive?"rgba(99,91,255,.12)":"transparent",
-                      color:isActive?C.accent:C.muted,cursor:"pointer",fontFamily:"inherit",
-                      fontWeight:isActive?600:400,fontSize:13,
-                      display:"flex",alignItems:"center",gap:9,textAlign:"left",
-                      borderLeft:isActive?"2px solid "+C.accent:"2px solid transparent",
-                      marginBottom:2,letterSpacing:"-.01em",transition:"all .12s"}}>
-              <span style={{fontSize:15,opacity:isActive?1:.7}}>{m.icon}</span>
-              <span style={{flex:1}}>{m.name}</span>
-              {m.badge==="legal"&&legalBadge>0&&(
-                <span style={{padding:"1px 6px",borderRadius:10,background:C.warning,
-                              color:"#fff",fontSize:9,fontWeight:800,minWidth:16,textAlign:"center"}}>{legalBadge}</span>
-              )}
-              {m.badge===true&&taskCount>0&&(
-                <span style={{padding:"1px 6px",borderRadius:10,background:C.danger,
-                              color:"#fff",fontSize:9,fontWeight:800,minWidth:16,textAlign:"center"}}>{taskCount}</span>
-              )}
-            </button>
-          );
-        })}
-      </nav>
-      {/* Bottom */}
-      <div style={{padding:"10px 8px",borderTop:"1px solid "+C.border}}>
-        <button onClick={onToggleTheme}
-          style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"none",
-                  background:"transparent",color:C.dim,cursor:"pointer",fontFamily:"inherit",
-                  fontSize:12,display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-          <span>{theme==="dark"?"☀️":"🌙"}</span>
-          {theme==="dark"?"Light Mode":"Dark Mode"}
-        </button>
-        <button onClick={onLogout}
-          style={{width:"100%",padding:"7px 10px",borderRadius:8,border:"none",
-                  background:"transparent",color:C.dim,cursor:"pointer",fontFamily:"inherit",
-                  fontSize:12,display:"flex",alignItems:"center",gap:8}}>
-          <span>↩</span> Sign Out
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
-</script>
-<script id="c2" type="text/plain">
+/* ─── PageHeader ─────────────────────────────────────────────────────────── */
 function PageHeader({title,subtitle,action}) {
   return (
-    <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",
-                 marginBottom:24,flexWrap:"wrap",gap:12}}>
+    <div style={{marginBottom:24,display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
       <div>
-        <h1 style={{fontSize:22,fontWeight:700,color:C.text,letterSpacing:"-.025em",margin:0}}>{title}</h1>
-        {subtitle&&<div style={{fontSize:13,color:C.muted,marginTop:4}}>{subtitle}</div>}
+        <div style={{fontWeight:800,fontSize:22,color:C.text,letterSpacing:"-.03em"}}>{title}</div>
+        {subtitle&&<div style={{fontSize:13,color:C.muted,marginTop:2}}>{subtitle}</div>}
       </div>
       {action&&<div>{action}</div>}
     </div>
   );
 }
 
+/* ─── SendInvoiceModal ───────────────────────────────────────────────────── */
 
-function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast,showResult}) {
-  var cust     = (customers||[]).find(function(x){return x.id===order.custId;})||{name:order.custName||"Customer"};
-  var company  = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
-  var totals   = order.totals||{};
-  var custName = cust.name||order.custName||"Customer";
-  const [toEmail,setToEmail] = useState(cust.email||"");
-  const [subject,setSubject] = useState("Invoice from "+company+" — Order "+order.id);
-  const [body,   setBody]    = useState("Hi "+custName+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+"\nTotal Due: "+fmtMoney(totals.grand||0)+"\n\nPay online: [PAYMENT_LINK]\n\nThank you,\n"+(currentUser&&currentUser.name||company));
-  const [link,   setLink]    = useState("");
-  const [copied, setCopied]  = useState(false);
+</script>
+<script id="c2" type="text/plain">
+function SendInvoiceModal({order,customers,products,currentUser,addToast,showResult,onClose,embedded}) {
+  var cust=(customers||[]).find(function(c2){return c2.id===order.custId;})||{};
+  var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  var grand=order.totals&&order.totals.grand||0;
+  const [toEmail, setToEmail] = useState(cust.email||"");
+  const [subject, setSubject] = useState("Invoice from "+company+" — Order "+order.id);
+  const [body,    setBody]    = useState("Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+"\nTotal Due: $"+grand.toFixed(2)+"\n\nPay online: [PAYMENT_LINK]\n\nThank you,\n"+company);
+  const [link,    setLink]    = useState("");
+  const [copied,  setCopied]  = useState(false);
+  const [sending, setSending] = useState(false);
 
   function genLink() {
     if(link) return link;
     var tok=order.id+"_"+Math.random().toString(36).slice(2,9);
-    var pd={
-      token:tok,status:"pending",
-      orderId:order.id,
-      custId:order.custId,
-      custName:cust.name||"",
-      custEmail:cust.email||"",
-      company:company||"PreVasive USA",
+    var pd={token:tok,status:"pending",orderId:order.id,custId:order.custId,
+      custName:cust.name||"",custEmail:cust.email||"",company:company,
       items:(order.items||[]).map(function(it){
         var prod=(products||[]).find(function(p){return p.id===it.prodId;})||{};
         return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:prod.name||it.prodId||""};
       }),
-      totals:order.totals||{},
-      createdAt:new Date().toISOString()
-    };
+      totals:order.totals||{},createdAt:new Date().toISOString()};
     try{localStorage.setItem("__pv__pay_"+tok,JSON.stringify(pd));}catch(e){}
     var sb=getSB();
     if(sb){sb.from("crm_pay_tokens").upsert({id:tok,data:pd,created_at:pd.createdAt}).then(function(){});}
@@ -1747,7 +1663,7 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     setLink(l);
     return l;
   }
-  function copyLink(){var l=genLink();navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");});}
+
   function openMail(){
     if(!toEmail.trim()){addToast("Enter a customer email address first","warning");return;}
     var l=genLink();
@@ -1755,29 +1671,44 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
     if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&(cfg.clientSecret||cfg.pass)){
-      // Send via Edge Function
-      var repEmail = currentUser&&currentUser.email ? currentUser.email : null;
-      var htmlBody = txt.split("\n").join("<br/>");
-      fetch(cfg.edgeFnUrl,{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          to:toEmail.trim(),
-          subject:subject, html:htmlBody,
-          fromName:cfg.fromName||"PreVasive USA",
-          fromEmail:cfg.fromEmail,
-          tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:cfg.clientSecret,
-        }),
+      setSending(true);
+      fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
+          clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
+          toEmail:toEmail.trim(),subject:subject,body:txt})
       }).then(function(r){return r.json();}).then(function(d){
-        if(d.ok){addToast("✓ Invoice sent to "+toEmail.trim(),"success");onClose();}
-        else{addToast("Email error: "+(d.error||"Unknown — check Edge Function logs"),"danger");}
-      }).catch(function(){addToast("Could not reach email server — check Edge Function URL","danger");});
+        setSending(false);
+        if(d.ok||d.id){
+          var upd=Object.assign({},order,{invoiceSentAt:new Date().toISOString()});
+          try{var sb2=getSB();if(sb2)sb2.from("crm_orders").update({invoiceSentAt:upd.invoiceSentAt}).eq("id",order.id).then(function(){});}catch(e){}
+          addToast("Invoice sent to "+toEmail,"success");
+          onClose();
+        } else { addToast("Send failed: "+(d.error||"Unknown error"),"danger"); }
+      }).catch(function(){setSending(false);addToast("Could not reach email server","danger");});
     } else {
-      // Fallback to mailto:
-      window.open("mailto:"+encodeURIComponent(toEmail)+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(txt),"_blank");
-      addToast("Opening email client… (configure Email in Settings for direct send)","info");
+      var ml="mailto:"+toEmail+"?subject="+encodeURIComponent(subject)+"&body="+encodeURIComponent(txt);
+      window.open(ml,"_blank");
     }
   }
+
+  if(embedded) return (
+    <div style={{padding:"8px 0"}}>
+      <div style={{marginBottom:8}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>To (Email)</div>
+        <input value={toEmail} onChange={function(e){setToEmail(e.target.value);}} style={{width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",fontSize:13,fontFamily:"inherit",background:C.bg,color:C.text,boxSizing:"border-box",outline:"none"}}/>
+      </div>
+      <div style={{marginBottom:8}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Payment Link</div>
+        {!link?(<Btn onClick={function(){try{genLink();}catch(e){addToast("Link error: "+e.message,"danger");}}} fullWidth={true}>⚡ Generate Link</Btn>):(
+          <div>
+            <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"6px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",marginBottom:6}}>{link}</div>
+            <Btn small onClick={function(){try{var l2=link||genLink();navigator.clipboard?navigator.clipboard.writeText(l2).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}):window.prompt("Copy:",l2);}catch(e){}}} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+          </div>
+        )}
+      </div>
+      <Btn onClick={function(){openMail();}} disabled={sending} fullWidth={true}>{sending?"Sending…":"✉ Send Email →"}</Btn>
+    </div>
+  );
 
   return (
     <Modal title="Send Invoice" wide={true} onClose={onClose}
@@ -1786,39 +1717,36 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
         <div style={{display:"flex",gap:8}}>
           <Btn variant="ghost" onClick={function(){onClose();}}>Close</Btn>
           <Btn variant="ghost" onClick={function(){
-            try{
-              var l=genLink();
-              if(navigator.clipboard){
-                navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}).catch(function(){
-                  window.prompt("Copy this link:",l);
-                });
-              } else { window.prompt("Copy this link:",l); }
-            }catch(e){addToast("Copy failed: "+e.message,"danger");}
+            try{var l2=link||genLink();navigator.clipboard?navigator.clipboard.writeText(l2).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2500);addToast("Payment link copied!","success");}):window.prompt("Copy:",l2);}catch(e){addToast("Copy failed: "+e.message,"danger");}
           }}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-          <Btn onClick={function(){openMail();}}>{(function(){try{var cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass)?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
+          <Btn onClick={function(){openMail();}} disabled={sending}>{sending?"Sending…":(function(){try{var cfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}");return cfg2&&cfg2.edgeFnUrl&&(cfg2.clientSecret||cfg2.pass)?"✉ Send Email →":"✉ Open in Mail →";}catch(e){return "✉ Open in Mail →";}})()}</Btn>
         </div>
       </div>}>
-
-      {/* Customer banner */}
-      <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,marginBottom:14}}>
-        <Avatar name={custName} size={38}/>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{fontWeight:700,fontSize:14,color:C.text}}>{custName}</div>
-          {cust.company&&<div style={{fontSize:11,color:C.muted}}>{cust.company}</div>}
-          {cust.email&&<div style={{fontSize:11,color:C.accent}}>{cust.email}</div>}
-        </div>
-        <div style={{textAlign:"right",flexShrink:0}}>
-          <div style={{fontSize:10,color:C.muted,marginBottom:1}}>Total Due</div>
-          <div style={{fontSize:20,fontWeight:900,fontFamily:"monospace",color:C.accent}}>{fmtMoney(totals.grand||0)}</div>
-        </div>
-      </div>
-
-      {!cust.email&&<div style={{padding:"8px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:12,fontSize:12,color:C.warning,fontWeight:600}}>⚠ No email on file — enter one below to send.</div>}
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:20}}>
         <div>
-          <Field label="To (Email)" value={toEmail} onChange={setToEmail} type="email" placeholder="customer@example.com"/>
-          <Field label="Subject" value={subject} onChange={setSubject}/>
+          <div style={{background:C.surface2,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <Avatar name={cust.name||"?"} size={36}/>
+              <div>
+                <div style={{fontWeight:700,fontSize:14,color:C.text}}>{cust.name||"Customer"}</div>
+                <div style={{fontSize:11,color:C.muted}}>{cust.email||""}</div>
+              </div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,color:C.muted,marginBottom:2}}>Total Due</div>
+              <div style={{fontWeight:800,fontSize:18,color:C.accent}}>${grand.toFixed(2)}</div>
+            </div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>To (Email)</div>
+            <input value={toEmail} onChange={function(e){setToEmail(e.target.value);}} placeholder="customer@email.com"
+              style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+          </div>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Subject</div>
+            <input value={subject} onChange={function(e){setSubject(e.target.value);}}
+              style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+          </div>
           <div style={{marginBottom:14}}>
             <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Message</div>
             <textarea value={link ? body.replace("[PAYMENT_LINK]",link) : body} onChange={function(e){setBody(e.target.value);}} rows={9}
@@ -1826,47 +1754,38 @@ function SendInvoiceModal({order,customers,products,currentUser,onClose,addToast
           </div>
         </div>
         <div>
-          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px",marginBottom:14}}>
-            <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>Payment Link</div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>Secure link — customer pays online, no login needed.</div>
+          <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:8}}>Payment Link</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>Secure link — customer pays online, no login needed.</div>
             {!link?(
               <Btn onClick={function(){try{genLink();}catch(e){addToast("Link error: "+e.message,"danger");}}} fullWidth={true}>⚡ Generate Link</Btn>
             ):(
               <div>
                 <div style={{background:C.surface2,border:"1px solid "+C.accent+"30",borderRadius:7,padding:"7px 10px",fontSize:10,fontFamily:"monospace",color:C.accent,wordBreak:"break-all",lineHeight:1.6,marginBottom:8}}>{link}</div>
-                <Btn small onClick={function(){
-                  try{
-                    var l=link||genLink();
-                    if(navigator.clipboard){navigator.clipboard.writeText(l).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}).catch(function(){window.prompt("Copy:",l);});}
-                    else{window.prompt("Copy:",l);}
-                  }catch(e){addToast("Copy failed: "+e.message,"danger");}
-                }} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
-                <div style={{fontSize:10,color:C.success,marginTop:6,fontWeight:600}}>✓ Paste into email or text</div>
+                <Btn small onClick={function(){try{var l2=link||genLink();navigator.clipboard?navigator.clipboard.writeText(l2).then(function(){setCopied(true);setTimeout(function(){setCopied(false);},2000);}):window.prompt("Copy:",l2);}catch(e){}}} fullWidth={true}>{copied?"✓ Copied!":"📋 Copy Link"}</Btn>
+                <div style={{fontSize:10,color:C.success,marginTop:6,textAlign:"center"}}>✓ Link ready to send</div>
               </div>
             )}
           </div>
           <div style={{background:C.surface2,borderRadius:10,padding:"14px"}}>
-            <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Summary</div>
-            {[["Order",order.id],["Customer",custName],["Items",(order.items||[]).length+" item(s)"],
-              totals.discount>0&&["Discount","-"+fmtMoney(totals.discount)],
-              totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
-              totals.tax>0&&["Tax",fmtMoney(totals.tax)],
-              ["Total",fmtMoney(totals.grand||0)],
-            ].filter(Boolean).map(function(row,i,arr){return (
-              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:i<arr.length-1?"1px solid "+C.border:"none"}}>
-                <span style={{color:C.muted}}>{row[0]}</span>
-                <span style={{fontWeight:i===arr.length-1?800:500,color:i===arr.length-1?C.accent:C.text,fontFamily:"monospace"}}>{row[1]}</span>
+            <div style={{fontWeight:700,fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Summary</div>
+            {[["Order",order.id],["Customer",cust.name||"—"],["Items",(order.items||[]).length+" item(s)"],
+              ["Shipping","$"+((order.totals&&order.totals.shipping)||0).toFixed(2)],
+              ["Tax","$"+((order.totals&&order.totals.tax)||0).toFixed(2)],
+              ["Total","$"+grand.toFixed(2)]].map(function(row,ri){return (
+              <div key={ri} style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6,
+                color:row[0]==="Total"?C.accent:C.muted,fontWeight:row[0]==="Total"?700:400}}>
+                <span style={{color:C.muted}}>{row[0]}</span><span style={{color:row[0]==="Total"?C.accent:C.text}}>{row[1]}</span>
               </div>
             );})}
           </div>
-          {cust.termsStatus==="active"&&<div style={{marginTop:10,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>✓ {fmtTerms(cust.termsType||"net_30")} Terms Active</div>}
         </div>
       </div>
     </Modal>
   );
 }
 
-
+/* ─── FileUpload ─────────────────────────────────────────────────────────── */
 
 function FileUpload({files,onChange,label,maxFiles}) {
   function pick(){
@@ -1875,7 +1794,10 @@ function FileUpload({files,onChange,label,maxFiles}) {
       var arr=Array.prototype.slice.call(inp.files||[]);
       arr.forEach(function(f){
         var rd=new FileReader();
-        rd.onload=function(e){onChange(function(prev){var next=(prev||[]).concat([{name:f.name,size:f.size,type:f.type,dataUrl:e.target.result}]);return next.slice(0,maxFiles||5);});};
+        rd.onload=function(e){onChange(function(prev){
+          var next=(prev||[]).concat([{name:f.name,size:f.size,type:f.type,dataUrl:e.target.result}]);
+          return next.slice(0,maxFiles||5);
+        });};
         rd.readAsDataURL(f);
       });
     };
@@ -1897,52 +1819,49 @@ function FileUpload({files,onChange,label,maxFiles}) {
   );
 }
 
-function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
-  const [reqLimit, setReqLimit] = useState("5000");
-  const [reqTerms, setReqTerms] = useState("net_30");
-  const [reason,   setReason]   = useState("");
-  const [bizType,  setBizType]  = useState("");
-  const [annualRev,setAnnualRev]= useState("");
-  const [err,      setErr]      = useState("");
-  const [docs,     setDocs]     = useState([]);
-  function submit() {
-    if(!reason.trim()){setErr("Please provide a reason.");return;}
-    onSubmit({custId:customer.id,custName:customer.name,repId:repId,repName:repName,
-      requestedLimit:parseFloat(reqLimit)||0,requestedTerms:reqTerms,
-      reason:reason.trim(),bizType:bizType.trim(),annualRevenue:annualRev.trim(),
-      documents:docs.map(function(d){return {name:d.name,size:d.size,type:d.type,dataUrl:d.dataUrl};}),
-      submittedAt:new Date().toISOString(),status:"pending"});
-    addToast("Terms request submitted","success"); onClose();
+/* ─── TermsRequestModal ────────────────────────────────────────────────── */
+function TermsRequestModal({customer,repId,repName,onClose,addToast}) {
+  const [termType, setTermType] = useState("net_30");
+  const [limit,    setLimit]    = useState("1000");
+  const [note,     setNote]     = useState("");
+  const [sending,  setSending]  = useState(false);
+  function submit(){
+    setSending(true);
+    var req={id:genId("trq"),custId:customer.id,custName:customer.name,repId:repId,repName:repName,
+      termType:termType,creditLimit:parseFloat(limit)||1000,note:note.trim(),
+      status:"pending",createdAt:new Date().toISOString()};
+    try{var sb=getSB();if(sb)sb.from("crm_terms_requests").upsert({id:req.id,data:req}).then(function(){});}catch(e){}
+    setSending(false);
+    addToast("Terms request submitted for "+customer.name,"success");
+    onClose();
   }
   return (
     <Modal title={"Request Credit Terms — "+customer.name} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={submit}>Submit Request</Btn></div>}>
-      {err&&<div style={{padding:"8px 12px",background:C.danger+"12",borderRadius:6,color:C.danger,fontSize:12,fontWeight:600,marginBottom:12}}>{err}</div>}
-      <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted}}>
-        Requesting credit terms for <strong style={{color:C.text}}>{customer.name}</strong>.
-      </div>
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={submit} disabled={sending}>{sending?"Submitting…":"Submit Request"}</Btn>
+      </div>}>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Drop label="Requested Terms" value={reqTerms} onChange={setReqTerms}
-          opts={[{v:"due_receipt",label:"Due on Receipt"},{v:"net_15",label:"Net 15"},{v:"net_30",label:"Net 30"},{v:"net_45",label:"Net 45"}]}/>
-        <Field label="Credit Limit ($)" value={reqLimit} onChange={setReqLimit} type="number" placeholder="5000"/>
-        <div style={{gridColumn:"1/-1"}}><Field label="Business Type" value={bizType} onChange={setBizType} placeholder="e.g. Medical Clinic"/></div>
-        <div style={{gridColumn:"1/-1"}}><Field label="Annual Revenue ($)" value={annualRev} onChange={setAnnualRev} placeholder="500000"/></div>
-        <div style={{gridColumn:"1/-1"}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Reason *</div>
-          <textarea value={reason} onChange={function(e){setReason(e.target.value);}} rows={3}
-            placeholder="Explain why this customer qualifies for credit terms…"
-            style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Terms Type</div>
+          <select value={termType} onChange={function(e){setTermType(e.target.value);}}
+            style={{width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,outline:"none"}}>
+            <option value="net_30">Net 30</option>
+            <option value="net_60">Net 60</option>
+            <option value="net_90">Net 90</option>
+          </select>
         </div>
+        <Field label="Credit Limit ($)" value={limit} onChange={setLimit} type="number" placeholder="1000"/>
         <div style={{gridColumn:"1/-1"}}>
-          <FileUpload files={docs} onChange={setDocs} label="Supporting Documents (optional)" maxFiles={5}/>
+          <TextArea label="Notes (optional)" value={note} onChange={setNote} rows={3} placeholder="Reason for credit terms request..."/>
         </div>
       </div>
     </Modal>
   );
 }
 
+/* ─── CustomerPaymentPage ──────────────────────────────────────────────── */
 function CustomerPaymentPage({payData,onPaid,onDecline}) {
-  // Support both old format (order/customer objects) and new simplified format
   var order=payData.order||payData,
       customer=payData.customer||{name:payData.custName||"",email:payData.custEmail||""},
       company=payData.company||"PreVasive USA",
@@ -1950,26 +1869,25 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
       items=payData.items||order.items||[],
       products=payData.products||[];
   var isTerms = customer.termsStatus==="active";
-  var stripeConf = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
-  var pubKey = stripeConf.publishableKey||"";
-  var edgeFn = stripeConf.edgeFnUrl||"";
-
-  const [cardHolder, setCardHolder] = useState(customer.name||"");
-  const [agreed,     setAgreed]     = useState(false);
-  const [paying,     setPaying]     = useState(false);
-  const [done,       setDone]       = useState(false);
-  const [err,        setErr]        = useState("");
-  var stripeRefArr = useState({stripe:null,card:null});
-  var stripeRef = stripeRefArr[0];
+  var stripeConf=(function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
+  var pubKey=stripeConf.publishableKey||"";
+  var edgeFn=stripeConf.edgeFnUrl||"";
+  const [cardHolder,setCardHolder]=useState(customer.name||"");
+  const [agreed,setAgreed]=useState(false);
+  const [paying,setPaying]=useState(false);
+  const [done,setDone]=useState(false);
+  const [err,setErr]=useState("");
+  var srArr=useState({stripe:null,card:null});
+  var sr=srArr[0];
 
   useEffect(function(){
     if(isTerms||!pubKey||!window.Stripe) return;
-    var s = window.Stripe(pubKey);
-    stripeRef.stripe = s;
-    var elements = s.elements();
-    var card = elements.create("card",{style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"15px",color:"#1a1a2e","::placeholder":{color:"#a0aec0"}},invalid:{color:"#e53e3e"}}});
+    var s=window.Stripe(pubKey);
+    sr.stripe=s;
+    var elements=s.elements();
+    var card=elements.create("card",{style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"15px",color:"#1a1a2e","::placeholder":{color:"#a0aec0"}},invalid:{color:"#e53e3e"}}});
     card.mount("#cpe-card-element");
-    stripeRef.card = card;
+    sr.card=card;
     card.on("change",function(e){if(e.error){setErr(e.error.message);}else{setErr("");}});
     return function(){card.destroy();};
   },[]);
@@ -1978,42 +1896,30 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
     if(paying) return;
     if(!agreed){setErr("Please agree to the terms.");return;}
     setErr(""); setPaying(true);
-
     if(isTerms){
       onPaid({method:customer.termsType||"net_30",paidAt:new Date().toISOString(),terms:true});
       setDone(true); setPaying(false); return;
     }
-
-    if(!stripeRef.stripe||!stripeRef.card){setErr("Stripe not loaded — contact support.");setPaying(false);return;}
+    if(!sr.stripe||!sr.card){setErr("Stripe not loaded — contact support.");setPaying(false);return;}
     if(!edgeFn){setErr("Payment processor not configured — contact support.");setPaying(false);return;}
-
-    stripeRef.stripe.createPaymentMethod({type:"card",card:stripeRef.card,billing_details:{name:cardHolder}})
+    sr.stripe.createPaymentMethod({type:"card",card:sr.card,billing_details:{name:cardHolder}})
       .then(function(result){
         if(result.error){setErr(result.error.message);setPaying(false);return;}
-        return fetch(edgeFn,{
-          method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({
-            action:"charge",
-            paymentMethodId:result.paymentMethod.id,
-            amount:Math.round((totals.grand||0)*100),
-            currency:"usd",
-            description:company+" — Order "+order.id,
-          }),
+        return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"charge",paymentMethodId:result.paymentMethod.id,
+            amount:Math.round((totals.grand||0)*100),currency:"usd",
+            description:company+" — Order "+(payData.orderId||order.id)})
         }).then(function(r){return r.json();}).then(function(d){
           if(d.ok){
-            onPaid({method:"credit_card",chargeId:d.chargeId,paidAt:new Date().toISOString(),
-              cardRef:{holder:cardHolder}});
+            onPaid({method:"credit_card",chargeId:d.chargeId,paidAt:new Date().toISOString(),cardRef:{holder:cardHolder}});
             setDone(true); setPaying(false);
-          } else {
-            setErr(d.error||"Payment failed — please try again.");
-            setPaying(false);
-          }
+          } else { setErr(d.error||"Payment failed — please try again."); setPaying(false); }
         });
       }).catch(function(e){setErr("Payment error: "+e.message);setPaying(false);});
   }
 
-  var canPay = agreed&&(isTerms||(cardHolder.trim().length>0));
-  var grand = totals.grand||0;
+  var canPay=agreed&&(isTerms||(cardHolder.trim().length>0));
+  var grand=totals.grand||0;
 
   if(done) return (
     <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
@@ -2023,7 +1929,7 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
         <div style={{fontSize:14,color:"#6b7c93",marginBottom:24,lineHeight:1.6}}>
           {isTerms?"Your order is confirmed under "+fmtTerms(customer.termsType||"net_30")+" terms.":"Your payment of $"+grand.toFixed(2)+" has been processed."}
         </div>
-        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",fontSize:13,color:"#6b7c93"}}>Order: <strong style={{color:"#1a1a2e"}}>{order.id}</strong></div>
+        <div style={{background:"#f6f9fc",borderRadius:10,padding:"14px 16px",fontSize:13,color:"#6b7c93"}}>Order: <strong style={{color:"#1a1a2e"}}>{payData.orderId||order.id}</strong></div>
       </div>
     </div>
   );
@@ -2031,18 +1937,14 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
   return (
     <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
       <div style={{maxWidth:520,margin:"0 auto"}}>
-
-        {/* Header */}
         <div style={{textAlign:"center",marginBottom:24}}>
           <div style={{fontWeight:800,fontSize:20,color:"#1a1a2e",marginBottom:4}}>{company}</div>
           <div style={{fontSize:13,color:"#6b7c93"}}>Secure Payment</div>
         </div>
-
-        {/* Order Summary */}
         <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
-          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>Order {order.id}</div>
+          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>Order {payData.orderId||order.id}</div>
           {items.map(function(it,i){
-            var prod=products.find(function(p){return p.id===it.prodId;})||{name:it.prodId,price:it.unitPrice||0};
+            var prod=products.find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||"Item",price:it.unitPrice||0};
             return (
               <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:8}}>
                 <span>{it.qty}× {prod.name}</span>
@@ -2058,151 +1960,164 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
             </div>
           </div>
         </div>
-
-        {/* Payment Form */}
         <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
           {isTerms?(
             <div style={{textAlign:"center",padding:"16px 0"}}>
               <div style={{fontSize:24,marginBottom:8}}>📋</div>
               <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e",marginBottom:4}}>Terms Account</div>
-              <div style={{fontSize:13,color:"#6b7c93",lineHeight:1.6}}>This order will be billed under your <strong>{fmtTerms(customer.termsType||"net_30")}</strong> credit terms. No payment required now.</div>
+              <div style={{fontSize:13,color:"#6b7c93",lineHeight:1.6}}>This order will be billed under your <strong>{fmtTerms(customer.termsType||"net_30")}</strong> credit terms.</div>
             </div>
           ):(
             <div>
               <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14}}>💳 Card Details</div>
-              {!pubKey&&(
-                <div style={{padding:"10px 14px",background:"#fff5f5",border:"1px solid #fed7d7",borderRadius:8,fontSize:12,color:"#e53e3e",marginBottom:12}}>
-                  Payment not configured. Please contact support.
-                </div>
-              )}
+              {!pubKey&&<div style={{padding:"10px 14px",background:"#fff5f5",border:"1px solid #fed7d7",borderRadius:8,fontSize:12,color:"#e53e3e",marginBottom:12}}>Payment not configured. Please contact support.</div>}
               <div style={{marginBottom:12}}>
-                <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Name on Card</div>
-                <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}}
-                  placeholder="Full name" style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"10px 12px",fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"}}/>
+                <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:5}}>Name on Card</div>
+                <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} placeholder="Full name"
+                  style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"10px 12px",fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"}}/>
               </div>
               <div style={{marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Card Number</div>
+                <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:5}}>Card Number</div>
                 <div id="cpe-card-element" style={{border:"1px solid #e8ecef",borderRadius:7,padding:"11px 12px",background:"#fff"}}/>
               </div>
-              <div style={{fontSize:10,color:"#a0aec0",marginTop:4}}>🔒 Secured by Stripe — your card details never touch our servers</div>
+              <div style={{fontSize:10,color:"#a0aec0",marginTop:4}}>🔒 Secured by Stripe</div>
             </div>
           )}
-
           {err&&<div style={{marginTop:12,padding:"8px 12px",background:"#fff5f5",borderRadius:7,fontSize:12,color:"#e53e3e"}}>{err}</div>}
-
           <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:16,cursor:"pointer"}}>
             <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{marginTop:2,accentColor:"#635bff"}}/>
             <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6}}>I confirm this order and authorize payment of <strong style={{color:"#1a1a2e"}}>${grand.toFixed(2)}</strong>.</span>
           </label>
         </div>
-
-        {/* Buttons */}
         <div style={{display:"flex",gap:10}}>
-          <button onClick={onDecline} style={{flex:1,padding:"13px",borderRadius:8,border:"1px solid #e8ecef",background:"#fff",color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14}}>
-            Decline
-          </button>
+          <button onClick={onDecline} style={{flex:1,padding:"13px",borderRadius:8,border:"1px solid #e8ecef",background:"#fff",color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14}}>Decline</button>
           <button onClick={pay} disabled={!canPay||paying}
-            style={{flex:3,padding:"13px",borderRadius:8,border:"none",fontFamily:"inherit",fontWeight:800,fontSize:15,cursor:canPay&&!paying?"pointer":"not-allowed",
+            style={{flex:3,padding:"13px",borderRadius:8,border:"none",fontFamily:"inherit",fontWeight:800,fontSize:15,
+              cursor:canPay&&!paying?"pointer":"not-allowed",
               background:canPay&&!paying?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",
               color:canPay&&!paying?"#fff":"#a0aec0"}}>
             {paying?"Processing…":isTerms?"Confirm Order →":"Pay $"+grand.toFixed(2)+" →"}
           </button>
         </div>
-
       </div>
     </div>
   );
 }
 
-
+/* ─── CustomerSigningPage ──────────────────────────────────────────────── */
 
 </script>
 <script id="c3" type="text/plain">
 function CustomerSigningPage({signingData,onSigned,onDecline}) {
-  var customer=signingData.customer||{},req=signingData.req||{},company=signingData.company||"PreVasive USA";
-  const [signerName,  setSignerName]  = useState("");
-  const [scrolled,    setScrolled]    = useState(false);
-  const [agreed,      setAgreed]      = useState(false);
-  const [done,        setDone]        = useState(false);
-  var termsLabel=fmtTerms(req.approvedTerms||"net_30");
-  var limit="$"+(req.approvedLimit||0).toLocaleString();
-  var canSign=scrolled&&signerName.trim().length>=3&&agreed;
-  function handleScroll(e){var el=e.target;if(el.scrollTop+el.clientHeight>=el.scrollHeight-30) setScrolled(true);}
+  var custName=signingData.custName||"";
+  var repName=signingData.repName||"";
+  var company=signingData.company||"PreVasive USA";
+  var items=signingData.items||[];
+  var totals=signingData.totals||{};
+  const [signerName,setSignerName]=useState(custName);
+  const [agreed,setAgreed]=useState(false);
+  const [scrolled,setScrolled]=useState(false);
+  const [done,setDone]=useState(false);
+
   if(done) return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"Inter,system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderRadius:14,padding:"48px 40px",maxWidth:480,width:"100%",textAlign:"center",boxShadow:"0 8px 32px rgba(0,0,0,.08)"}}>
-        <div style={{width:64,height:64,borderRadius:"50%",background:"#1ea67215",display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,margin:"0 auto 20px"}}>✓</div>
-        <div style={{fontSize:22,fontWeight:800,color:"#1a1a2e",marginBottom:8}}>Agreement Signed</div>
-        <div style={{fontSize:13,color:"#6b7c93",marginBottom:6}}>Thank you, <strong>{signerName}</strong>. Your credit account agreement has been signed.</div>
-        <div style={{marginTop:20,fontSize:11,color:"#a0aec0"}}>You may close this page. Your rep will be notified.</div>
+    <div style={{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{background:"#fff",borderRadius:16,padding:"40px 32px",maxWidth:440,width:"100%",textAlign:"center",boxShadow:"0 8px 40px rgba(0,0,0,.10)"}}>
+        <div style={{fontSize:48,marginBottom:16}}>✅</div>
+        <div style={{fontWeight:800,fontSize:22,color:"#1a1a2e",marginBottom:8}}>Agreement Signed</div>
+        <div style={{fontSize:14,color:"#6b7c93"}}>Thank you, {custName}. Your credit agreement has been signed.</div>
       </div>
     </div>
   );
+
   return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif"}}>
-      <div style={{background:"#fff",borderBottom:"1px solid #e8ecef",padding:"14px 24px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontWeight:700,fontSize:15,color:"#1a1a2e"}}>{company}</div>
-        <div style={{fontSize:11,color:"#6b7c93"}}>Credit Agreement — {termsLabel} · {limit}</div>
-      </div>
-      <div style={{maxWidth:700,margin:"0 auto",padding:"28px 20px"}}>
-        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,overflow:"hidden",marginBottom:20}}>
-          <div style={{padding:"12px 20px",borderBottom:"1px solid #e8ecef",background:"#f6f9fc",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <span style={{fontWeight:700,fontSize:13,color:"#1a1a2e"}}>Credit Account Agreement</span>
-            {!scrolled&&<span style={{fontSize:11,color:"#f6ab2f",fontWeight:600}}>↓ Scroll to bottom to sign</span>}
-            {scrolled&&<span style={{fontSize:11,color:"#1ea672",fontWeight:600}}>✓ Document read</span>}
-          </div>
-          <div onScroll={handleScroll} style={{maxHeight:380,overflowY:"auto",padding:"24px 28px"}}>
-            <div style={{fontSize:13,color:"#1a1a2e",lineHeight:1.9,whiteSpace:"pre-wrap",fontFamily:"Georgia,serif"}}>
-              {generateCreditAgreement(customer,req,signingData.template,company)}
+    <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{maxWidth:560,margin:"0 auto"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#1a1a2e",marginBottom:4}}>{company}</div>
+          <div style={{fontSize:13,color:"#6b7c93"}}>Credit Agreement — Signature Required</div>
+        </div>
+        <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:12}}>Order Summary</div>
+          {items.map(function(it,i){return (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:6}}>
+              <span>{it.qty}× {it.name||it.prodId}</span>
+              <span>${((it.unitPrice||0)*it.qty).toFixed(2)}</span>
             </div>
+          );})}
+          <div style={{borderTop:"1px solid #e8ecef",marginTop:10,paddingTop:10,display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:"#1a1a2e"}}>
+            <span>Total</span><span style={{color:"#635bff"}}>${(totals.grand||0).toFixed(2)}</span>
           </div>
         </div>
-        <div style={{background:"#fff",border:"1px solid #e8ecef",borderRadius:12,padding:"24px 28px"}}>
-          <div style={{fontWeight:800,fontSize:15,color:"#1a1a2e",marginBottom:14}}>Sign this Agreement</div>
-          {!scrolled&&<div style={{padding:"8px 12px",background:"#f6ab2f12",border:"1px solid #f6ab2f25",borderRadius:8,fontSize:12,color:"#f6ab2f",fontWeight:600,marginBottom:12}}>Please scroll through the full document before signing.</div>}
-          <div style={{marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:600,color:"#6b7c93",marginBottom:5}}>Full Legal Name *</div>
-            <input value={signerName} onChange={function(e){setSignerName(e.target.value);}} placeholder="Your full legal name" disabled={!scrolled}
-              style={{width:"100%",border:"1px solid "+(signerName.length>=3&&scrolled?"#1ea672":"#e8ecef"),borderRadius:7,padding:"9px 12px",color:"#1a1a2e",fontSize:14,fontFamily:"Georgia,serif",fontStyle:"italic",boxSizing:"border-box",outline:"none",background:scrolled?"#fff":"#f6f9fc"}}/>
-          </div>
-          <label style={{display:"flex",alignItems:"flex-start",gap:8,marginBottom:18,cursor:"pointer"}}>
-            <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} disabled={!scrolled} style={{marginTop:2,accentColor:"#635bff"}}/>
-            <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6,opacity:scrolled?1:.6}}>I have read and agree to all terms. I am authorized to sign on behalf of {customer.name||"the business"}.</span>
+        <div onScroll={function(e){if(e.target.scrollTop+e.target.clientHeight>=e.target.scrollHeight-20)setScrolled(true);}}
+          style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)",maxHeight:200,overflowY:"auto",fontSize:12,color:"#4a5568",lineHeight:1.8}}>
+          <div style={{fontWeight:700,marginBottom:8,color:"#1a1a2e"}}>Credit Agreement Terms</div>
+          <p>By signing this agreement, {custName} ("Customer") agrees to purchase the above products on credit terms as offered by {company}.</p>
+          <p style={{marginTop:8}}>Customer agrees to pay the full balance within the agreed terms period. Late payments may incur additional fees.</p>
+          <p style={{marginTop:8}}>This agreement is facilitated by {repName} as an authorized representative of {company}.</p>
+          <p style={{marginTop:8,color:"#999"}}>Scroll to bottom to enable signature.</p>
+        </div>
+        <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+          <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:5}}>Full Legal Name (Signature)</div>
+          <input value={signerName} onChange={function(e){setSignerName(e.target.value);}} placeholder="Type your full name"
+            style={{width:"100%",border:"1px solid #e8ecef",borderRadius:7,padding:"10px 12px",fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"}}/>
+          {!scrolled&&<div style={{fontSize:10,color:"#f59e0b",marginTop:6}}>Please read the full agreement above first.</div>}
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:12,cursor:scrolled?"pointer":"not-allowed",opacity:scrolled?1:0.5}}>
+            <input type="checkbox" checked={agreed} disabled={!scrolled} onChange={function(e){setAgreed(e.target.checked);}} style={{marginTop:2}}/>
+            <span style={{fontSize:12,color:"#6b7c93",lineHeight:1.6}}>I have read and agree to the credit agreement terms above.</span>
           </label>
-          <div style={{display:"flex",gap:10}}>
-            <button onClick={onDecline} style={{flex:1,padding:"12px",borderRadius:7,border:"1px solid #e8ecef",background:"#fff",color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>Decline</button>
-            <button onClick={function(){if(!canSign) return;onSigned({signerName:signerName.trim(),signedAt:new Date().toISOString()});setDone(true);}} disabled={!canSign}
-              style={{flex:2,padding:"12px",borderRadius:7,border:"none",background:canSign?"#635bff":"#e8ecef",color:canSign?"#fff":"#a0aec0",cursor:canSign?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:800,fontSize:15}}>
-              {canSign?"Sign Agreement →":"Complete steps above"}
-            </button>
-          </div>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={onDecline} style={{flex:1,padding:"13px",borderRadius:8,border:"1px solid #e8ecef",background:"#fff",color:"#6b7c93",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14}}>Decline</button>
+          <button disabled={!agreed||!signerName.trim()}
+            onClick={function(){onSigned({signerName:signerName,signedAt:new Date().toISOString()});setDone(true);}}
+            style={{flex:3,padding:"13px",borderRadius:8,border:"none",fontFamily:"inherit",fontWeight:800,fontSize:15,
+              cursor:agreed&&signerName.trim()?"pointer":"not-allowed",
+              background:agreed&&signerName.trim()?"linear-gradient(135deg,#635bff,#8b5cf6)":"#e8ecef",
+              color:agreed&&signerName.trim()?"#fff":"#a0aec0"}}>
+            Sign Agreement →
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
+/* ─── PreviewOrderModal ────────────────────────────────────────────────── */
 function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,commRate,payMethod,onClose}) {
   var cust=selCust||{name:custName||"Customer"};
-  var company=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+  var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
   var date=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
   var rate2=parseFloat(commRate)||0;
   function buildHtml(){
-    var rows=items.filter(function(it){return it.prodId;}).map(function(it){
-      var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-      var cup=Math.round(p.price*(1+rate2/100)*100)/100;
+    var rows=(items||[]).filter(function(it){return it.prodId;}).map(function(it){
+      var p=(products||[]).find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
+      var cup=Math.round((it.unitPrice||p.price||0)*100)/100;
       return "<tr><td style='padding:10px 14px;font-weight:600;color:#1a1a2e'>"+p.name+"</td><td style='padding:10px 14px;text-align:right;color:#6b7c93'>"+it.qty+"</td><td style='padding:10px 14px;text-align:right;color:#6b7c93'>$"+cup.toFixed(2)+"</td><td style='padding:10px 14px;text-align:right;font-weight:700;color:#1a1a2e'>$"+(cup*it.qty).toFixed(2)+"</td></tr>";
     }).join("");
-    return "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Preview</title><link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap' rel='stylesheet'><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,sans-serif;background:#f6f9fc;padding:32px 20px}.card{background:#fff;max-width:700px;margin:0 auto;border-radius:14px;border:1px solid #e8ecef;overflow:hidden}table{width:100%;border-collapse:collapse}th{padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600;background:#f6f9fc}</style></head><body>"
-      +"<div style='max-width:700px;margin:0 auto 16px;display:flex;justify-content:space-between'><div style='font-size:12px;color:#6b7c93'>CUSTOMER VIEW PREVIEW</div><button onclick='window.print()' style='padding:6px 12px;border-radius:6px;border:1px solid #e8ecef;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#635bff'>Print</button></div>"
-      +"<div class='card'><div style='padding:20px 24px;border-bottom:1px solid #e8ecef;display:flex;justify-content:space-between'><div style='font-weight:900;font-size:18px;color:#1a1a2e'>"+company+"</div><div style='text-align:right'><div style='font-size:24px;font-weight:900;font-family:monospace;color:#635bff'>$"+((totals.grand||0).toFixed(2))+"</div><div style='font-size:11px;color:#6b7c93'>"+date+"</div></div></div>"
-      +"<div style='padding:14px 24px;background:#f6f9fc;border-bottom:1px solid #e8ecef'><div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Bill To</div><div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+cust.name+"</div>"+(cust.email?"<div style='font-size:12px;color:#6b7c93'>"+cust.email+"</div>":"")+"</div>"
+    return "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Preview</title>"
+      +"<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap' rel='stylesheet'>"
+      +"<style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:Inter,sans-serif;background:#f6f9fc;padding:32px 20px}"
+      +".card{background:#fff;max-width:700px;margin:0 auto;border-radius:14px;border:1px solid #e8ecef;overflow:hidden}"
+      +"table{width:100%;border-collapse:collapse}th{padding:8px 14px;text-align:left;font-size:10px;text-transform:uppercase;"
+      +"letter-spacing:.06em;color:#6b7c93;font-weight:600;background:#f6f9fc}</style></head><body>"
+      +"<div style='max-width:700px;margin:0 auto 16px;display:flex;justify-content:space-between'>"
+      +"<div style='font-size:12px;color:#6b7c93'>CUSTOMER VIEW PREVIEW</div>"
+      +"<button onclick='window.print()' style='padding:6px 12px;border-radius:6px;border:1px solid #e8ecef;background:#fff;cursor:pointer;font-size:12px;font-weight:600;color:#635bff'>Print</button></div>"
+      +"<div class='card'><div style='padding:20px 24px;border-bottom:1px solid #e8ecef;display:flex;justify-content:space-between'>"
+      +"<div style='font-weight:900;font-size:18px;color:#1a1a2e'>"+company+"</div>"
+      +"<div style='text-align:right'><div style='font-size:24px;font-weight:900;font-family:monospace;color:#635bff'>$"+((totals.grand||0).toFixed(2))+"</div>"
+      +"<div style='font-size:11px;color:#6b7c93'>"+date+"</div></div></div>"
+      +"<div style='padding:14px 24px;background:#f6f9fc;border-bottom:1px solid #e8ecef'>"
+      +"<div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Bill To</div>"
+      +"<div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+cust.name+"</div>"
+      +(cust.email?"<div style='font-size:12px;color:#6b7c93'>"+cust.email+"</div>":"")+"</div>"
       +"<table><thead><tr><th>Product</th><th style='text-align:right'>Qty</th><th style='text-align:right'>Price</th><th style='text-align:right'>Total</th></tr></thead><tbody>"+rows+"</tbody></table>"
       +"<div style='padding:14px 24px;border-top:2px solid #e8ecef'>"
       +(totals.discount>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Discount</span><span>-$"+totals.discount.toFixed(2)+"</span></div>":"")
       +(totals.shipping>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Shipping</span><span>$"+totals.shipping.toFixed(2)+"</span></div>":"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Shipping</span><span>Free</span></div>")
       +(totals.tax>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Tax</span><span>$"+totals.tax.toFixed(2)+"</span></div>":"")
-      +"<div style='display:flex;justify-content:space-between;font-size:18px;font-weight:900;color:#635bff'><span>Total</span><span>$"+((totals.grand||0).toFixed(2))+"</span></div></div></div></body></html>";
+      +"<div style='display:flex;justify-content:space-between;font-size:18px;font-weight:900;color:#635bff'><span>Total</span><span>$"+((totals.grand||0).toFixed(2))+"</span></div>"
+      +"</div></div></body></html>";
   }
   return (
     <Modal title="Customer Invoice Preview" wide={true} onClose={onClose}
@@ -2219,49 +2134,97 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
 }
 
 function OrderEditModal({order,products,customers,onSave,onClose}) {
-  const [notes, setNotes] = useState(order.notes||"");
+  const [note,setNote]=useState(order.note||"");
+  const [status,setStatus]=useState(order.status||"Submitted");
+  var S={width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box",outline:"none"};
   return (
     <Modal title={"Edit Order — "+order.id} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={function(){onSave(Object.assign({},order,{notes:notes.trim()}));}}>Save</Btn>
+        <Btn onClick={function(){onSave(Object.assign({},order,{note:note,status:status,updatedAt:new Date().toISOString()}));onClose();}}>Save</Btn>
       </div>}>
-      <div style={{marginBottom:12}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Order Notes</div>
-        <textarea value={notes} onChange={function(e){setNotes(e.target.value);}} rows={4}
-          placeholder="Add notes for this order…"
-          style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:12,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
+      <div style={{display:"grid",gap:12}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Status</div>
+          <select value={status} onChange={function(e){setStatus(e.target.value);}} style={S}>
+            {["Submitted","Processing","Shipped","Delivered","Paid","Cancelled"].map(function(s){return <option key={s} value={s}>{s}</option>;})}
+          </select>
+        </div>
+        <TextArea label="Internal Note" value={note} onChange={setNote} rows={3} placeholder="Add a note..."/>
       </div>
     </Modal>
   );
 }
 
 function OrderDupModal({order,products,customers,reps,setOrders,addToast,showResult,onClose}) {
-  const [repId2, setRepId2] = useState(order.repId||"");
-  function dup(){
-    var nid = genId("ord");
-    var newOrd = Object.assign({},order,{id:nid,repId:repId2,status:"Submitted",createdAt:new Date().toISOString(),paidAt:null,shippedAt:null,trackingNumber:null,carrier:null});
-    setOrders(function(prev){return [newOrd].concat(prev);});
-    dbSave("crm_orders",nid,newOrd);
-    addToast("Order duplicated — "+nid,"success");
-    onClose();
-  }
+  const [custId,setCustId]=useState(order.custId||"");
+  var cust=(customers||[]).find(function(x){return x.id===custId;})||{};
   return (
     <Modal title={"Duplicate Order — "+order.id} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={dup}>Duplicate Order</Btn></div>}>
-      <div style={{fontSize:12,color:C.muted,marginBottom:16,lineHeight:1.6}}>Creates a copy of this order as a new Submitted order.</div>
-      <Drop label="Assign to Rep" value={repId2} onChange={setRepId2}
-        opts={reps.map(function(r){return {v:r.id,label:r.name};})}/>
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={function(){
+          var newOrd=Object.assign({},order,{id:genId("ord"),custId:custId,custName:cust.name||order.custName,createdAt:new Date().toISOString(),status:"Submitted",paidAt:null,invoiceSentAt:null,trackingNum:null});
+          setOrders(function(prev){return [newOrd].concat(prev);});
+          try{var sb=getSB();if(sb)sb.from("crm_orders").upsert({id:newOrd.id,data:newOrd}).then(function(){});}catch(e){}
+          addToast("Order duplicated: "+newOrd.id,"success");
+          onClose();
+        }}>Duplicate Order</Btn>
+      </div>}>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Customer</div>
+        <select value={custId} onChange={function(e){setCustId(e.target.value);}}
+          style={{width:"100%",border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box",outline:"none"}}>
+          <option value="">— Select customer —</option>
+          {(customers||[]).map(function(cu){return <option key={cu.id} value={cu.id}>{cu.name}</option>;})}
+        </select>
+      </div>
+      <div style={{padding:"10px 14px",background:C.surface2,borderRadius:8,fontSize:12,color:C.muted}}>
+        Items: {(order.items||[]).length} · Total: {fmtMoney(order.totals&&order.totals.grand||0)}
+      </div>
     </Modal>
+  );
+}
+
+/* ─── CustomerEditModal ────────────────────────────────────────────────── */
+function MultiAddressManager({addresses,onChange}) {
+  function add(){onChange((addresses||[]).concat([{id:genId("adr"),label:"Address "+(addresses.length+1),address:"",city:"",state:"",zip:"",isPrimary:addresses.length===0}]));}
+  function remove(id){onChange((addresses||[]).filter(function(a){return a.id!==id;}));}
+  function update(id,field,val){onChange((addresses||[]).map(function(a){return a.id===id?Object.assign({},a,{[field]:val}):a;}));}
+  function setPrimary(id){onChange((addresses||[]).map(function(a){return Object.assign({},a,{isPrimary:a.id===id});}));}
+  var inputS={width:"100%",border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",fontSize:12,fontFamily:"inherit",background:C.bg,color:C.text,boxSizing:"border-box",outline:"none"};
+  return (
+    <div>
+      {(addresses||[]).map(function(a,ai){return (
+        <div key={a.id} style={{background:C.surface2,borderRadius:8,padding:"10px 12px",marginBottom:8,border:"1px solid "+(a.isPrimary?C.accent:C.border)}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <input value={a.label||""} onChange={function(e){update(a.id,"label",e.target.value);}} placeholder="Label (e.g. Office)"
+              style={Object.assign({},inputS,{width:120,fontSize:11,fontWeight:600})}/>
+            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              {!a.isPrimary&&<button onClick={function(){setPrimary(a.id);}} style={{fontSize:10,padding:"2px 8px",borderRadius:6,border:"1px solid "+C.accent,background:"transparent",color:C.accent,cursor:"pointer",fontFamily:"inherit"}}>Set Primary</button>}
+              {a.isPrimary&&<span style={{fontSize:10,color:C.accent,fontWeight:700}}>★ Primary</span>}
+              <button onClick={function(){remove(a.id);}} style={{fontSize:12,color:C.danger||"#ef4444",border:"none",background:"transparent",cursor:"pointer",padding:"2px 4px"}}>✕</button>
+            </div>
+          </div>
+          <input value={a.address||""} onChange={function(e){update(a.id,"address",e.target.value);}} placeholder="Street address" style={Object.assign({},inputS,{marginBottom:6})}/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 80px 80px",gap:6}}>
+            <input value={a.city||""} onChange={function(e){update(a.id,"city",e.target.value);}} placeholder="City" style={inputS}/>
+            <input value={a.state||""} onChange={function(e){update(a.id,"state",e.target.value);}} placeholder="State" style={inputS} maxLength={2}/>
+            <input value={a.zip||""} onChange={function(e){update(a.id,"zip",e.target.value);}} placeholder="ZIP" style={inputS}/>
+          </div>
+        </div>
+      );})}
+      <button onClick={add} style={{width:"100%",padding:"7px",borderRadius:8,border:"1px dashed "+C.border,background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>+ Add Address</button>
+    </div>
   );
 }
 
 function CustomerEditModal({customer,onSave,onClose,addToast}) {
   var approved=customer.termsStatus==="active"||customer.termsStatus==="awaiting_signature"||customer.termsStatus==="approved";
+  const [name,      setName]      = useState(customer.name||"");
   const [email,     setEmail]     = useState(customer.email||"");
   const [phone,     setPhone]     = useState(customer.phone||"");
   const [company,   setCompany]   = useState(customer.company||"");
-  const [name,      setName]      = useState(customer.name||"");
   const [addresses, setAddresses] = useState((function(){
     if(customer.addresses&&customer.addresses.length>0) return customer.addresses;
     if(customer.address) return [{id:genId("adr"),label:"Primary",address:customer.address||"",city:customer.city||"",state:customer.state||"",zip:customer.zip||"",isPrimary:true}];
@@ -2285,7 +2248,7 @@ function CustomerEditModal({customer,onSave,onClose,addToast}) {
         <div style={{gridColumn:"1/-1"}}>
           <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Full Name {approved&&<span style={{color:C.warning,fontSize:10}}>🔒 Locked</span>}</div>
           <input value={approved?customer.name:name} onChange={function(e){if(!approved)setName(e.target.value);}} disabled={approved}
-            style={{width:"100%",background:approved?C.surface2:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:approved?C.dim:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",opacity:approved?0.7:1,cursor:approved?"not-allowed":"text"}}/>
+            style={{width:"100%",background:approved?C.surface2:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:approved?C.dim:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
         </div>
         <div style={{gridColumn:"1/-1"}}><Field label="Company / Practice" value={company} onChange={setCompany} placeholder="e.g. Atlanta Medical Group"/></div>
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="email@practice.com"/>
@@ -2300,233 +2263,125 @@ function CustomerEditModal({customer,onSave,onClose,addToast}) {
   );
 }
 
-
-function generateReceiptToken(order, customer, paymentRef, company) {
-  var token = order.id+"_rcpt_"+Math.random().toString(36).slice(2,8);
-  var rData = {token:token,order:order,customer:customer,paymentRef:paymentRef,
-    company:company||"PreVasive USA",paidAt:new Date().toISOString()};
-  localStorage.setItem("__pv__rcpt_"+token,JSON.stringify(rData));
-  return token;
-}
-
-function ReceiptPage({receiptData}) {
-  var order=receiptData.order||{},customer=receiptData.customer||{},
-      company=receiptData.company||"PreVasive USA",totals=order.totals||{},
-      items=order.items||[],paidAt=receiptData.paidAt||new Date().toISOString(),
-      payRef=receiptData.paymentRef||{};
-  var payLabel=payRef.type==="card"?"Credit Card ····"+payRef.last4:payRef.type==="cash"?"Cash":payRef.type==="check"?"Check"+(payRef.ref?" #"+payRef.ref:""):fmtTerms(order.payMethod||"due_receipt");
-  return (
-    <div style={{minHeight:"100vh",background:"#f6f9fc",fontFamily:"Inter,system-ui,sans-serif",padding:"32px 20px"}}>
-      <div style={{maxWidth:520,margin:"0 auto"}}>
-        <div style={{textAlign:"center",marginBottom:24}}>
-          <div style={{width:52,height:52,borderRadius:"50%",background:"#1ea67215",border:"2px solid #1ea67230",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,margin:"0 auto 12px"}}>✓</div>
-          <div style={{fontSize:24,fontWeight:900,color:"#1a1a2e",marginBottom:4}}>Payment Confirmed</div>
-          <div style={{fontSize:13,color:"#6b7c93"}}>Thank you, {customer.name||order.custName||"Customer"}</div>
-        </div>
-        <div style={{background:"#fff",borderRadius:14,border:"1px solid #e8ecef",overflow:"hidden",boxShadow:"0 4px 24px rgba(0,0,0,.06)"}}>
-          <div style={{padding:"16px 22px",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontWeight:900,fontSize:17,color:"#1a1a2e"}}>{company}</div>
-            <div style={{fontFamily:"monospace",fontWeight:700,color:"#635bff",fontSize:13}}>{order.id}</div>
-          </div>
-          <div style={{padding:"14px 22px",background:"#f6fdf9",borderBottom:"1px solid #e8ecef",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div>
-              <div style={{fontSize:10,color:"#6b7c93",marginBottom:1}}>Amount Paid</div>
-              <div style={{fontSize:26,fontWeight:900,fontFamily:"monospace",color:"#1ea672"}}>{fmtMoney(totals.grand||0)}</div>
-            </div>
-            <div style={{textAlign:"right"}}>
-              <div style={{fontSize:12,fontWeight:600,color:"#1a1a2e"}}>{fmtDate(paidAt)}</div>
-              <div style={{fontSize:11,color:"#6b7c93",marginTop:3}}>{payLabel}</div>
-            </div>
-          </div>
-          <div style={{padding:"14px 22px",borderBottom:"1px solid #e8ecef"}}>
-            {items.filter(function(it){return it.prodId;}).map(function(it,i){
-              var cup=it.customerPrice||it.unitPrice||0;
-              return (
-                <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid #f6f9fc"}}>
-                  <span style={{color:"#374151",fontWeight:600}}>{it.productName||it.prodId} ×{it.qty}</span>
-                  <span style={{fontFamily:"monospace",fontWeight:700}}>{fmtMoney(cup*it.qty)}</span>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{padding:"14px 22px",borderBottom:"1px solid #e8ecef"}}>
-            {[totals.discount>0&&["Discount","-"+fmtMoney(totals.discount),"#1ea672"],
-              totals.shipping>0&&["Shipping",fmtMoney(totals.shipping),null],
-              totals.shipping===0&&["Shipping","Free","#1ea672"],
-              totals.tax>0&&["Tax (GA "+(((totals.taxRate||0)*100).toFixed(1))+"%)","+ "+fmtMoney(totals.tax),null],
-              ["Total Paid",fmtMoney(totals.grand||0),"#635bff"],
-            ].filter(Boolean).map(function(row,i,arr){return (
-              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:i===arr.length-1?14:12,
-                fontWeight:i===arr.length-1?900:400,padding:"4px 0",color:row[2]||"#374151",
-                borderTop:i===arr.length-1?"1px solid #e8ecef":"none",fontFamily:i===arr.length-1?"monospace":"inherit"}}>
-                <span style={{color:i===arr.length-1?"#6b7c93":"inherit"}}>{row[0]}</span><span>{row[1]}</span>
-              </div>
-            );})}
-          </div>
-          <div style={{padding:"14px 22px"}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#6b7c93",textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>Billed To</div>
-            <div style={{fontSize:12,color:"#374151",lineHeight:1.8}}>
-              <div style={{fontWeight:700}}>{customer.name||order.custName}</div>
-              {customer.company&&<div>{customer.company}</div>}
-              {customer.email&&<div style={{color:"#6b7c93"}}>{customer.email}</div>}
-            </div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:10,marginTop:14}}>
-          <button onClick={function(){window.print();}} style={{flex:1,padding:"10px",borderRadius:8,border:"1px solid #e8ecef",background:"#fff",color:"#374151",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:12}}>
-            🖨 Print Receipt
-          </button>
-        </div>
-        <div style={{marginTop:14,fontSize:11,color:"#a0aec0",textAlign:"center"}}>{company} · Keep this for your records.</div>
-      </div>
-    </div>
-  );
-}
-
-function MultiAddressManager({addresses,onChange}) {
-  const [adding,  setAdding]  = useState(false);
-  const [editIdx, setEditIdx] = useState(null);
-  const [label,   setLabel]   = useState("");
-  const [addr,    setAddr]    = useState("");
-  const [city,    setCity]    = useState("");
-  const [state2,  setState2]  = useState("");
-  const [zip,     setZip]     = useState("");
-  function resetForm(){setLabel("");setAddr("");setCity("");setState2("");setZip("");}
-  function openAdd(){resetForm();setEditIdx(null);setAdding(true);}
-  function openEdit(i){var a=addresses[i];setLabel(a.label||"");setAddr(a.address||"");setCity(a.city||"");setState2(a.state||"");setZip(a.zip||"");setEditIdx(i);setAdding(true);}
-  function save(){
-    if(!addr.trim()) return;
-    var entry={id:editIdx!==null?addresses[editIdx].id:genId("adr"),label:label.trim()||"Address "+(addresses.length+1),address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),isPrimary:editIdx!==null?addresses[editIdx].isPrimary:addresses.length===0};
-    var updated=editIdx!==null?addresses.map(function(a,i){return i===editIdx?entry:a;}):addresses.concat([entry]);
-    onChange(updated);setAdding(false);resetForm();setEditIdx(null);
-  }
-  function remove(i){var updated=addresses.filter(function(_,j){return j!==i;});if(addresses[i].isPrimary&&updated.length>0) updated[0]=Object.assign({},updated[0],{isPrimary:true});onChange(updated);}
-  function setPrimary(i){onChange(addresses.map(function(a,j){return Object.assign({},a,{isPrimary:j===i});}));}
-  var taxInfo=zip&&getGaTaxRate(zip);
-  return (
-    <div>
-      {addresses.map(function(a,i){return (
-        <div key={a.id||i} style={{background:C.surface,border:"1px solid "+(a.isPrimary?C.accent:C.border),borderRadius:10,padding:"12px 14px",marginBottom:8,boxShadow:a.isPrimary?"0 0 0 2px "+C.accent+"20":undefined}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-            <div style={{flex:1}}>
-              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                <span style={{fontWeight:700,fontSize:13,color:C.text}}>{a.label||"Address"}</span>
-                {a.isPrimary&&<span style={{padding:"1px 6px",borderRadius:10,fontSize:9,fontWeight:700,background:C.accent+"18",color:C.accent}}>PRIMARY</span>}
-              </div>
-              <div style={{fontSize:12,color:C.muted,lineHeight:1.7}}>
-                {a.address&&<div>{a.address}</div>}
-                {[a.city,a.state,a.zip].filter(Boolean).join(", ")&&<div>{[a.city,a.state,a.zip].filter(Boolean).join(", ")}</div>}
-              </div>
-              {a.zip&&getGaTaxRate(a.zip)&&<div style={{fontSize:10,color:C.accent,marginTop:3}}>📍 {getGaTaxRate(a.zip).county} — {((getGaTaxRate(a.zip).rate||0)*100).toFixed(1)}% tax</div>}
-            </div>
-            <div style={{display:"flex",gap:6,flexShrink:0}}>
-              {!a.isPrimary&&<Btn small variant="ghost" onClick={function(){setPrimary(i);}}>Set Primary</Btn>}
-              <Btn small variant="ghost" onClick={function(){openEdit(i);}}>Edit</Btn>
-              <Btn small variant="danger" onClick={function(){remove(i);}}>×</Btn>
-            </div>
-          </div>
-        </div>
-      );})}
-      {adding?(
-        <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px",marginBottom:8}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>{editIdx!==null?"Edit Address":"New Address"}</div>
-          <Field label="Label" value={label} onChange={setLabel} placeholder="e.g. Main Office, Warehouse"/>
-          <PlacesAutocomplete label="Street Address" value={addr} onChange={setAddr}
-            placeholder="123 Medical Dr, Atlanta…"
-            onSelect={function(a){setAddr(a.street);setCity(a.city);setState2(a.state);setZip(a.zip);}}/>
-          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
-            <Field label="City" value={city} onChange={setCity}/>
-            <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
-            <Field label="ZIP" value={zip} onChange={setZip} placeholder="30309"/>
-          </div>
-          {taxInfo&&<div style={{padding:"5px 10px",background:C.accent+"08",borderRadius:6,fontSize:11,color:C.accent,marginBottom:8}}>📍 {taxInfo.county} County — {((taxInfo.rate||0)*100).toFixed(1)}% tax</div>}
-          <div style={{display:"flex",gap:8}}>
-            <Btn small onClick={save} disabled={!addr.trim()}>{editIdx!==null?"Save Changes":"Add Address"}</Btn>
-            <Btn small variant="ghost" onClick={function(){setAdding(false);resetForm();setEditIdx(null);}}>Cancel</Btn>
-          </div>
-        </div>
-      ):(
-        <Btn small variant="ghost" onClick={openAdd}>+ Add Address</Btn>
-      )}
-    </div>
-  );
-}
-
+/* ─── ReceiptPage ──────────────────────────────────────────────────────── */
 
 </script>
 <script id="c4" type="text/plain">
-function CollectPaymentModal({order,onCollect,onClose,addToast}) {
-  var totals=order.totals||{};
-  const [method,     setMethod]     = useState("card");
-  const [cardHolder, setCardHolder] = useState(order.custName||"");
-  const [cardLast4,  setCardLast4]  = useState("");
-  const [cardExpiry, setCardExpiry] = useState("");
-  const [cardZip,    setCardZip]    = useState("");
-  const [ref,        setRef]        = useState("");
-  const [collecting, setCollecting] = useState(false);
-  var canCollect=method==="card"?cardLast4.length===4&&cardExpiry.length===5:ref.trim().length>0;
-  function collect(){
-    if(!canCollect) return;
-    setCollecting(true);
-    var payRef=method==="card"?{type:"card",holder:cardHolder,last4:cardLast4,expiry:cardExpiry,zip:cardZip}:{type:method,ref:ref.trim()};
-    setTimeout(function(){setCollecting(false);onCollect(payRef);addToast("Payment collected — receipt ready","success");onClose();},400);
-  }
+function ReceiptPage({receiptData}) {
+  var ord=receiptData.order||{};
+  var cust=receiptData.customer||{};
+  var company=receiptData.company||"PreVasive USA";
+  var grand=ord.totals&&ord.totals.grand||0;
   return (
-    <Modal title={"Collect Payment — "+order.id} onClose={onClose}
-      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={collect} disabled={!canCollect||collecting}>{collecting?"Processing…":"✓ Confirm Payment Collected"}</Btn>
-      </div>}>
-      <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div style={{fontSize:12,color:C.muted}}>Amount to collect</div>
-        <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:C.success}}>{fmtMoney(totals.grand||0)}</div>
-      </div>
-      <div style={{marginBottom:16}}>
-        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Payment Method</div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
-          {[["card","💳 Credit Card"],["cash","💵 Cash"],["check","📝 Check"]].map(function(opt){
-            var sel=method===opt[0];
-            return (
-              <div key={opt[0]} onClick={function(){setMethod(opt[0]);}}
-                style={{padding:"10px",borderRadius:8,border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent+"08":C.surface2,cursor:"pointer",textAlign:"center"}}>
-                <div style={{fontSize:16,marginBottom:3}}>{opt[1].split(" ")[0]}</div>
-                <div style={{fontSize:11,fontWeight:sel?700:400,color:sel?C.accent:C.muted}}>{opt[1].split(" ").slice(1).join(" ")}</div>
-              </div>
-            );
-          })}
+    <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"32px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{maxWidth:480,margin:"0 auto",background:"#fff",borderRadius:16,padding:"32px",boxShadow:"0 4px 24px rgba(0,0,0,.08)"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontSize:32,marginBottom:8}}>✅</div>
+          <div style={{fontWeight:800,fontSize:20,color:"#1a1a2e"}}>Payment Receipt</div>
+          <div style={{fontSize:13,color:"#6b7c93",marginTop:4}}>{company}</div>
         </div>
-      </div>
-      {method==="card"&&(
-        <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginBottom:14}}>
-          <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>Card Reference</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            <div style={{gridColumn:"1/-1"}}><Field label="Cardholder Name" value={cardHolder} onChange={setCardHolder} placeholder="Jane Smith"/></div>
-            <div>
-              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Last 4 Digits</div>
-              <input value={cardLast4} onChange={function(e){setCardLast4(e.target.value.replace(/\D/g,"").slice(0,4));}} placeholder="4242" maxLength={4}
-                style={{width:"100%",background:C.bg,border:"1px solid "+(cardLast4.length===4?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",letterSpacing:".1em",boxSizing:"border-box",outline:"none"}}/>
+        <div style={{borderTop:"1px solid #e8ecef",paddingTop:16,marginBottom:16}}>
+          {[["Order",ord.id||"—"],["Customer",cust.name||"—"],["Date",fmtDate(receiptData.paidAt||ord.createdAt)],["Amount","$"+grand.toFixed(2)],["Method",receiptData.payMethod||"Card"]].map(function(row,i){return (
+            <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:8,color:i===3?"#1a1a2e":"#4a5568",fontWeight:i===3?700:400}}>
+              <span style={{color:"#6b7c93"}}>{row[0]}</span><span>{row[1]}</span>
             </div>
-            <div>
-              <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:4}}>Expiry (MM/YY)</div>
-              <input value={cardExpiry} onChange={function(e){var v=e.target.value.replace(/\D/g,"");if(v.length>2)v=v.slice(0,2)+"/"+v.slice(2,4);setCardExpiry(v);}} placeholder="12/27" maxLength={5}
-                style={{width:"100%",background:C.bg,border:"1px solid "+(cardExpiry.length===5?C.success:C.border),borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
-            </div>
-          </div>
-          <div style={{marginTop:8,fontSize:10,color:C.dim}}>Reference only — process through your terminal separately.</div>
+          );})}
         </div>
-      )}
-      {(method==="cash"||method==="check")&&(
-        <div style={{marginBottom:14}}>
-          <Field label={method==="check"?"Check Number":"Cash Receipt Reference"} value={ref} onChange={setRef}
-            placeholder={method==="check"?"e.g. Check #1042":"e.g. Receipt #005"}/>
+        <div style={{background:"#f0fdf4",borderRadius:8,padding:"12px 14px",fontSize:12,color:"#16a34a",textAlign:"center",fontWeight:600}}>
+          Payment confirmed. Thank you for your order!
         </div>
-      )}
-      <div style={{padding:"8px 12px",background:C.surface2,borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.7}}>
-        Confirming marks this order as <strong style={{color:C.success}}>Paid</strong> and unlocks fulfillment.
       </div>
-    </Modal>
+    </div>
   );
 }
+
+/* ─── Sidebar ────────────────────────────────────────────────────────────── */
+function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount,legalBadge}) {
+  var isRep = user&&user.role==="rep";
+  var isDark = theme==="dark";
+  return (
+    <div style={{width:220,minWidth:220,minHeight:"100vh",background:C.surface,borderRight:"1px solid "+C.border,
+                 display:"flex",flexDirection:"column",position:"sticky",top:0,height:"100vh",overflowY:"auto",flexShrink:0}}>
+
+      {/* Brand */}
+      <div style={{padding:"20px 18px 14px",borderBottom:"1px solid "+C.border}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:32,height:32,borderRadius:8,background:"linear-gradient(135deg,#635bff,#8b5cf6)",
+                       display:"flex",alignItems:"center",justifyContent:"center",fontWeight:900,fontSize:14,color:"#fff",flexShrink:0}}>P</div>
+          <div>
+            <div style={{fontWeight:800,fontSize:13,color:C.text,letterSpacing:"-.02em",lineHeight:1.2}}>PreVasive</div>
+            <div style={{fontSize:9,color:C.muted,fontWeight:600,letterSpacing:".08em",textTransform:"uppercase"}}>Rep Sales</div>
+          </div>
+        </div>
+      </div>
+
+      {/* User */}
+      {user&&(
+        <div style={{padding:"12px 14px",borderBottom:"1px solid "+C.border}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{position:"relative"}}>
+              <Avatar name={user.name||"?"} size={34}/>
+              <div style={{position:"absolute",bottom:0,right:0,width:9,height:9,borderRadius:"50%",
+                           background:"#22c55e",border:"2px solid "+C.surface}}/>
+            </div>
+            <div style={{overflow:"hidden"}}>
+              <div style={{fontWeight:700,fontSize:12,color:C.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{user.name||"User"}</div>
+              <div style={{fontSize:10,color:C.muted,textTransform:"capitalize"}}>{user._impersonating?"👁 as "+user.name:user.role||"rep"}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nav */}
+      <nav style={{flex:1,padding:"8px 0"}}>
+        {(modules||[]).map(function(m,mi){
+          if(m.divider) return <div key={mi} style={{height:1,background:C.border,margin:"6px 14px"}}/>;
+          if(m.label) return (
+            <div key={mi} style={{padding:"10px 18px 4px",fontSize:9,fontWeight:700,color:C.dim,
+                                   textTransform:"uppercase",letterSpacing:".1em"}}>{m.label}</div>
+          );
+          var isActive = active===m.id;
+          var badge = m.badge===true?taskCount:(m.badge==="legal"?legalBadge:0);
+          return (
+            <button key={m.id} onClick={function(){onNav(m.id);}}
+              style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 18px",
+                      border:"none",background:isActive?"rgba(99,91,255,.12)":"transparent",
+                      color:isActive?C.accent:C.muted,cursor:"pointer",textAlign:"left",
+                      fontFamily:"inherit",fontSize:13,fontWeight:isActive?700:500,
+                      borderLeft:isActive?"2px solid "+C.accent:"2px solid transparent",
+                      transition:"all .15s"}}>
+              <span style={{fontSize:15,width:20,textAlign:"center",flexShrink:0}}>{m.icon}</span>
+              <span style={{flex:1}}>{m.name}</span>
+              {badge>0&&<span style={{background:C.accent,color:"#fff",fontSize:10,fontWeight:700,
+                                      padding:"1px 6px",borderRadius:10,minWidth:18,textAlign:"center"}}>{badge}</span>}
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Bottom */}
+      <div style={{padding:"8px 0",borderTop:"1px solid "+C.border}}>
+        <button onClick={onToggleTheme}
+          style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 18px",
+                  border:"none",background:"transparent",color:C.muted,cursor:"pointer",
+                  fontFamily:"inherit",fontSize:13,fontWeight:500,textAlign:"left"}}>
+          <span style={{fontSize:15,width:20,textAlign:"center"}}>{isDark?"☀️":"🌙"}</span>
+          <span>{isDark?"Light Mode":"Dark Mode"}</span>
+        </button>
+        <button onClick={onLogout}
+          style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 18px",
+                  border:"none",background:"transparent",color:C.muted,cursor:"pointer",
+                  fontFamily:"inherit",fontSize:13,fontWeight:500,textAlign:"left"}}>
+          <span style={{fontSize:15,width:20,textAlign:"center"}}>↩</span>
+          <span>Sign Out</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
+
 
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
   const [carrier,  setCarrier]  = useState("UPS");
@@ -4879,6 +4734,150 @@ function getPaymentStatus(o) {
   }
   return {key:"awaiting",label:"⏳ Awaiting",color:"#6b7280"};
 }
+
+/* ─── CollectPaymentModal ────────────────────────────────────────────────── */
+function CollectPaymentModal({order, customers, products, currentUser, addToast, showResult, setOrders, onClose}) {
+  var cust = (customers||[]).find(function(x){return x.id===order.custId;})||{};
+  var grand = order.totals&&order.totals.grand||0;
+  var stripeConf = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
+  var pubKey = stripeConf.publishableKey||"";
+  var edgeFn = stripeConf.edgeFnUrl||"";
+
+  const [mode,       setMode]       = useState("card"); // card | link | manual
+  const [cardHolder, setCardHolder] = useState(cust.name||"");
+  const [charging,   setCharging]   = useState(false);
+  const [err,        setErr]        = useState("");
+  const [markDate,   setMarkDate]   = useState(new Date().toISOString().slice(0,10));
+  const [markMethod, setMarkMethod] = useState("check");
+  var srArr = useState({stripe:null,card:null});
+  var sr = srArr[0];
+
+  useEffect(function(){
+    if(mode!=="card"||!pubKey||!window.Stripe) return;
+    var s=window.Stripe(pubKey);
+    sr.stripe=s;
+    var el=s.elements();
+    var card=el.create("card",{style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"14px",color:"#1a1a2e","::placeholder":{color:"#a0aec0"}}}});
+    card.mount("#cpm-card-el");
+    sr.card=card;
+    card.on("change",function(e){setErr(e.error?e.error.message:"");});
+    return function(){card.destroy();};
+  },[mode,pubKey]);
+
+  function chargeCard(){
+    if(!sr.stripe||!sr.card){setErr("Stripe not loaded");return;}
+    if(!edgeFn){setErr("Charge Edge Function not configured in Settings → Stripe");return;}
+    setCharging(true); setErr("");
+    sr.stripe.createPaymentMethod({type:"card",card:sr.card,billing_details:{name:cardHolder}})
+      .then(function(res){
+        if(res.error){setErr(res.error.message);setCharging(false);return;}
+        return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"charge",paymentMethodId:res.paymentMethod.id,
+            amount:Math.round(grand*100),currency:"usd",
+            description:"PreVasive — Order "+order.id+" — "+(cust.name||"")})
+        }).then(function(r){return r.json();}).then(function(d){
+          setCharging(false);
+          if(d.ok){
+            var upd=Object.assign({},order,{paidAt:new Date().toISOString(),payMethod:"credit_card",chargeId:d.chargeId,status:"Paid"});
+            setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
+            try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
+            addToast("✓ $"+grand.toFixed(2)+" charged successfully","success");
+            showResult({type:"payment",title:"Payment Collected!",subtitle:"Card charged successfully.",
+              rows:[["Order",order.id],["Amount","$"+grand.toFixed(2)],["Customer",cust.name||""],["Charge ID",d.chargeId||""]],cta:"Done"});
+            onClose();
+          } else { setErr(d.error||"Charge failed"); }
+        });
+      }).catch(function(e){setCharging(false);setErr(e.message);});
+  }
+
+  function markPaid(){
+    var upd=Object.assign({},order,{paidAt:new Date(markDate).toISOString(),payMethod:markMethod,status:"Paid"});
+    setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
+    try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
+    addToast("Order marked as paid","success");
+    onClose();
+  }
+
+  var S = {bg:"#fff",border:"1px solid #e8ecef",br:10,p:"16px 20px",mb:12,fontFamily:"Inter,system-ui,sans-serif"};
+  var inputS = {width:"100%",border:"1px solid #e2e8f0",borderRadius:7,padding:"9px 12px",fontSize:14,fontFamily:"inherit",boxSizing:"border-box",outline:"none",color:"#1a1a2e"};
+
+  return (
+    <Modal title={"Collect Payment — "+order.id} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        {mode==="card"&&<Btn onClick={chargeCard} disabled={charging||!pubKey}>
+          {charging?"Charging…":"Charge $"+grand.toFixed(2)+" →"}
+        </Btn>}
+        {mode==="manual"&&<Btn variant="success" onClick={markPaid}>✓ Mark as Paid</Btn>}
+      </div>}>
+
+      {/* Header */}
+      <div style={{background:"#f8fafc",borderRadius:8,padding:"10px 14px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:13,color:"#4a5568"}}>{cust.name||"Customer"}</div>
+        <div style={{fontWeight:800,fontSize:18,color:"#635bff"}}>${grand.toFixed(2)}</div>
+      </div>
+
+      {/* Mode tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        {[["card","💳 Charge Card"],["link","📧 Send Link"],["manual","✓ Mark Paid"]].map(function(m){
+          return <button key={m[0]} onClick={function(){setMode(m[0]);setErr("");}}
+            style={{flex:1,padding:"9px 6px",borderRadius:8,border:"2px solid "+(mode===m[0]?"#635bff":"#e2e8f0"),
+              background:mode===m[0]?"#635bff10":"#fff",color:mode===m[0]?"#635bff":"#6b7280",
+              cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:12}}>{m[1]}</button>;
+        })}
+      </div>
+
+      {/* Card mode */}
+      {mode==="card"&&(
+        <div>
+          {!pubKey&&<div style={{padding:"10px 14px",background:"#fff5f5",border:"1px solid #fed7d7",borderRadius:8,fontSize:12,color:"#e53e3e",marginBottom:12}}>
+            Stripe not configured — go to Settings → Stripe → Account 1 → Publishable Key
+          </div>}
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:4}}>Name on Card</div>
+            <input value={cardHolder} onChange={function(e){setCardHolder(e.target.value);}} style={inputS} placeholder="Full name"/>
+          </div>
+          <div style={{marginBottom:6}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:4}}>Card Details</div>
+            <div id="cpm-card-el" style={{border:"1px solid #e2e8f0",borderRadius:7,padding:"10px 12px",background:"#fff"}}/>
+          </div>
+          <div style={{fontSize:10,color:"#a0aec0",marginBottom:8}}>🔒 Secured by Stripe</div>
+          {err&&<div style={{padding:"8px 12px",background:"#fff5f5",borderRadius:7,fontSize:12,color:"#e53e3e"}}>{err}</div>}
+        </div>
+      )}
+
+      {/* Link mode */}
+      {mode==="link"&&(
+        <SendInvoiceModal order={order} customers={customers} products={products}
+          currentUser={currentUser} addToast={addToast} showResult={showResult}
+          onClose={onClose} embedded={true}/>
+      )}
+
+      {/* Manual mode */}
+      {mode==="manual"&&(
+        <div>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:4}}>Payment Date</div>
+            <input type="date" value={markDate} onChange={function(e){setMarkDate(e.target.value);}} style={inputS}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,fontWeight:600,color:"#6b7280",marginBottom:4}}>Payment Method</div>
+            <select value={markMethod} onChange={function(e){setMarkMethod(e.target.value);}}
+              style={Object.assign({},inputS,{cursor:"pointer"})}>
+              <option value="check">Check</option>
+              <option value="cash">Cash</option>
+              <option value="wire">Wire Transfer</option>
+              <option value="ach">ACH</option>
+              <option value="credit_card">Credit Card (external)</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResult,currentUser}) {
   const [search,      setSearch]      = useState("");
   const [filter,      setFilter]      = useState("all");
@@ -5009,7 +5008,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                         <div>
                           <div style={{fontSize:11,fontWeight:600,color:ps.color,marginBottom:ps.key!=="paid"?4:0,whiteSpace:"nowrap"}}>{ps.label}</div>
                           {ps.key!=="paid"&&(
-                            <Btn small onClick={function(){setShowSendInv(true);setViewOrder(o);}}>Collect →</Btn>
+                            <Btn small onClick={function(){setCollectTarget2(o);}}>Collect →</Btn>
                           )}
                         </div>
                       );
@@ -5041,23 +5040,12 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
       )}
 
       {collectTarget2&&(
-        <CollectPaymentModal order={collectTarget2} addToast={addToast}
-          onCollect={function(payRef){
-            var co4=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
-            var cust4=customers.find(function(x){return x.id===collectTarget2.custId;})||{name:collectTarget2.custName||""};
-            var rTok2=generateReceiptToken(collectTarget2,cust4,payRef,co4);
-            var rLink2=getSiteUrl()+"#receipt="+rTok2;
-            var updated=addAuditEntry(Object.assign({},collectTarget2,{
-              status:"Paid",paidAt:new Date().toISOString(),
-              paymentRef:payRef,paymentType:payRef.type,
-              receiptToken:rTok2,receiptLink:rLink2,
-            }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
-            onUpdate(updated); setViewOrder(updated);
-            dbSave("crm_orders",collectTarget2.id,updated);
-            setCollectTarget2(null);
-            addToast("Payment collected! Copy receipt link from order detail.","success");
-          }}
+        <CollectPaymentModal order={collectTarget2}
+          customers={customers} products={products}
+          currentUser={currentUser} addToast={addToast} showResult={showResult}
+          setOrders={function(fn){setOrders(fn);onUpdate&&onUpdate(fn([collectTarget2])[0]);}}
           onClose={function(){setCollectTarget2(null);}}/>
+      )}
       )}
       {fulfillTarget2&&(
         <FulfillmentModal order={fulfillTarget2} customers={customers} products={products}
@@ -8189,7 +8177,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
         <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
           <table style={{width:"100%",borderCollapse:"collapse"}}>
             <thead><tr style={{background:C.surface2}}>
-              {["Order","Customer","Date","Total","Commission","Status",""].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
+              {["Order","Customer","Date","Total","Commission","Status","Payment","Shipping",""].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}
             </tr></thead>
             <tbody>
               {filtered.map(function(o){
@@ -8205,6 +8193,38 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                       <span style={{fontSize:12,fontFamily:"monospace",fontWeight:700,color:held?C.warning:C.gold}}>{held?"🔒 ":""}{fmtMoney(o.totals&&o.totals.commission||0)}</span>
                     </td>
                     <td style={{padding:"10px 14px"}}><Badge status={o.status}/></td>
+
+                    {/* Payment Status */}
+                    <td style={{padding:"10px 14px",minWidth:130}} onClick={function(e){e.stopPropagation();}}>
+                      {(function(){
+                        var ps=getPaymentStatus(o);
+                        return (
+                          <div>
+                            <div style={{fontSize:11,fontWeight:600,color:ps.color,marginBottom:ps.key!=="paid"?3:0,whiteSpace:"nowrap"}}>{ps.label}</div>
+                            {ps.key!=="paid"&&(
+                              <Btn small onClick={function(){setShowSendInv(true);}}>Collect →</Btn>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
+
+                    {/* Shipping Status */}
+                    <td style={{padding:"10px 14px",minWidth:120}} onClick={function(e){e.stopPropagation();}}>
+                      {(function(){
+                        var delivered=o.status==="Delivered"||o.shippingStatus==="delivered";
+                        if(delivered) return <div style={{fontSize:11,fontWeight:600,color:"#22c55e"}}>✅ Delivered</div>;
+                        if(o.trackingNum) return (
+                          <div>
+                            <div style={{fontSize:11,fontWeight:600,color:"#3b82f6"}}>🚚 In Transit</div>
+                            <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{o.trackingNum}</div>
+                          </div>
+                        );
+                        if(o.labelCreated) return <div style={{fontSize:11,color:C.muted}}>📦 Label Created</div>;
+                        return <div style={{fontSize:11,color:C.dim}}>— Not Shipped</div>;
+                      })()}
+                    </td>
+
                     <td style={{padding:"10px 14px"}} onClick={function(e){e.stopPropagation();}}>
                       <Btn small variant="ghost" onClick={function(){generateInvoice(o,customers,products,currentUser);}}>⬇</Btn>
                     </td>
