@@ -1095,11 +1095,31 @@ function RepSubscriptionWall({rep,onActivate,onLogout}) {
             );
           })}
         </div>
-        <button onClick={function(){onActivate(selPlan);}}
-          style={{width:"100%",padding:"12px",borderRadius:6,border:"none",background:C.accent,
-                  color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:15,
-                  boxShadow:"0 2px 12px "+C.accent+"40",marginBottom:10,letterSpacing:"-.01em"}}>
-          Activate {(REP_PLANS.find(function(p){return p.id===selPlan;})||REP_PLANS[0]).name} Plan
+        {(function(){
+          var links={}; try{links=JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");}catch(e){}
+          var base = selPlan==="pro"?links.pro:links.starter;
+          var link = base ? base+(base.indexOf("?")>=0?"&":"?")+"client_reference_id="+encodeURIComponent((rep&&rep.id)||"")+"&prefilled_email="+encodeURIComponent((rep&&rep.email)||"") : "";
+          var pl = REP_PLANS.find(function(p){return p.id===selPlan;})||REP_PLANS[0];
+          if(link) return (
+            <a href={link} target="_blank" rel="noopener" onClick={function(){onActivate(selPlan);}}
+              style={{display:"block",textAlign:"center",width:"100%",boxSizing:"border-box",padding:"13px",borderRadius:6,border:"none",
+                      background:C.accent,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:15,
+                      textDecoration:"none",boxShadow:"0 2px 12px "+C.accent+"40",marginBottom:10,letterSpacing:"-.01em"}}>
+              Subscribe to {pl.name} — ${pl.price}/month →
+            </a>
+          );
+          return (
+            <div style={{padding:"12px 14px",borderRadius:8,background:C.warning+"12",border:"1px solid "+C.warning+"30",color:C.warning,fontSize:12,marginBottom:10,lineHeight:1.5}}>
+              Billing isn't set up yet. Please contact your admin to enable subscriptions.
+            </div>
+          );
+        })()}
+        <div style={{fontSize:10,color:C.dim,marginBottom:16}}>Secure checkout via Stripe. After paying, your access unlocks automatically.</div>
+        <button onClick={function(){window.location.reload();}}
+          style={{width:"100%",padding:"10px",borderRadius:6,border:"1px solid "+C.border,
+                  background:C.surface2,color:C.text,cursor:"pointer",fontFamily:"inherit",
+                  fontWeight:600,fontSize:13,marginBottom:8}}>
+          I've subscribed — refresh
         </button>
         <button onClick={onLogout}
           style={{width:"100%",padding:"10px",borderRadius:6,border:"1px solid "+C.border,
@@ -9485,6 +9505,17 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
   }
 
   var plan = repData?REP_PLANS.find(function(p){return p.id===repData.planId;}):null;
+  function switchPlan(newPlanId){
+    if(!repData||newPlanId===repData.planId) return;
+    var target=REP_PLANS.find(function(p){return p.id===newPlanId;});
+    var cur=REP_PLANS.find(function(p){return p.id===repData.planId;});
+    var isDowngrade=target&&cur&&target.price<cur.price;
+    if(isDowngrade&&!window.confirm("Switch to "+target.name+"? Your commission ceiling drops to "+fmtMoney(target.ceiling)+"/mo.")) return;
+    var updated=Object.assign({},repData,{planId:newPlanId});
+    setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
+    dbSave("crm_reps",repData.id,updated);
+    addToast("Switched to "+(target?target.name:newPlanId)+(repData.subscriptionStatus==="active"?" — confirm the new price in Stripe":" — activate billing to start"),isDowngrade?"info":"success");
+  }
   var TABS = [{id:"profile",l:"Profile"},{id:"documents",l:"Documents"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
 
   return (
@@ -9581,12 +9612,18 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                   </div>
                 </div>
                 {/* Plan details */}
-                {[
-                  ["Commission Ceiling", plan?fmtMoney(plan.ceiling)+"/mo":"—"],
-                  ["Billing", repData.subscriptionStatus==="trial"?"Trial period (free)":"$"+(plan?plan.price:0)+"/month"],
-                  ["Trial Started", repData.trialStartedAt?fmtDate(repData.trialStartedAt):"—"],
-                  ["Trial Ends", repData.trialStartedAt?fmtDate(new Date(new Date(repData.trialStartedAt).getTime()+TRIAL_DAYS*24*60*60*1000).toISOString()):"—"],
-                ].map(function(row,i){return (
+                {(function(){
+                  var rows=[["Commission Ceiling", plan?fmtMoney(plan.ceiling)+"/mo":"—"]];
+                  if(repData.subscriptionStatus==="active"){
+                    rows.push(["Billing","$"+(plan?plan.price:0)+"/month"]);
+                    rows.push(["Member since", repData.activatedAt?fmtDate(repData.activatedAt):(repData.trialStartedAt?fmtDate(repData.trialStartedAt):"—")]);
+                  } else {
+                    rows.push(["Billing", repData.subscriptionStatus==="trial"?"Trial period (free)":"$"+(plan?plan.price:0)+"/month"]);
+                    rows.push(["Trial Started", repData.trialStartedAt?fmtDate(repData.trialStartedAt):"—"]);
+                    rows.push(["Trial Ends", repData.trialStartedAt?fmtDate(new Date(new Date(repData.trialStartedAt).getTime()+TRIAL_DAYS*24*60*60*1000).toISOString()):"—"]);
+                  }
+                  return rows;
+                })().map(function(row,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
                                        padding:"6px 0",borderTop:"1px solid "+C.border}}>
                     <span style={{color:C.muted}}>{row[0]}</span>
@@ -9598,12 +9635,14 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
               {/* Stripe subscription action */}
               {(function(){
                 var links = JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
-                var planLink = repData.planId==="pro"?links.pro:links.starter;
+                var baseLink = repData.planId==="pro"?links.pro:links.starter;
+                var planLink = baseLink ? baseLink+(baseLink.indexOf("?")>=0?"&":"?")+"client_reference_id="+encodeURIComponent(repData.id)+"&prefilled_email="+encodeURIComponent((user&&user.email)||repData.email||"") : "";
                 var portalLink = links.portal;
+                var isActive = repData.subscriptionStatus==="active";
                 var hasStripe = !!repData.stripeSubscriptionId;
                 return (
                   <div>
-                    {!hasStripe&&planLink&&(
+                    {!isActive&&planLink&&(
                       <div style={{marginBottom:14}}>
                         <a href={planLink} target="_blank"
                           style={{display:"block",textAlign:"center",padding:"13px",borderRadius:10,
@@ -9617,10 +9656,10 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                         </div>
                       </div>
                     )}
-                    {hasStripe&&(
+                    {isActive&&(
                       <div style={{marginBottom:14,padding:"12px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:10}}>
-                        <div style={{fontWeight:700,fontSize:12,color:C.success,marginBottom:2}}>✓ Stripe subscription active</div>
-                        <div style={{fontSize:11,color:C.muted}}>Billing ID: {repData.stripeSubscriptionId}</div>
+                        <div style={{fontWeight:700,fontSize:12,color:C.success,marginBottom:2}}>✓ Membership active</div>
+                        <div style={{fontSize:11,color:C.muted}}>{hasStripe?("Billing ID: "+repData.stripeSubscriptionId):"Billed monthly via Stripe."}</div>
                       </div>
                     )}
                     {portalLink&&(
@@ -9631,7 +9670,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                         Manage Billing & Invoices →
                       </a>
                     )}
-                    {!planLink&&!hasStripe&&(
+                    {!planLink&&!isActive&&(
                       <div style={{padding:"12px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:10,fontSize:12,color:C.warning}}>
                         ⚠ Stripe payment link not configured yet. Contact your admin to set up billing.
                       </div>
@@ -9654,7 +9693,12 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                         <div style={{fontSize:22,fontWeight:900,fontFamily:"monospace",color:C.text,margin:"6px 0"}}>${p.price}<span style={{fontSize:11,color:C.dim,fontWeight:400}}>/mo</span></div>
                         <div style={{fontSize:11,color:C.muted,marginBottom:8}}>{p.desc}</div>
                         <div style={{fontSize:11,fontWeight:700,color:cur?C.accent:C.muted}}>Commission ceiling: {fmtMoney(p.ceiling)}/mo</div>
-                        {cur&&<div style={{marginTop:8,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.accent+"18",color:C.accent,textAlign:"center"}}>Current Plan</div>}
+                        {cur
+                          ? <div style={{marginTop:8,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:C.accent+"18",color:C.accent,textAlign:"center"}}>Current Plan</div>
+                          : <button onClick={function(){switchPlan(p.id);}}
+                              style={{marginTop:8,width:"100%",padding:"6px",borderRadius:8,border:"1px solid "+C.accent,background:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700}}>
+                              Switch to {p.name}
+                            </button>}
                       </div>
                     );
                   })}
@@ -10442,7 +10486,8 @@ function App() {
   if(trialExpired) return React.createElement(RepSubscriptionWall, {
     rep: myRepData,
     onActivate: function(planId) {
-      var updated = Object.assign({},myRepData,{planId:planId,subscriptionStatus:"active",planActivatedAt:new Date().toISOString()});
+      if(!myRepData) return;
+      var updated = Object.assign({},myRepData,{planId:planId});
       setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?updated:r;});});
       dbSave("crm_reps",myRepData.id,updated);
     },
