@@ -2770,7 +2770,7 @@ function ReceiptPage({receiptData}) {
 }
 
 /* ─── Sidebar ────────────────────────────────────────────────────────────── */
-function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount,legalBadge,helpBadge}) {
+function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount,legalBadge,helpBadge,returnsBadge}) {
   var isRep = user&&user.role==="rep";
   var isDark = theme==="dark";
   return (
@@ -2815,7 +2815,7 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCou
                                    textTransform:"uppercase",letterSpacing:".1em"}}>{m.label}</div>
           );
           var isActive = active===m.id;
-          var badge = m.badge===true?taskCount:(m.badge==="legal"?legalBadge:(m.badge==="help"?helpBadge:0));
+          var badge = m.badge===true?taskCount:(m.badge==="legal"?legalBadge:(m.badge==="help"?helpBadge:(m.badge==="returns"?returnsBadge:0)));
           return (
             <button key={m.id} onClick={function(){onNav(m.id);}}
               style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 18px",
@@ -2971,7 +2971,8 @@ function RepPayModal({order,rep,onConfirm,onClose}) {
 }
 
 
-function ReturnModal({order,currentUser,onProcess,onClose}) {
+function ReturnModal({order,currentUser,onProcess,onClose,mode}) {
+  var isReq = mode==="request";
   const [reason,   setReason]   = useState("");
   const [type,     setType]     = useState("full");
   const [amount,   setAmount]   = useState(String((order.totals&&order.totals.grand||0).toFixed(2)));
@@ -2989,10 +2990,10 @@ function ReturnModal({order,currentUser,onProcess,onClose}) {
   }
 
   return (
-    <Modal title="Process Return" onClose={onClose}
+    <Modal title={isReq?"Request Return / Refund":"Process Return"} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn variant="danger" onClick={process}>Process Return</Btn>
+        {isReq?<Btn onClick={process}>Submit Request</Btn>:<Btn variant="danger" onClick={process}>Process Return</Btn>}
       </div>}>
       <div style={{marginBottom:14,padding:"10px 14px",borderRadius:8,
                    background:inWindow?C.success+"10":C.danger+"10",
@@ -3028,7 +3029,7 @@ function ReturnModal({order,currentUser,onProcess,onClose}) {
       )}
       <TextArea label="Notes (optional)" value={notes} onChange={setNotes} rows={2} placeholder="Additional context…"/>
       <div style={{padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:12,color:C.warning,fontWeight:600}}>
-        ⚠ This will set the order status to Returned and reverse any commission earned.
+        {isReq?"This sends a request to your admin to review and approve. No refund is issued until they approve.":"⚠ This will set the order status to Returned and reverse any commission earned."}
       </div>
     </Modal>
   );
@@ -5527,7 +5528,7 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
   );
 }
 
-function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResult,currentUser}) {
+function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResult,currentUser,returns,setReturns}) {
   const [search,      setSearch]      = useState("");
   const [filter,      setFilter]      = useState("all");
   const [viewOrder,   setViewOrder]   = useState(null);
@@ -5576,16 +5577,32 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
   }
 
   function processReturn(order, ret) {
-    var refundAmt = ret.type==="full"?(order.totals&&order.totals.grand||0):ret.refundAmount;
-    var patch = {status:"Returned",returnedAt:new Date().toISOString(),returnReason:ret.reason,
-                 returnType:ret.type,refundAmount:refundAmt,returnNotes:ret.notes,
-                 totals:Object.assign({},order.totals,{commission:0})};
-    var withAudit = addAuditEntry(Object.assign({},order,patch),"Return processed — "+ret.reason,currentUser&&currentUser.name);
-    onUpdate(withAudit); setViewOrder(withAudit); setShowReturn(false);
-    dbSave("crm_orders",order.id,withAudit);
-    addToast("Return processed for "+order.id,"warning");
-    showResult({type:"error",title:"Return Processed",subtitle:"Order returned. Commission reversed.",
-      rows:[["Order",order.id],["Reason",ret.reason],["Refund",fmtMoney(refundAmt)],["Commission","$0.00 (reversed)"]],cta:"Done"});
+    var patched = applyReturnPatch(order, ret);
+    var refundAmt = patched.refundAmount;
+    function finish(info){
+      var withAudit = addAuditEntry(patched,"Return processed — "+ret.reason,currentUser&&currentUser.name);
+      onUpdate(withAudit); setViewOrder(withAudit); setShowReturn(false);
+      dbSave("crm_orders",order.id,withAudit);
+      var rep=(reps||[]).find(function(x){return (x.rep_id||x.id)===order.repId;})||{};
+      var rec={id:genId("ret"),orderId:order.id,custId:order.custId,custName:order.custName,repId:order.repId,repName:rep.name||order.repName||"",
+        requestedBy:"admin",reason:ret.reason,type:ret.type,amount:refundAmt,notes:ret.notes||"",
+        status:"refunded",refundMethod:info.method,stripeRefundId:info.refundId||"",refundedAt:new Date().toISOString(),
+        refundedBy:currentUser&&currentUser.name,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};
+      if(setReturns) setReturns(function(prev){return [rec].concat(prev);});
+      dbSave("crm_returns",rec.id,rec);
+      addToast("Return processed for "+order.id,"warning");
+      showResult({type:"error",title:"Return Processed",
+        subtitle:info.method==="stripe"?"Refund issued to card. Commission reversed.":"Order returned. Commission reversed.",
+        rows:[["Order",order.id],["Reason",ret.reason],["Refund",fmtMoney(refundAmt)],
+          info.refundId?["Stripe Refund",info.refundId]:["Commission",ret.type==="full"?"$0.00 (reversed)":"prorated"]],cta:"Done"});
+    }
+    if(order.chargeId && refundAmt>0){
+      addToast("Issuing Stripe refund…","info");
+      stripeRefund(order.chargeId, refundAmt).then(function(res){
+        if(res&&res.ok) finish({method:"stripe",refundId:res.refundId});
+        else { addToast("Stripe refund failed: "+((res&&res.error)||"unknown")+" — recorded as manual","danger"); finish({method:"manual"}); }
+      });
+    } else { finish({method: order.payMethod==="credit_card"?"manual":"credit"}); }
   }
 
   return (
@@ -8928,7 +8945,8 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 }
 
 /* ─── Rep Orders ─────────────────────────────────────────────────────────── */
-function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,autoOpen}) {
+function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,returns,setReturns,autoOpen}) {
+  const [showReturn,  setShowReturn]  = useState(false);
   const [showForm,    setShowForm]    = useState(false);
   const [filter,      setFilter]      = useState("all");
   const [viewOrd,     setViewOrd]     = useState(null);
@@ -8939,6 +8957,19 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
   }, [autoOpen]);
   var myOrds = orders.filter(function(o){return o.repId===repId;});
   var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
+
+  function requestReturn(order, ret){
+    var now=new Date().toISOString();
+    var amt=ret.type==="full"?(order.totals&&order.totals.grand||0):(parseFloat(ret.refundAmount)||0);
+    var rec={id:genId("ret"),orderId:order.id,custId:order.custId,custName:order.custName,repId:repId,repName:repName,
+      requestedBy:"rep",reason:ret.reason,type:ret.type,amount:amt,notes:ret.notes||"",
+      status:"requested",createdAt:now,updatedAt:now};
+    if(setReturns) setReturns(function(prev){return [rec].concat(prev);});
+    dbSave("crm_returns",rec.id,rec);
+    try{ _writeNotifRow({key:"refund",repId:"",msg:"💸 Refund request from "+repName+" on "+order.id+" — "+fmtMoney(amt),type:"info"}); }catch(e){}
+    setShowReturn(false); setViewOrd(null);
+    addToast("Refund request submitted for approval","success");
+  }
 
   return (
     <div>
@@ -9067,10 +9098,20 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                 <Btn small variant="ghost" onClick={function(){generateInvoice(viewOrd,customers,products,currentUser);}}>⬇ Invoice</Btn>
                 <Btn small variant="ghost" onClick={function(){var w=window.open("","_blank");var h=generateInvoice(viewOrd,customers,products,currentUser,true);w.document.write(h);w.document.close();setTimeout(function(){w.print();},500);}}>🖨 Print</Btn>
                 <Btn small onClick={function(){setShowSendInv(true);}}>✉ Send to Customer</Btn>
+                {(function(){
+                  var er=(returns||[]).find(function(r){return r.orderId===viewOrd.id;});
+                  if(er){ var sm=returnStatusMeta(er.status); return <span style={{padding:"5px 12px",borderRadius:6,fontSize:11,fontWeight:700,background:sm.bg,color:sm.c,alignSelf:"center"}}>Refund: {sm.label}</span>; }
+                  var elig=(viewOrd.paidAt||["Shipped","Delivered","Paid"].indexOf(viewOrd.status)>=0)&&["Cancelled","Returned","Refunded"].indexOf(viewOrd.status)<0;
+                  return elig?<Btn small variant="ghost" onClick={function(){setShowReturn(true);}}>↩ Request Refund</Btn>:null;
+                })()}
               </div>
             </div>
           </div>
         </Modal>
+      )}
+      {showReturn&&viewOrd&&(
+        <ReturnModal mode="request" order={viewOrd} currentUser={currentUser}
+          onProcess={function(ret){requestReturn(viewOrd,ret);}} onClose={function(){setShowReturn(false);}}/>
       )}
       {showSendInv&&viewOrd&&(
         <CollectPaymentModal order={viewOrd}
@@ -10288,6 +10329,151 @@ function AdminHelpDesk({tickets,setTickets,faqs,setFaqs,reps,orders,currentUser,
   );
 }
 
+/* ═══════════════════════ RETURNS / REFUNDS ═══════════════════════ */
+function returnStatusMeta(s){
+  return ({
+    requested:{label:"Requested",c:C.warning,bg:C.warning+"18"},
+    approved: {label:"Approved", c:C.accent, bg:C.accent+"18"},
+    refunded: {label:"Refunded", c:C.success,bg:C.success+"18"},
+    denied:   {label:"Denied",   c:C.danger, bg:C.danger+"18"},
+  })[s]||{label:s||"—",c:C.muted,bg:C.surface2};
+}
+function retPill(meta,text){return <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:meta.bg,color:meta.c,whiteSpace:"nowrap"}}>{text}</span>;}
+// Call the Stripe refund edge function (full refund if amount omitted/0).
+function stripeRefund(chargeId, amountDollars){
+  return fetch(SUPABASE_URL+"/functions/v1/stripe-refund",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({chargeId:chargeId, amount:amountDollars||0})}).then(function(r){return r.json();}).catch(function(e){return {ok:false,error:String(e)};});
+}
+// Patch an order for a full or partial refund (commission reversed/prorated).
+function applyReturnPatch(order, ret){
+  var grand=order.totals&&order.totals.grand||0;
+  var origComm=order.originalCommission!=null?order.originalCommission:(order.totals&&order.totals.commission||0);
+  var now=new Date().toISOString();
+  if(ret.type==="full"){
+    return Object.assign({},order,{status:"Returned",returnedAt:now,returnReason:ret.reason,returnType:"full",
+      refundAmount:grand,returnNotes:ret.notes||"",originalCommission:origComm,
+      totals:Object.assign({},order.totals,{commission:0})});
+  }
+  var amt=parseFloat(ret.refundAmount)||0, prev=order.refundAmount||0;
+  var totalRefunded=Math.min(grand,prev+amt);
+  var newComm=Math.round(origComm*(1-(grand?totalRefunded/grand:1))*100)/100;
+  return Object.assign({},order,{partiallyRefunded:true,returnedAt:now,returnReason:ret.reason,returnType:"partial",
+    refundAmount:totalRefunded,returnNotes:ret.notes||"",originalCommission:origComm,
+    totals:Object.assign({},order.totals,{commission:newComm})});
+}
+
+function ReturnReviewModal({rec,order,busy,onApprove,onDeny,onClose}){
+  const [denying,setDenying]=useState(false);
+  const [note,setNote]=useState("");
+  var sm=returnStatusMeta(rec.status);
+  var rows=[["Order",rec.orderId],["Customer",rec.custName||"—"],["Rep",rec.repName||"—"],
+            ["Reason",rec.reason||"—"],["Type",rec.type==="full"?"Full refund":"Partial refund"],
+            ["Amount",fmtMoney(rec.amount||0)],["Requested by",rec.requestedBy==="rep"?"Rep":"Admin"]];
+  return (
+    <Modal title={"Refund · "+rec.orderId} onClose={onClose}
+      footer={rec.status==="requested"
+        ?(denying
+          ?<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" small onClick={function(){setDenying(false);}}>Back</Btn><Btn variant="danger" small onClick={function(){onDeny(note);}}>Confirm Deny</Btn></div>
+          :<div style={{display:"flex",gap:8,justifyContent:"space-between"}}><Btn variant="ghost" small onClick={function(){setDenying(true);}}>Deny</Btn><Btn small disabled={busy} onClick={onApprove}>{busy?"Processing…":((order&&order.chargeId)?"Approve & Refund to Card":"Approve & Refund")}</Btn></div>)
+        :<div style={{display:"flex",justifyContent:"flex-end"}}><Btn variant="ghost" small onClick={onClose}>Close</Btn></div>}>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>{retPill(sm,sm.label)}<span style={{fontSize:11,color:C.dim}}>{tktWhen(rec.updatedAt||rec.createdAt)}</span></div>
+      {rows.map(function(r,i){return (
+        <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"6px 0",borderBottom:"1px solid "+C.border}}>
+          <span style={{color:C.muted}}>{r[0]}</span><span style={{fontWeight:600,color:C.text}}>{r[1]}</span>
+        </div>
+      );})}
+      {rec.notes&&<div style={{marginTop:12,padding:"10px",background:C.surface2,borderRadius:8,fontSize:12,color:C.muted}}>{rec.notes}</div>}
+      {rec.status==="refunded"&&<div style={{marginTop:12,padding:"10px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:12,color:C.success}}>Refunded via {rec.refundMethod==="stripe"?"Stripe":(rec.refundMethod==="credit"?"invoice credit":"manual")}{rec.stripeRefundId?(" · "+rec.stripeRefundId):""}{rec.refundedBy?(" · by "+rec.refundedBy):""}</div>}
+      {rec.status==="denied"&&<div style={{marginTop:12,padding:"10px 12px",background:C.danger+"10",border:"1px solid "+C.danger+"25",borderRadius:8,fontSize:12,color:C.danger}}>Denied{rec.denyNote?(": "+rec.denyNote):""}</div>}
+      {rec.status==="requested"&&!order&&<div style={{marginTop:12,padding:"10px 12px",background:C.danger+"10",borderRadius:8,fontSize:12,color:C.danger}}>⚠ Linked order not found.</div>}
+      {rec.status==="requested"&&order&&!order.chargeId&&<div style={{marginTop:12,padding:"10px 12px",background:C.warning+"10",borderRadius:8,fontSize:12,color:C.warning}}>Not a card payment — approving records a credit/manual refund (no Stripe charge to reverse).</div>}
+      {denying&&<div style={{marginTop:12}}><TextArea label="Reason for denial (optional)" value={note} onChange={setNote} rows={2}/></div>}
+    </Modal>
+  );
+}
+
+function AdminReturns({returns,setReturns,orders,setOrders,reps,currentUser,addToast}){
+  const [filter,setFilter]=useState("all");
+  const [active,setActive]=useState(null);
+  const [busy,setBusy]=useState(false);
+  function saveRec(r){ setReturns(function(prev){return prev.some(function(x){return x.id===r.id;})?prev.map(function(x){return x.id===r.id?r:x;}):[r].concat(prev);}); dbSave("crm_returns",r.id,r); if(active&&active.id===r.id)setActive(r); }
+  function repEmail(repId){var r=(reps||[]).find(function(x){return (x.rep_id||x.id)===repId;});return r?r.email:"";}
+  function notifyRep(rec,msg,html,subject){
+    try{
+      var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+      var to=repEmail(rec.repId), canSend=to&&html&&cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass);
+      if(canSend){ fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:to,subject:subject||"Refund update",html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){}); _writeNotifRow({key:"refund",repId:rec.repId,msg:msg,type:"info"}); }
+      else { _writeNotifRow({key:"refund",to:to||"",emailSubject:subject||"",emailHtml:html||"",emailPending:!!(to&&html),repId:rec.repId,msg:msg,type:"info"}); }
+    }catch(e){}
+  }
+  function approve(rec){
+    var order=(orders||[]).find(function(o){return o.id===rec.orderId;});
+    if(!order){ addToast("Linked order not found","danger"); return; }
+    var ret={reason:rec.reason,type:rec.type,refundAmount:rec.amount,notes:rec.notes};
+    setBusy(true);
+    function finish(info){
+      var patched=applyReturnPatch(order,ret);
+      if(setOrders) setOrders(function(prev){return prev.map(function(o){return o.id===order.id?patched:o;});});
+      dbSave("crm_orders",order.id,patched);
+      var up=Object.assign({},rec,{status:"refunded",refundMethod:info.method,stripeRefundId:info.refundId||"",refundedAt:new Date().toISOString(),refundedBy:currentUser&&currentUser.name,updatedAt:new Date().toISOString()});
+      saveRec(up); setBusy(false);
+      notifyRep(up,"💸 Refund "+(info.method==="stripe"?"issued to card":"recorded")+" on "+rec.orderId+" — "+fmtMoney(rec.amount),
+        notifEmailHtml("PreVasive USA","Refund processed","<p>Your refund request on order <strong>"+rec.orderId+"</strong> was approved.</p><p>Amount: <strong>"+fmtMoney(rec.amount)+"</strong></p>",null,null,"#1ea672"),
+        "Refund processed: "+rec.orderId);
+      addToast("Refund processed for "+rec.orderId,"success");
+    }
+    if(order.chargeId && rec.amount>0){
+      addToast("Issuing Stripe refund…","info");
+      stripeRefund(order.chargeId,rec.amount).then(function(res){
+        if(res&&res.ok) finish({method:"stripe",refundId:res.refundId});
+        else { addToast("Stripe refund failed: "+((res&&res.error)||"unknown")+" — recorded as manual","danger"); finish({method:"manual"}); }
+      });
+    } else { finish({method: order.payMethod==="credit_card"?"manual":"credit"}); }
+  }
+  function deny(rec,note){
+    var up=Object.assign({},rec,{status:"denied",denyNote:note||"",deniedBy:currentUser&&currentUser.name,updatedAt:new Date().toISOString()});
+    saveRec(up);
+    notifyRep(up,"Refund request on "+rec.orderId+" was denied",
+      notifEmailHtml("PreVasive USA","Refund request denied","<p>Your refund request on order <strong>"+rec.orderId+"</strong> was not approved."+(note?(" Reason: "+tktSafe(note)):"")+"</p>",null,null,"#ef4444"),
+      "Refund request update: "+rec.orderId);
+    addToast("Request denied","info");
+  }
+  var list=(returns||[]).slice().sort(function(a,b){return (b.updatedAt||b.createdAt||"").localeCompare(a.updatedAt||a.createdAt||"");});
+  if(filter!=="all") list=list.filter(function(r){return r.status===filter;});
+  var pending=(returns||[]).filter(function(r){return r.status==="requested";}).length;
+  return (
+    <div>
+      <PageHeader title="Returns & Refunds" subtitle={(returns||[]).length+" total"+(pending?(" · "+pending+" awaiting review"):"")}/>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18}}>
+        {[["all","All"],["requested","Requested"],["refunded","Refunded"],["denied","Denied"]].map(function(s){
+          var act=filter===s[0];
+          return <button key={s[0]} onClick={function(){setFilter(s[0]);}} style={{padding:"6px 12px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:act?700:500,background:act?C.accent+"18":"transparent",color:act?C.accent:C.muted}}>{s[1]}</button>;
+        })}
+      </div>
+      {list.length?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {list.map(function(r){
+            var sm=returnStatusMeta(r.status);
+            return (
+              <button key={r.id} onClick={function(){setActive(r);}}
+                style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderRadius:10,cursor:"pointer",textAlign:"left",fontFamily:"inherit",background:C.surface,border:"1px solid "+(r.status==="requested"?C.warning+"55":C.border)}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:3}}><span style={{fontFamily:"monospace",color:C.accent}}>{r.orderId}</span> · {r.custName||"—"}</div>
+                  <div style={{fontSize:11,color:C.dim}}>{r.repName} · {r.reason} · {r.type==="full"?"Full":"Partial"} · {tktWhen(r.updatedAt||r.createdAt)}</div>
+                </div>
+                <span style={{fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.text}}>{fmtMoney(r.amount||0)}</span>
+                {retPill(sm,sm.label)}
+              </button>
+            );
+          })}
+        </div>
+      ):<EmptyState icon="↩️" title="No refund requests" subtitle="Rep requests and processed refunds will show here."/>}
+      {active&&<ReturnReviewModal rec={active} order={(orders||[]).find(function(o){return o.id===active.orderId;})} busy={busy}
+        onApprove={function(){approve(active);}} onDeny={function(note){deny(active,note);}} onClose={function(){setActive(null);}}/>}
+    </div>
+  );
+}
+
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -10306,6 +10492,7 @@ function App() {
   const [notifications, setNotifications] = useState([]);
   const [tickets,       setTickets]       = useState([]);
   const [faqs,          setFaqs]          = useState([]);
+  const [returns,       setReturns]       = useState([]);
   const [showHelp,      setShowHelp]      = useState(false);
   const [showSearch,    setShowSearch]    = useState(false);
   function addNotification(msg,type){
@@ -10610,6 +10797,7 @@ function App() {
     dbLoad("crm_payout_requests").then(function(d){if(alive) setPayoutRequests(d);});
     dbLoad("crm_tickets").then(function(d){if(alive) setTickets(d);});
     dbLoad("crm_faq").then(function(d){if(alive) setFaqs(d);});
+    dbLoad("crm_returns").then(function(d){if(alive) setReturns(d);});
     dbLoad("crm_notifications").then(function(d){if(alive){
       var rid=currentUser.rep_id||currentUser.id;
       var mine=(currentUser.role==="admin")?d:d.filter(function(n){return n.repId===rid;});
@@ -10892,6 +11080,7 @@ function App() {
     {id:"legal",       name:"Legal & Compliance", icon:"⚖️", badge:"legal"},
     {id:"commissions",name:"Commissions", icon:"💰"},
     {id:"helpdesk",    name:"Help Desk",   icon:"🎧", badge:"help"},
+    {id:"returns",     name:"Returns",     icon:"↩️", badge:"returns"},
     {id:"settings",   name:"Settings",    icon:"⚙️"},
   ];
 
@@ -10924,7 +11113,8 @@ function App() {
         }).length:0}
         helpBadge={isAdmin
           ? (tickets||[]).filter(function(t){return t.lastBy==="rep"&&t.status!=="closed"&&t.status!=="resolved";}).length
-          : (tickets||[]).filter(function(t){return t.repId===(effectiveUser.rep_id||effectiveUser.id)&&t.lastBy==="admin"&&t.status!=="closed";}).length}/>
+          : (tickets||[]).filter(function(t){return t.repId===(effectiveUser.rep_id||effectiveUser.id)&&t.lastBy==="admin"&&t.status!=="closed";}).length}
+        returnsBadge={isAdmin?(returns||[]).filter(function(r){return r.status==="requested";}).length:0}/>
 
       <div style={{display:"flex",flexDirection:"column",flex:1,minWidth:0}}>
       <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:8,padding:"10px 20px 0",flexShrink:0}}>
@@ -10962,7 +11152,8 @@ function App() {
         {isAdmin&&activeTab==="orders"&&(
           <AdminOrders orders={orders} reps={reps} customers={customers} products={products}
             onUpdate={function(updated){setOrders(function(prev){return prev.map(function(o){return o.id===updated.id?updated:o;});});}}
-            addToast={addToast} showResult={showResult} currentUser={currentUser}/>
+            addToast={addToast} showResult={showResult} currentUser={currentUser}
+            returns={returns} setReturns={setReturns}/>
         )}
         {isAdmin&&activeTab==="customers"&&(
           <AdminCustomers customers={customers} setCustomers={setCustomers} reps={reps} orders={orders} addToast={addToast}/>
@@ -11017,6 +11208,11 @@ function App() {
             reps={reps} orders={orders} currentUser={currentUser} addToast={addToast}/>
         )}
 
+        {isAdmin&&activeTab==="returns"&&(
+          <AdminReturns returns={returns} setReturns={setReturns} orders={orders} setOrders={setOrders}
+            reps={reps} currentUser={currentUser} addToast={addToast}/>
+        )}
+
         {/* Rep Modules */}
         {!isAdmin&&activeTab==="dashboard"&&(
           <RepDashboard repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
@@ -11028,6 +11224,7 @@ function App() {
             setOrders={setOrders} setCustomers={setCustomers}
             addToast={addToast} showResult={showResult} discountCodes={discountCodes}
             shippingRules={shippingRules}
+            returns={returns} setReturns={setReturns}
             autoOpen={activeTab==="new_order"}/>
         )}
         {!isAdmin&&activeTab==="customers"&&(
