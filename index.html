@@ -1674,6 +1674,8 @@ function AppLanding({onLogin}) {
                   setRegDone(true);
                   notifyEmail("newApp",getAdminNotifyEmail(),"New rep application — "+(data.name||""),
                     notifEmailHtml("PreVasive USA","New application","<p><strong>"+(data.name||"Someone")+"</strong> applied to become a sales rep.</p><p style='color:#6b7c93;font-size:13px'>Email: "+(data.email||"—")+"<br>Phone: "+(data.phone||"—")+"<br>Company: "+(data.company||"—")+"<br>Location: "+([data.city,data.state].filter(Boolean).join(", ")||"—")+(data.territory?("<br>Territory: "+data.territory):"")+"</p><p>Review them in the Reps → Applications tab.</p>","#635bff"));
+                  sendRepEmail((data.email||""),"We received your application — PreVasive USA",
+                    notifEmailHtml("PreVasive USA","Application received","<p>Hi "+(data.name||"there")+",</p><p>Thanks for applying to join PreVasive USA as a sales rep. Your application is <strong>under review</strong> — we'll email you a link to set up your account and password once it's approved.</p>",null,null,"#635bff"));
                 }} onCancel={function(){setShowReg(false);}}/>
               </div>
             )}
@@ -3227,6 +3229,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
       phone:app.phone||"",address:app.address||"",city:app.city||"",state:app.state||"",zip:app.zip||"",territory:app.territory||"",
       status:"active",subscriptionStatus:"trial",trialStartedAt:new Date().toISOString(),
       planId:"starter",createdAt:new Date().toISOString()};
+    sendSetPasswordEmail(newRep);
     setReps(function(prev){return [newRep].concat(prev);});
     dbSave("crm_reps",id,newRep);
     var updated = Object.assign({},app,{status:"approved"});
@@ -6174,10 +6177,11 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 
   function approve(rep) {
     var updated = Object.assign({},rep,{status:"active",approvedAt:new Date().toISOString()});
+    sendSetPasswordEmail(updated);
     setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
     dbSave("crm_reps",rep.id,updated);
     addToast(rep.name+" approved","success");
-    showResult({type:"rep",title:"Rep Approved",subtitle:rep.name+" can now log in and place orders.",rows:[["Name",rep.name],["Email",rep.email],["Status","Active ✓"]],cta:"Done"});
+    showResult({type:"rep",title:"Rep Approved",subtitle:rep.name+" has been emailed a link to set their password and log in.",rows:[["Name",rep.name],["Email",rep.email],["Status","Active ✓"]],cta:"Done"});
   }
 
   function suspend(rep) {
@@ -6347,14 +6351,12 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
                                   status:"active",subscriptionStatus:"trial",
                                   trialStartedAt:new Date().toISOString(),planId:"starter",
                                   createdAt:new Date().toISOString()};
+                                sendSetPasswordEmail(newRep);
                                 setReps(function(prev){return [newRep].concat(prev);});
                                 dbSave("crm_reps",id,newRep);
                                 var updated = Object.assign({},app,{status:"approved"});
                                 setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
                                 dbSave("crm_applications",app.id,updated);
-                                (function(){var coA=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
-                                  notifyEmail("appApproved",app.email||"","You're approved — welcome to "+coA,
-                                    notifEmailHtml(coA,"Application approved","<p>Hi "+(app.name||"there")+",</p><p>Your application to join "+coA+" as a sales rep has been approved. You can now sign in to start placing orders.</p>","Sign in",getSiteUrl(),"#1ea672"));})();
                                 addToast(app.name+" approved as rep","success");
                               }}>Approve</Btn>
                               <Btn small variant="ghost" onClick={function(){
@@ -9891,6 +9893,32 @@ function notifyEmail(key, to, subject, html, bell){
   }
   _writeNotifRow({key:key,to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,
     repId:(bell&&bell.repId)||"",msg:(bell&&bell.msg)||"",type:(bell&&bell.type)||"info"});
+}
+
+// Send a rep onboarding email — sends now if this session has email creds (admin),
+// otherwise queues it for an admin session to deliver (e.g. from the public apply page).
+function sendRepEmail(to, subject, html){
+  try{
+    var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var canSend = to && html && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
+    if(canSend){
+      fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){});
+    } else {
+      _writeNotifRow({key:"rep_onboarding",to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:"",msg:"",type:"info"});
+    }
+  }catch(e){}
+}
+// Ensures the rep has an invite token (mutates rep), emails the set-password link, returns the token.
+function sendSetPasswordEmail(rep){
+  var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  rep.inviteToken = rep.inviteToken || (rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
+  var link = getSiteUrl()+"#invite="+rep.inviteToken;
+  sendRepEmail(rep.email, "You're approved — set up your "+company+" account",
+    notifEmailHtml(company,"Welcome aboard",
+      "<p>Hi "+(rep.name||"there")+",</p><p>Your application to join "+company+" as a sales rep has been <strong>approved</strong>. Click below to set your password and access your rep dashboard.</p>",
+      "Set Up My Account", link, "#1ea672"));
+  return rep.inviteToken;
 }
 
 function QuoteAcceptPage({snap, onAccept, onDecline}){
