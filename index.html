@@ -4613,8 +4613,55 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 
               {/* Rep details */}
               <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+                <div style={{background:C.bg,borderRadius:8,padding:"12px 14px",margin:"12px 12px 0 12px",border:"1px solid "+C.border}}>
+                  <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>Commission Settings</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:10,color:C.dim,marginBottom:4}}>Default Rate</div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input type="number" min={0} max={100} step={0.5}
+                          value={rep.defaultCommissionRate!=null?rep.defaultCommissionRate:10}
+                          onChange={function(e){
+                            var v=Math.min(100,Math.max(0,parseFloat(e.target.value)||0));
+                            var upd=Object.assign({},rep,{defaultCommissionRate:v});
+                            setReps(function(prev){return prev.map(function(r){return r.id===rep.id?upd:r;});});
+                            dbSave("crm_reps",rep.id,upd);
+                          }}
+                          style={{width:"60px",border:"1px solid "+C.border,borderRadius:6,padding:"5px 8px",background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,textAlign:"center"}}/>
+                        <span style={{fontSize:12,color:C.gold,fontWeight:700}}>{rep.defaultCommissionRate!=null?rep.defaultCommissionRate:10}%</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:10,color:C.dim,marginBottom:4}}>Max Allowed</div>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <input type="number" min={0} max={100} step={0.5}
+                          value={rep.maxCommissionRate!=null?rep.maxCommissionRate:100}
+                          onChange={function(e){
+                            var v=Math.min(100,Math.max(0,parseFloat(e.target.value)||0));
+                            var upd=Object.assign({},rep,{maxCommissionRate:v});
+                            setReps(function(prev){return prev.map(function(r){return r.id===rep.id?upd:r;});});
+                            dbSave("crm_reps",rep.id,upd);
+                          }}
+                          style={{width:"60px",border:"1px solid "+C.border,borderRadius:6,padding:"5px 8px",background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,textAlign:"center"}}/>
+                        <span style={{fontSize:12,color:C.muted,fontWeight:700}}>{rep.maxCommissionRate!=null?rep.maxCommissionRate:100}% cap</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{position:"relative",width:36,height:20,borderRadius:10,cursor:"pointer",transition:"background .2s",flexShrink:0,
+                        background:rep.allowCustomCommission===false?C.border:C.accent}}
+                      onClick={function(){
+                        var upd=Object.assign({},rep,{allowCustomCommission:rep.allowCustomCommission===false?true:false});
+                        setReps(function(prev){return prev.map(function(r){return r.id===rep.id?upd:r;});});
+                        dbSave("crm_reps",rep.id,upd);
+                      }}>
+                      <div style={{position:"absolute",top:2,transition:"left .2s",width:16,height:16,borderRadius:"50%",background:"#fff",
+                          left:rep.allowCustomCommission===false?"2px":"18px"}}/>
+                    </div>
+                    <div style={{fontSize:11,color:C.text}}>Allow rep to set custom rate per customer</div>
+                  </div>
+                </div>
                 {[
-                  ["Default Commission",rep.defaultCommissionRate!=null?(rep.defaultCommissionRate+"%"):"Not set"],
                   ["Plan / Ceiling", (plan?plan.name:"—")+" · "+fmtMoney(plan?plan.ceiling:0)+"/mo"],
                   ["Subscription",rep.subscriptionStatus||"—"],
                   ["Trial Started",rep.trialStartedAt?fmtDate(rep.trialStartedAt):"—"],
@@ -7473,7 +7520,15 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [billZip,    setBillZip]    = useState("");
   const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1}]);
   const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"due_receipt");
-  const [commRate,   setCommRate]   = useState((editOrder&&editOrder.commissionRate)||(repData&&repData.defaultCommissionRate)||10);
+  var initCommRate = (function(){
+    if(editOrder&&editOrder.commissionRate!=null) return editOrder.commissionRate;
+    if(custId) {
+      var custObj=(customers||[]).find(function(x){return x.id===custId;})||{};
+      if(custObj.commissionRate!=null&&custObj.commissionRate!=="") return parseFloat(custObj.commissionRate)||10;
+    }
+    return (repData&&repData.defaultCommissionRate)||10;
+  })();
+  const [commRate,   setCommRate]   = useState(initCommRate);
   const [notes,      setNotes]      = useState((editOrder&&editOrder.notes)||"");
   const [agreed,     setAgreed]     = useState(false);
   const [placing,    setPlacing]    = useState(false);
@@ -8776,7 +8831,37 @@ function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTerm
                 </div>
                 <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <Btn small variant="outline" onClick={function(){setViewCust2(c2);}} fullWidth={true}>View Profile</Btn>
-                  <Btn small variant="ghost" onClick={function(){setEditCustModal(c2);}} fullWidth={true}>Edit</Btn>
+                  <Btn small variant="ghost" onClick={function(){setEditCust(c2);}} fullWidth={true}>Edit</Btn>
+                  {/* Commission Rate */}
+                  {(function(){
+                    var maxRate = (repData&&repData.maxCommissionRate!=null) ? parseFloat(repData.maxCommissionRate) : 100;
+                    var allowCustom = !repData || repData.allowCustomCommission!==false;
+                    var custRate = c2.commissionRate!=null && c2.commissionRate!==""
+                      ? parseFloat(c2.commissionRate)
+                      : (repData&&repData.defaultCommissionRate)||10;
+                    if(!allowCustom) return null;
+                    return (
+                      <div style={{marginTop:6,padding:"8px 10px",background:C.surface2,borderRadius:7,border:"1px solid "+C.border}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                          <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>Commission</div>
+                          <div style={{fontSize:12,fontWeight:800,color:C.gold}}>{custRate}%</div>
+                        </div>
+                        <input type="range" min={0} max={maxRate} step={0.5} value={custRate}
+                          onChange={function(e){
+                            var v=parseFloat(e.target.value);
+                            setCustomers(function(prev){return prev.map(function(x){
+                              return x.id===c2.id?Object.assign({},x,{commissionRate:v}):x;
+                            });});
+                            try{var sb=getSB();if(sb){var upd=Object.assign({},c2,{commissionRate:v});sb.from("crm_customers").update({data:upd}).eq("id",c2.id).then(function(){});}}catch(e2){}
+                          }}
+                          style={{width:"100%",accentColor:C.gold,cursor:"pointer"}}/>
+                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.dim,marginTop:2}}>
+                          <span>0%</span>
+                          <span style={{color:C.muted}}>Max: {maxRate}%</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {c2.termsStatus!=="active"&&c2.termsStatus!=="awaiting_signature"&&(
                     <Btn small variant="ghost"
                       onClick={function(){if(c2.termsStatus!=="pending")setTermsReqCust(c2);}}
@@ -9233,6 +9318,16 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
 
 /* ─── App Shell ──────────────────────────────────────────────────────────── */
+
+/* ─── Commission Rate Helper ────────────────────────────────────────────── */
+function getEffectiveCommRate(custId, repData, customers, globalDefault) {
+  // Priority: customer-specific → rep default → global default
+  var cust = (customers||[]).find(function(c2){return c2.id===custId;})||{};
+  if(cust.commissionRate!=null && cust.commissionRate!=="") return parseFloat(cust.commissionRate)||0;
+  if(repData&&repData.defaultCommissionRate!=null) return parseFloat(repData.defaultCommissionRate)||10;
+  return parseFloat(globalDefault)||10;
+}
+
 function getSiteUrl(){
   try{
     var cfg=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}");
@@ -9791,6 +9886,7 @@ function App() {
         )}
         {!isAdmin&&activeTab==="customers"&&(
           <RepCustomers repId={effectiveUser.rep_id||effectiveUser.id}
+            repData={reps.find(function(r){return r.id===(effectiveUser.rep_id||effectiveUser.id);})}
             customers={customers} setCustomers={setCustomers}
             orders={orders} termsRequests={termsRequests}
             setTermsRequests={setTermsRequests} addToast={addToast}/>
