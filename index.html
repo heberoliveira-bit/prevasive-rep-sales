@@ -2610,75 +2610,33 @@ function CustomerEditModal({customer,onSave,onClose,addToast}) {
       </div>
 
       {/* Billing Address */}
-      <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:12,border:"1px solid "+C.border}}>
-        <div style={secHdr}>🧾 Billing Address</div>
-        <div style={{marginBottom:10}}>
-          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Street Address</div>
-          <input value={bAddr} onChange={function(e){setBAddr(e.target.value);}} placeholder="123 Main St" style={inpS}/>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Address</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div style={{gridColumn:"1/-1"}}><Field label="Street Address" value={bAddr} onChange={setBAddr} placeholder="123 Main St"/></div>
+          <div style={{gridColumn:"1/-1"}}><Field label="Suite / Floor" value={bAddr2} onChange={setBAddr2} placeholder="Suite 400 (optional)"/></div>
+          <Field label="City" value={bCity} onChange={setBCity} placeholder="Atlanta"/>
+          <Field label="State" value={bState} onChange={setBState} placeholder="GA"/>
+          <Field label="ZIP" value={bZip} onChange={setBZip} placeholder="30301"/>
         </div>
-        <div style={{marginBottom:10}}>
-          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Address Line 2 <span style={{color:C.dim}}>(Suite, Floor, etc.)</span></div>
-          <input value={bAddr2} onChange={function(e){setBAddr2(e.target.value);}} placeholder="Suite 400" style={inpS}/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10}}>
-          <div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>City</div>
-            <input value={bCity} onChange={function(e){setBCity(e.target.value);}} placeholder="Atlanta" style={inpS}/>
-          </div>
-          <div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>State</div>
-            <input value={bState} onChange={function(e){setBState(e.target.value);}} placeholder="GA" style={inpS}/>
-          </div>
-          <div>
-            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>ZIP</div>
-            <input value={bZip} onChange={function(e){setBZip(e.target.value);}} placeholder="30301" style={inpS}/>
-          </div>
-        </div>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:C.muted}}>
+          <input type="checkbox" checked={!sameAs} onChange={function(e){setSameAs(!e.target.checked);}} style={{width:14,height:14,accentColor:C.accent}}/>
+          <span>Shipping address is different from billing</span>
+        </label>
       </div>
 
-      {/* Shipping Address */}
-      <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",border:"1px solid "+C.border}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-          <div style={Object.assign({},secHdr,{marginBottom:0,marginTop:0})}>📦 Shipping Address</div>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:C.muted}}>
-            <input type="checkbox" checked={sameAs} onChange={function(e){setSameAs(e.target.checked);}}
-              style={{width:14,height:14,accentColor:C.accent,cursor:"pointer"}}/>
-            Same as billing
-          </label>
+      {/* Shipping Address — only shown if different */}
+      {!sameAs&&(
+        <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",border:"1px solid "+C.border}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>📦 Shipping Address</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div style={{gridColumn:"1/-1"}}><Field label="Street" value={sAddr} onChange={setSAddr} placeholder="456 Industrial Blvd"/></div>
+            <Field label="City" value={sCity} onChange={setSCity} placeholder="Duluth"/>
+            <Field label="State" value={sState} onChange={setSState} placeholder="GA"/>
+            <Field label="ZIP" value={sZip} onChange={setSZip} placeholder="30097"/>
+          </div>
         </div>
-        {sameAs?(
-          <div style={{padding:"10px 14px",background:C.bg,borderRadius:7,border:"1px solid "+C.border,fontSize:12,color:C.muted,lineHeight:1.7}}>
-            {bAddr&&<div>{bAddr}{bAddr2?" · "+bAddr2:""}</div>}
-            {bCity&&<div>{bCity}{bState?", "+bState:""}{bZip?" "+bZip:""}</div>}
-            {!bAddr&&!bCity&&<span style={{color:C.dim}}>Enter billing address above</span>}
-          </div>
-        ):(
-          <div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Street Address</div>
-              <input value={sAddr} onChange={function(e){setSAddr(e.target.value);}} placeholder="456 Industrial Blvd" style={inpS}/>
-            </div>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Address Line 2</div>
-              <input value={sAddr2} onChange={function(e){setSAddr2(e.target.value);}} placeholder="Warehouse" style={inpS}/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10}}>
-              <div>
-                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>City</div>
-                <input value={sCity} onChange={function(e){setSCity(e.target.value);}} placeholder="Duluth" style={inpS}/>
-              </div>
-              <div>
-                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>State</div>
-                <input value={sState} onChange={function(e){setSState(e.target.value);}} placeholder="GA" style={inpS}/>
-              </div>
-              <div>
-                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>ZIP</div>
-                <input value={sZip} onChange={function(e){setSZip(e.target.value);}} placeholder="30097" style={inpS}/>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      )}
     </Modal>
   );
 }
@@ -2800,9 +2758,6 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCou
 
 
 
-
-</script>
-<script id="c5" type="text/plain">
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
   const [carrier,  setCarrier]  = useState("UPS");
   const [trackNum, setTrackNum] = useState(order.trackingNumber||"");
@@ -2868,6 +2823,9 @@ function FulfillmentModal({order,customers,products,onSend,onClose}) {
 }
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function RepPayModal({order,rep,onConfirm,onClose}) {
   var comm = order.totals&&order.totals.commission||0;
   const [method, setMethod] = useState("manual");
@@ -3136,9 +3094,6 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
-
-</script>
-<script id="c6" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
@@ -3631,7 +3586,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 /* CustomerEditModal also rendered in AdminCustomers — see wiring below */
 
 </script>
-<script id="c7" type="text/plain">
+<script id="c6" type="text/plain">
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
   const [tab,      setTab]      = useState("docs");
   const [showForm, setShowForm] = useState(false);
@@ -3982,7 +3937,7 @@ function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
 
 
 </script>
-<script id="c8" type="text/plain">
+<script id="c7" type="text/plain">
 function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders,
                        currentUser,isAdmin,addToast,showResult}) {
   const [showForm,  setShowForm]  = useState(false);
@@ -4485,7 +4440,7 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
 
 
 </script>
-<script id="c9" type="text/plain">
+<script id="c8" type="text/plain">
 function HelpModal({isAdmin,onClose}) {
   const [tab, setTab] = useState(isAdmin?"admin":"rep");
   var ADMIN_FAQ = [
@@ -5067,7 +5022,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c10" type="text/plain">
+<script id="c9" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   const [range, setRange] = useState("month");
   var now2 = new Date();
@@ -5748,7 +5703,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c11" type="text/plain">
+<script id="c10" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -6277,7 +6232,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
 
 </script>
-<script id="c12" type="text/plain">
+<script id="c11" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests}) {
   const [payTarget,    setPayTarget]    = useState(null);
   const [releasingAll, setReleasingAll] = useState(false);
@@ -7281,7 +7236,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
 /* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
-<script id="c13" type="text/plain">
+<script id="c12" type="text/plain">
 function CommissionStatement({repId,orders,commissions,repName}) {
   var now3 = new Date();
   var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -8601,7 +8556,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c14" type="text/plain">
+<script id="c13" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast,reps,currentUser}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -9010,47 +8965,29 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
             <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="jane@practice.com"/>
             <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
             <div style={{gridColumn:"1/-1"}}><Field label="Company" value={company} onChange={setCompany} placeholder="Smith Medical Group"/></div>
-            {/* Billing Address */}
-            <div style={{gridColumn:"1/-1",background:C.surface2,borderRadius:10,padding:"12px 14px",border:"1px solid "+C.border}}>
-              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>🧾 Billing Address</div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                <div style={{gridColumn:"1/-1"}}><Field label="Street" value={addr} onChange={setAddr} placeholder="123 Main St"/></div>
-                <div style={{gridColumn:"1/-1"}}><Field label="Suite / Floor" value={addr2} onChange={setAddr2} placeholder="Suite 400"/></div>
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
-                <Field label="City" value={city} onChange={setCity} placeholder="Atlanta"/>
-                <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
-                <Field label="ZIP" value={zip} onChange={setZip} placeholder="30301"/>
-              </div>
+            <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
+            <Field label="Street Address" value={addr} onChange={setAddr} placeholder="123 Main St"/>
+            <Field label="Suite / Floor" value={addr2} onChange={setAddr2} placeholder="Suite 400 (optional)"/>
+            <Field label="City" value={city} onChange={setCity} placeholder="Atlanta"/>
+            <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
+            <Field label="ZIP" value={zip} onChange={setZip} placeholder="30301"/>
+            <div style={{gridColumn:"1/-1"}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",fontSize:12,color:C.muted}}>
+                <input type="checkbox" checked={!sameShip} onChange={function(e){setSameShip(!e.target.checked);}} style={{width:14,height:14,accentColor:C.accent}}/>
+                <span>Shipping address is different from billing</span>
+              </label>
             </div>
-            {/* Shipping Address */}
-            <div style={{gridColumn:"1/-1",background:C.surface2,borderRadius:10,padding:"12px 14px",border:"1px solid "+C.border}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>📦 Shipping Address</div>
-                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:C.muted}}>
-                  <input type="checkbox" checked={sameShip} onChange={function(e){setSameShip(e.target.checked);}} style={{width:14,height:14,accentColor:C.accent}}/>
-                  Same as billing
-                </label>
+            {!sameShip&&(
+              <div style={{gridColumn:"1/-1",background:C.surface2,borderRadius:9,padding:"12px 14px",border:"1px solid "+C.border}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>📦 Shipping Address</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  <div style={{gridColumn:"1/-1"}}><Field label="Street" value={sAddr} onChange={setSAddr} placeholder="456 Industrial Blvd"/></div>
+                  <Field label="City" value={sCity} onChange={setSCity} placeholder="Duluth"/>
+                  <Field label="State" value={sState} onChange={setSState} placeholder="GA"/>
+                  <Field label="ZIP" value={sZip} onChange={setSZip} placeholder="30097"/>
+                </div>
               </div>
-              {sameShip?(
-                <div style={{fontSize:12,color:C.muted,fontStyle:"italic",padding:"8px 0"}}>
-                  {addr?addr+(addr2?" · "+addr2:""):""}{city?"\n"+city+(state2?", "+state2:"")+(zip?" "+zip:""):""}
-                  {!addr&&!city&&"Will use billing address"}
-                </div>
-              ):(
-                <div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
-                    <div style={{gridColumn:"1/-1"}}><Field label="Street" value={sAddr} onChange={setSAddr} placeholder="456 Industrial Blvd"/></div>
-                    <div style={{gridColumn:"1/-1"}}><Field label="Suite / Floor" value={sAddr2} onChange={setSAddr2} placeholder="Warehouse"/></div>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
-                    <Field label="City" value={sCity} onChange={setSCity} placeholder="Duluth"/>
-                    <Field label="State" value={sState} onChange={setSState} placeholder="GA"/>
-                    <Field label="ZIP" value={sZip} onChange={setSZip} placeholder="30097"/>
-                  </div>
-                </div>
-              )}
-            </div>
+            )}
             <div style={{gridColumn:"1/-1"}}>
               <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Payment Terms</div>
               <div style={{padding:"10px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
@@ -9113,7 +9050,7 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
 /* ─── Rep Commissions ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c15" type="text/plain">
+<script id="c14" type="text/plain">
 function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -9512,7 +9449,7 @@ function getSiteUrl(){
 /* ─── PayTokenLoader ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c16" type="text/plain">
+<script id="c15" type="text/plain">
 function PayTokenLoader({token, sb, onLoaded, onNotFound}) {
   const [notFound, setNotFound] = useState(false);
   const [loaded,   setLoaded]   = useState(false);
@@ -10081,7 +10018,7 @@ function App() {
 </script>
 
 <script>
-var N=17;
+var N=16;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
