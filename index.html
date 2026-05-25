@@ -8864,6 +8864,11 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
   const [company,setCompany] = useState(""); const [phone,   setPhone]   = useState("");
   const [addr,   setAddr]   = useState(""); const [city,    setCity]    = useState("");
   const [state2, setState2] = useState(""); const [zip,     setZip]     = useState("");
+  const [addr2,  setAddr2]  = useState("");
+  const [sameShip, setSameShip] = useState(true);
+  const [sAddr,  setSAddr]  = useState(""); const [sAddr2, setSAddr2] = useState("");
+  const [sCity,  setSCity]  = useState(""); const [sState, setSState] = useState("");
+  const [sZip,   setSZip]   = useState("");
   const [payTerms,setPayTerms] = useState(""); const [search, setSearch] = useState("");
   var myCusts = customers.filter(function(c2){return c2.repId===repId;});
   var filtered = myCusts.filter(function(c2){
@@ -8871,11 +8876,30 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
     return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.company||"").toLowerCase().indexOf(s)>=0;
   });
   function openNew(){setEditCust(null);setName("");setEmail("");setCompany("");setPhone("");setAddr("");setCity("");setState2("");setZip("");setPayTerms("");setShowForm(true);}
-  function openEdit(c2){setEditCust(c2);setName(c2.name||"");setEmail(c2.email||"");setCompany(c2.company||"");setPhone(c2.phone||"");setAddr(c2.address||"");setCity(c2.city||"");setState2(c2.state||"");setZip(c2.zip||"");setPayTerms(c2.paymentTerms||"");setShowForm(true);}
+  function openEdit(c2){
+    setEditCust(c2);setName(c2.name||"");setEmail(c2.email||"");setCompany(c2.company||"");setPhone(c2.phone||"");
+    setAddr(c2.billingAddress||c2.address||"");setAddr2(c2.billingAddress2||"");
+    setCity(c2.billingCity||c2.city||"");setState2(c2.billingState||c2.state||"");setZip(c2.billingZip||c2.zip||"");
+    var same=c2.shippingSameAsBilling!==false&&!c2.shippingAddress;
+    setSameShip(same);
+    setSAddr(c2.shippingAddress||"");setSAddr2(c2.shippingAddress2||"");
+    setSCity(c2.shippingCity||"");setSState(c2.shippingState||"");setSZip(c2.shippingZip||"");
+    setPayTerms(c2.paymentTerms||"");setShowForm(true);
+  }
   function save(){
     if(!name.trim()) return;
     var id=editCust?editCust.id:genId("cust");
-    var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),updatedAt:new Date().toISOString()};
+    var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),
+      billingAddress:addr.trim(),billingAddress2:addr2.trim(),
+      billingCity:city.trim(),billingState:state2.trim(),billingZip:zip.trim(),
+      address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),
+      shippingSameAsBilling:sameShip,
+      shippingAddress:sameShip?addr.trim():sAddr.trim(),
+      shippingAddress2:sameShip?addr2.trim():sAddr2.trim(),
+      shippingCity:sameShip?city.trim():sCity.trim(),
+      shippingState:sameShip?state2.trim():sState.trim(),
+      shippingZip:sameShip?zip.trim():sZip.trim(),
+      updatedAt:new Date().toISOString()};
     if(editCust&&editCust.termsStatus) data.termsStatus=editCust.termsStatus;
     if(editCust&&editCust.termsType) data.termsType=editCust.termsType;
     if(editCust&&editCust.termsLimit) data.termsLimit=editCust.termsLimit;
@@ -8986,6 +9010,47 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
             <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="jane@practice.com"/>
             <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
             <div style={{gridColumn:"1/-1"}}><Field label="Company" value={company} onChange={setCompany} placeholder="Smith Medical Group"/></div>
+            {/* Billing Address */}
+            <div style={{gridColumn:"1/-1",background:C.surface2,borderRadius:10,padding:"12px 14px",border:"1px solid "+C.border}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>🧾 Billing Address</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div style={{gridColumn:"1/-1"}}><Field label="Street" value={addr} onChange={setAddr} placeholder="123 Main St"/></div>
+                <div style={{gridColumn:"1/-1"}}><Field label="Suite / Floor" value={addr2} onChange={setAddr2} placeholder="Suite 400"/></div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
+                <Field label="City" value={city} onChange={setCity} placeholder="Atlanta"/>
+                <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
+                <Field label="ZIP" value={zip} onChange={setZip} placeholder="30301"/>
+              </div>
+            </div>
+            {/* Shipping Address */}
+            <div style={{gridColumn:"1/-1",background:C.surface2,borderRadius:10,padding:"12px 14px",border:"1px solid "+C.border}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>📦 Shipping Address</div>
+                <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:C.muted}}>
+                  <input type="checkbox" checked={sameShip} onChange={function(e){setSameShip(e.target.checked);}} style={{width:14,height:14,accentColor:C.accent}}/>
+                  Same as billing
+                </label>
+              </div>
+              {sameShip?(
+                <div style={{fontSize:12,color:C.muted,fontStyle:"italic",padding:"8px 0"}}>
+                  {addr?addr+(addr2?" · "+addr2:""):""}{city?"\n"+city+(state2?", "+state2:"")+(zip?" "+zip:""):""}
+                  {!addr&&!city&&"Will use billing address"}
+                </div>
+              ):(
+                <div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                    <div style={{gridColumn:"1/-1"}}><Field label="Street" value={sAddr} onChange={setSAddr} placeholder="456 Industrial Blvd"/></div>
+                    <div style={{gridColumn:"1/-1"}}><Field label="Suite / Floor" value={sAddr2} onChange={setSAddr2} placeholder="Warehouse"/></div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
+                    <Field label="City" value={sCity} onChange={setSCity} placeholder="Duluth"/>
+                    <Field label="State" value={sState} onChange={setSState} placeholder="GA"/>
+                    <Field label="ZIP" value={sZip} onChange={setSZip} placeholder="30097"/>
+                  </div>
+                </div>
+              )}
+            </div>
             <div style={{gridColumn:"1/-1"}}>
               <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Payment Terms</div>
               <div style={{padding:"10px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
