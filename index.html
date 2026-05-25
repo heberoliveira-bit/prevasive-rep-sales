@@ -1114,34 +1114,76 @@ function RepSubscriptionWall({rep,onActivate,onLogout}) {
 
 
 function ApplyForm({onSubmit,onCancel}) {
-  const [name,    setName]    = useState("");
-  const [company, setCompany] = useState("");
-  const [email,   setEmail]   = useState("");
-  const [err,     setErr]     = useState("");
+  const [name,      setName]      = useState("");
+  const [email,     setEmail]     = useState("");
+  const [phone,     setPhone]     = useState("");
+  const [company,   setCompany]   = useState("");
+  const [address,   setAddress]   = useState("");
+  const [city,      setCity]      = useState("");
+  const [state,     setState]     = useState("");
+  const [zip,       setZip]       = useState("");
+  const [territory, setTerritory] = useState("");
+  const [experience,setExperience]= useState("");
+  const [industry,  setIndustry]  = useState("");
+  const [website,   setWebsite]   = useState("");
+  const [heardAbout,setHeardAbout]= useState("");
+  const [message,   setMessage]   = useState("");
+  const [err,       setErr]       = useState("");
   var inp = {width:"100%",background:C.surface2,border:"1px solid "+C.border,
              borderRadius:6,padding:"9px 12px",color:C.text,fontSize:13,
              fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
+  var lbl = {fontSize:11,fontWeight:500,color:C.muted,marginBottom:4};
+  var sec = {fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",margin:"4px 0 8px"};
   function submit() {
-    if(!name.trim()||!email.trim()){setErr("Name and email are required.");return;}
-    onSubmit({name:name.trim(),company:company.trim(),email:email.trim(),role:"rep"});
+    if(!name.trim()||!email.trim()||!phone.trim()||!company.trim()||!address.trim()||!city.trim()||!state.trim()||!zip.trim()){
+      setErr("Please fill in all required fields: name, email, phone, company, and full address.");return;
+    }
+    onSubmit({name:name.trim(),email:email.trim(),phone:phone.trim(),company:company.trim(),
+      address:address.trim(),city:city.trim(),state:state.trim(),zip:zip.trim(),
+      territory:territory.trim(),experience:experience.trim(),industry:industry.trim(),
+      website:website.trim(),heardAbout:heardAbout.trim(),message:message.trim(),role:"rep"});
+  }
+  function F(label,val,setter,ph,type){
+    return React.createElement("div",null,
+      React.createElement("div",{style:lbl},label),
+      React.createElement("input",{value:val,onChange:function(e){setter(e.target.value);},placeholder:ph||"",type:type||"text",style:inp}));
   }
   return (
     <div>
       {err&&<div style={{padding:"8px 12px",background:"rgba(223,27,65,.12)",border:"1px solid rgba(223,27,65,.3)",borderRadius:6,color:"#df1b41",fontSize:12,marginBottom:12}}>{err}</div>}
+
+      <div style={sec}>Contact</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-        <div>
-          <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Full Name *</div>
-          <input value={name} onChange={function(e){setName(e.target.value);}} placeholder="Jane Smith" style={inp}/>
-        </div>
-        <div>
-          <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Company</div>
-          <input value={company} onChange={function(e){setCompany(e.target.value);}} placeholder="Optional" style={inp}/>
-        </div>
+        {F("Full name *",name,setName,"Jane Smith")}
+        {F("Phone *",phone,setPhone,"(404) 555-0100","tel")}
+      </div>
+      <div style={{marginBottom:16}}>{F("Email *",email,setEmail,"you@company.com","email")}</div>
+
+      <div style={sec}>Business &amp; address</div>
+      <div style={{marginBottom:10}}>{F("Company / business name *",company,setCompany,"Acme Medical Supply")}</div>
+      <div style={{marginBottom:10}}>{F("Street address *",address,setAddress,"123 Main St")}</div>
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10,marginBottom:16}}>
+        {F("City *",city,setCity,"Atlanta")}
+        {F("State *",state,setState,"GA")}
+        {F("ZIP *",zip,setZip,"30301")}
+      </div>
+
+      <div style={sec}>Background <span style={{textTransform:"none",fontWeight:400,letterSpacing:0}}>(optional)</span></div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        {F("Territory / region",territory,setTerritory,"e.g. Southeast US")}
+        {F("Years of sales experience",experience,setExperience,"e.g. 5")}
+      </div>
+      <div style={{marginBottom:10}}>{F("Industry / products you currently sell",industry,setIndustry,"e.g. janitorial, medical")}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        {F("Website or LinkedIn",website,setWebsite,"https://")}
+        {F("How did you hear about us?",heardAbout,setHeardAbout,"Referral, web search…")}
       </div>
       <div style={{marginBottom:20}}>
-        <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Email *</div>
-        <input value={email} onChange={function(e){setEmail(e.target.value);}} type="email" placeholder="you@company.com" style={inp}/>
+        <div style={lbl}>Why do you want to join?</div>
+        <textarea value={message} onChange={function(e){setMessage(e.target.value);}} rows={3}
+          placeholder="Tell us a bit about yourself…" style={Object.assign({},inp,{resize:"vertical",minHeight:64})}/>
       </div>
+
       <button onClick={submit}
         style={{width:"100%",padding:"10px",borderRadius:6,border:"none",background:"#635bff",
                 color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
@@ -1609,6 +1651,8 @@ function AppLanding({onLogin}) {
                     }).then(function(r){if(r.error) console.warn("Apply error:",r.error.message);});
                   }
                   setRegDone(true);
+                  notifyEmail("newApp",getAdminNotifyEmail(),"New rep application — "+(data.name||""),
+                    notifEmailHtml("PreVasive USA","New application","<p><strong>"+(data.name||"Someone")+"</strong> applied to become a sales rep.</p><p style='color:#6b7c93;font-size:13px'>Email: "+(data.email||"—")+"<br>Phone: "+(data.phone||"—")+"<br>Company: "+(data.company||"—")+"<br>Location: "+([data.city,data.state].filter(Boolean).join(", ")||"—")+(data.territory?("<br>Territory: "+data.territory):"")+"</p><p>Review them in the Reps → Applications tab.</p>","#635bff"));
                 }} onCancel={function(){setShowReg(false);}}/>
               </div>
             )}
@@ -1666,23 +1710,57 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     doc.text('Date:       ' + new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}), margin, y); y += 5;
     doc.text('Status:     ' + (order.paidAt ? 'PAID' : 'DUE ON RECEIPT'), margin, y); y += 10;
 
-    // ── Bill To ──
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(30,30,50);
-    doc.text('Bill To', margin, y); y += 6;
-    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(80,80,100);
-    doc.text(cust.name || order.custName || 'Customer', margin, y); y += 5;
-    if(cust.email) { doc.text(cust.email, margin, y); y += 5; }
-    if(cust.phone) { doc.text(cust.phone, margin, y); y += 5; }
-    var addr = {
+    // ── Bill To / Ship To (two columns) ──
+    var colR = 115;
+    var billAddr = {
       address: cust.billingAddress||cust.address||"",
       address2: cust.billingAddress2||"",
       city: cust.billingCity||cust.city||"",
       state: cust.billingState||cust.state||"",
       zip: cust.billingZip||cust.zip||""
     };
-    if(addr.address) { doc.text(addr.address, margin, y); y += 5; }
-    if(addr.city) { doc.text((addr.city||'') + (addr.state ? ', '+addr.state : '') + (addr.zip ? ' '+addr.zip : ''), margin, y); y += 5; }
-    y += 6;
+    // Ship To: prefer the address captured on the order, else the customer's shipping fields
+    var os = order.shipAddress||order.shipAddr||null;
+    var shipAddr = (os && (os.address||os.city)) ? {
+      address: os.address||"", address2: os.address2||"",
+      city: os.city||"", state: os.state||"", zip: os.zip||""
+    } : {
+      address: cust.shippingAddress||"", address2: cust.shippingAddress2||"",
+      city: cust.shippingCity||"", state: cust.shippingState||"", zip: cust.shippingZip||""
+    };
+    var hasShip = !!(shipAddr.address||shipAddr.city);
+
+    var drawParty = function(title, x, startY, who){
+      var yy = startY;
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(30,30,50);
+      doc.text(title, x, yy); yy += 6;
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(80,80,100);
+      if(who.name)     { doc.text(String(who.name).slice(0,38), x, yy); yy += 5; }
+      if(who.email)    { doc.text(String(who.email).slice(0,38), x, yy); yy += 5; }
+      if(who.phone)    { doc.text(String(who.phone).slice(0,38), x, yy); yy += 5; }
+      if(who.address)  { doc.text(String(who.address).slice(0,38), x, yy); yy += 5; }
+      if(who.address2) { doc.text(String(who.address2).slice(0,38), x, yy); yy += 5; }
+      var cityLine = (who.city||'') + (who.state ? ', '+who.state : '') + (who.zip ? ' '+who.zip : '');
+      if(cityLine.trim()) { doc.text(cityLine, x, yy); yy += 5; }
+      return yy;
+    };
+
+    var startY = y;
+    var yL = drawParty('Bill To', margin, startY, {
+      name: cust.name || order.custName || 'Customer',
+      email: cust.email, phone: cust.phone,
+      address: billAddr.address, address2: billAddr.address2,
+      city: billAddr.city, state: billAddr.state, zip: billAddr.zip
+    });
+    var yR = yL;
+    if(hasShip) {
+      yR = drawParty('Ship To', colR, startY, {
+        name: cust.name || order.custName || 'Customer',
+        address: shipAddr.address, address2: shipAddr.address2,
+        city: shipAddr.city, state: shipAddr.state, zip: shipAddr.zip
+      });
+    }
+    y = Math.max(yL, yR) + 6;
 
     // ── Divider ──
     doc.setDrawColor(200,200,220); doc.setLineWidth(0.3);
@@ -1704,7 +1782,7 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     var alt = false;
     items.forEach(function(it) {
       var prod = (products||[]).find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||'Product'};
-      var price = it.unitPrice||prod.price||0;
+      var price = it.customerPrice||it.unitPrice||prod.price||0;
       var total = price * (it.qty||1);
       if(alt) { doc.setFillColor(250,250,255); doc.rect(margin, y-4, W-margin*2, 7, 'F'); }
       alt = !alt;
@@ -1763,7 +1841,7 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     custName:cust.name||"",custEmail:cust.email||"",company:company,
     items:(order.items||[]).map(function(it){
       var prod=(products||[]).find(function(p){return p.id===it.prodId;})||{};
-      return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:prod.name||it.prodId||""};
+      return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,customerPrice:it.customerPrice||it.unitPrice||0,name:prod.name||it.prodId||""};
     }),totals:order.totals||{},createdAt:new Date().toISOString()};
   try{localStorage.setItem("__pv__pay_"+initTok,JSON.stringify(initPd));}catch(e){}
   var initLink = getSiteUrl()+"#pay="+initTok;
@@ -2279,7 +2357,7 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
             return (
               <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:8}}>
                 <span>{it.qty}× {prod.name}</span>
-                <span style={{fontWeight:600,color:"#1a1a2e"}}>${((it.unitPrice||prod.price||0)*it.qty).toFixed(2)}</span>
+                <span style={{fontWeight:600,color:"#1a1a2e"}}>${((it.customerPrice||it.unitPrice||prod.price||0)*it.qty).toFixed(2)}</span>
               </div>
             );
           })}
@@ -2419,7 +2497,7 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
   function buildHtml(){
     var rows=(items||[]).filter(function(it){return it.prodId;}).map(function(it){
       var p=(products||[]).find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-      var cup=Math.round((it.unitPrice||p.price||0)*100)/100;
+      var cup=Math.round((it.customerPrice||((it.unitPrice||p.price||0)*(1+(parseFloat(commRate)||0)/100)))*100)/100;
       return "<tr><td style='padding:10px 14px;font-weight:600;color:#1a1a2e'>"+p.name+"</td><td style='padding:10px 14px;text-align:right;color:#6b7c93'>"+it.qty+"</td><td style='padding:10px 14px;text-align:right;color:#6b7c93'>$"+cup.toFixed(2)+"</td><td style='padding:10px 14px;text-align:right;font-weight:700;color:#1a1a2e'>$"+(cup*it.qty).toFixed(2)+"</td></tr>";
     }).join("");
     return "<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Preview</title>"
@@ -3124,6 +3202,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
   function approveApp(app) {
     var id = genId("rep");
     var newRep = {id:id,name:app.name,email:app.email,company:app.company||"",
+      phone:app.phone||"",address:app.address||"",city:app.city||"",state:app.state||"",zip:app.zip||"",territory:app.territory||"",
       status:"active",subscriptionStatus:"trial",trialStartedAt:new Date().toISOString(),
       planId:"starter",createdAt:new Date().toISOString()};
     setReps(function(prev){return [newRep].concat(prev);});
@@ -3224,6 +3303,8 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
             setOrders(function(prev){return prev.map(function(x){return x.id===collectTarget.id?updated:x;});});
             dbSave("crm_orders",collectTarget.id,updated);
+            notifyEmail("receipt",cust3.email||"","Payment receipt — "+collectTarget.id,
+              notifEmailHtml(co3,"Payment received","<p>Hi "+(cust3.name||"there")+",</p><p>We've received your payment for order <strong>"+collectTarget.id+"</strong>"+(collectTarget.totals?(" of <strong>$"+((collectTarget.totals.grand||0)).toFixed(2)+"</strong>"):"")+". Thank you!</p>","View receipt",rLink,"#1ea672"));
             addToast("Payment collected! Receipt link ready to send.","success");
             setCollectTarget(null);
           }}
@@ -3242,6 +3323,12 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             setOrders(function(prev){return prev.map(function(o){return o.id===fulfillTarget.id?updated:o;});});
             dbSave("crm_orders",fulfillTarget.id,updated);
             setFulfillTarget(updated);
+            if(result.status==="Shipped"){
+              var cS=(customers||[]).find(function(x){return x.id===fulfillTarget.custId;})||{};
+              var coSh=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+              notifyEmail("shipped",cS.email||"","Your order "+fulfillTarget.id+" has shipped",
+                notifEmailHtml(coSh,"Your order shipped","<p>Order <strong>"+fulfillTarget.id+"</strong> is on its way."+(result.trackingNumber?(" Tracking number: <strong>"+result.trackingNumber+"</strong>"+(result.carrier?" ("+result.carrier+")":"")+"."):"")+"</p>",result.trackingUrl?"Track shipment":null,result.trackingUrl||null,"#0ea5e9"));
+            }
             addToast("Order "+fulfillTarget.id+" → "+result.status,"success");
           }}
           onClose={function(){setFulfillTarget(null);}}/>
@@ -3458,13 +3545,19 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                         if(cust){
                           var token=cust.id+"_"+Math.random().toString(36).slice(2,9);
                           var co=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+                          var _repObj=(reps||[]).find(function(r){return r.id===cust.repId;})||{};
                           var sigData={
                             token:token,status:"pending",customer:cust,req:updated,
                             company:co,template:localStorage.getItem("__pv__creditAgreementTemplate")||"",
                             agreementHtml:generateCreditAgreementHtml(cust,updated,"",co),
+                            repId:cust.repId||"",repEmail:_repObj.email||"",repName:_repObj.name||"",
                             createdAt:new Date().toISOString()
                           };
                           localStorage.setItem("__pv__sign_"+token,JSON.stringify(sigData));
+                          (function(){var _sbS=getSB();if(_sbS){_sbS.from("crm_sign_tokens").upsert({id:token,data:sigData,created_at:sigData.createdAt}).then(function(){});}})();
+                          var _signLink=getSiteUrl()+"#sign="+token;
+                          notifyEmail("termsApproved",cust.email||"","Your credit application is approved — "+co,
+                            notifEmailHtml(co,"Credit terms approved","<p>Hi "+(cust.name||"there")+",</p><p>Your request for credit terms has been approved. Please review and sign your agreement to activate your account.</p>","Review &amp; sign agreement",_signLink,"#1ea672"));
                           var updCust=Object.assign({},cust,{termsStatus:"awaiting_signature",
                             termsType:req.requestedTerms,termsLimit:req.requestedLimit,
                             termsApprovedAt:new Date().toISOString(),termsSigningToken:token});
@@ -3948,6 +4041,8 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   const [notes,     setNotes]     = useState("");
   const [validDays, setValidDays] = useState("30");
   const [commRate,  setCommRate]  = useState(10);
+  const [quoteRate, setQuoteRate] = useState(null);
+  const [quoteShip, setQuoteShip] = useState(0);
 
   var myQuotes = isAdmin ? quotes : quotes.filter(function(q){
     return q.repId===(currentUser&&(currentUser.rep_id||currentUser.id));
@@ -3963,39 +4058,69 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       return s+(p?p.price:0)*it.qty;
     },0);
   }
+  // Customer-facing goods subtotal (base + commission markup), tax, and grand total
+  function calcCustomerSub() { return Math.round(calcTotal()*(1+(parseFloat(commRate)||0)/100)*100)/100; }
+  function quoteTaxInfo() { return (selCust&&selCust.zip) ? getGaTaxRate(selCust.zip) : null; }
+  function calcTax() { var ti=quoteTaxInfo(); return ti ? Math.round(calcCustomerSub()*ti.rate*100)/100 : 0; }
+  function calcGrand() { return Math.round((calcCustomerSub()+(parseFloat(quoteShip)||0)+calcTax())*100)/100; }
 
   function saveQuote() {
     if(!custId||!items.some(function(it){return it.prodId;})) return;
     var id = genId("qt");
     var expiry = new Date(Date.now()+(parseInt(validDays)||30)*24*60*60*1000).toISOString();
-    var total = calcTotal();
+    var rate3 = parseFloat(commRate)||0;
+    var productBase = calcTotal();
+    var productCustomer = Math.round(productBase*(1+rate3/100)*100)/100;
+    var ship = parseFloat(quoteShip)||0;
+    var ti = (selCust&&selCust.zip) ? getGaTaxRate(selCust.zip) : null;
+    var taxRate = ti ? ti.rate : 0;
+    var tax = Math.round(productCustomer*taxRate*100)/100;
+    var grand = Math.round((productCustomer+ship+tax)*100)/100;
     var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
               repName:currentUser&&currentUser.name,
-              shipping:quoteShip||0,shippingService:quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):"",
+              shipping:ship,shippingService:quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):"",
               custId:custId,custName:selCust?selCust.name:"",
               items:items.filter(function(it){return it.prodId;}).map(function(it){
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
-        var rate3=parseFloat(commRate)||0;
         return Object.assign({},it,{unitPrice:p.price,customerPrice:Math.round(p.price*(1+rate3/100)*100)/100});
       }),
-              total:total,commissionRate:commRate,
+              productBase:productBase,productCustomer:productCustomer,
+              commission:Math.round(productBase*rate3/100*100)/100,
+              tax:tax,taxRate:taxRate,
+              total:grand,commissionRate:commRate,
               notes:notes,validUntil:expiry,
               status:"draft",createdAt:new Date().toISOString()};
     setQuotes(function(prev){return [q].concat(prev);});
     dbSave("crm_quotes",id,q);
     addToast("Quote "+id+" created","success");
     setShowForm(false); setCustId(""); setItems([{prodId:"",qty:1}]); setNotes("");
+    setQuoteRate(null); setQuoteShip(0);
   }
 
   function convertToOrder(quote) {
     var id = "ORD-"+String(Date.now()).slice(-6);
     var commR = quote.commissionRate||0;
     if(!commR&&quote.repId) { var repForComm=reps.find(function(r){return r.id===quote.repId;}); commR=(repForComm&&repForComm.defaultCommissionRate)||10; }
+    // Backward-compat: older quotes stored the BASE subtotal in `total` and had no productBase
+    var base = (quote.productBase!=null) ? quote.productBase : (quote.total||0);
+    var ship = quote.shipping||0;
+    var subtotal = Math.round(base*(1+commR/100)*100)/100;   // customer goods (markup on products only)
+    // Carry the ship-to address from the customer so the invoice Ship To block populates
+    var qCust = customers.find(function(c2){return c2.id===quote.custId;})||{};
+    var ti = qCust.zip ? getGaTaxRate(qCust.zip) : null;
+    var taxRate = ti ? ti.rate : 0;
+    var tax = Math.round(subtotal*taxRate*100)/100;
+    var grand = Math.round((subtotal+ship+tax)*100)/100;
+    var commission = Math.round(base*(commR/100)*100)/100;
+    var shipAddr = (qCust.shippingAddress||qCust.shippingCity)
+      ? {address:qCust.shippingAddress||"",address2:qCust.shippingAddress2||"",city:qCust.shippingCity||"",state:qCust.shippingState||"",zip:qCust.shippingZip||"",label:"Shipping"}
+      : (qCust.address?{address:qCust.address,city:qCust.city,state:qCust.state,zip:qCust.zip,label:"Primary"}:null);
     var order = Object.assign({},quote,{id:id,status:"Submitted",
       createdAt:new Date().toISOString(),commissionRate:commR,
-      totals:{baseSubtotal:quote.total,subtotal:Math.round(quote.total*(1+commR/100)*100)/100,shipping:0,tax:0,
-              grand:Math.round(quote.total*(1+commR/100)*100)/100,
-              commission:Math.round(quote.total*(commR/100)*100)/100,commRate:commR},
+      shipAddress:quote.shipAddress||shipAddr,
+      totals:{baseSubtotal:base,subtotal:subtotal,shipping:ship,tax:tax,taxRate:taxRate,
+              grand:grand,commission:commission,commRate:commR,
+              shippingService:quote.shippingService||""},
       quoteId:quote.id,payMethod:"pay_later"});
     setOrders(function(prev){return [order].concat(prev);});
     dbSave("crm_orders",id,order);
@@ -4004,15 +4129,43 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     dbSave("crm_quotes",quote.id,updated);
     addToast("Quote converted to Order "+id,"success");
     showResult({type:"order",title:"Order Created!",subtitle:"Quote converted to order successfully.",
-      rows:[["Order #",id],["Customer",quote.custName],["Total",fmtMoney(quote.total)],["Status","Submitted"]],cta:"Done"});
+      rows:[["Order #",id],["Customer",quote.custName],["Total",fmtMoney(grand)],["Status","Submitted"]],cta:"Done"});
     setViewQuote(null);
   }
 
   function sendQuote(quote) {
-    var updated = Object.assign({},quote,{status:"sent",sentAt:new Date().toISOString()});
+    var cust = customers.find(function(c2){return c2.id===quote.custId;})||{};
+    var custEmail = cust.email||"";
+    var repObj = reps.find(function(r){return r.id===quote.repId;})||{};
+    var repEmail = repObj.email||(currentUser&&currentUser.email)||"";
+    var company = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+    var shipAddr = (cust.shippingAddress||cust.shippingCity)
+      ? {address:cust.shippingAddress||"",address2:cust.shippingAddress2||"",city:cust.shippingCity||"",state:cust.shippingState||"",zip:cust.shippingZip||"",label:"Shipping"}
+      : (cust.address?{address:cust.address,city:cust.city,state:cust.state,zip:cust.zip,label:"Primary"}:null);
+    var token = quote.id+"_q_"+Math.random().toString(36).slice(2,9);
+    var snap = {token:token,status:"sent",quote:quote,company:company,
+      custId:quote.custId,custName:quote.custName||cust.name||"",custEmail:custEmail,
+      repId:quote.repId,repName:quote.repName||"",repEmail:repEmail,
+      shipAddress:shipAddr,createdAt:new Date().toISOString()};
+    try{localStorage.setItem("__pv__quote_"+token,JSON.stringify(snap));}catch(e){}
+    var sbq=getSB();if(sbq){sbq.from("crm_quote_tokens").upsert({id:token,data:snap,created_at:snap.createdAt}).then(function(){});}
+    var link = getSiteUrl()+"#quote="+token;
+    var emailCfg2=null; try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var emailed=false;
+    if(emailCfg2&&emailCfg2.edgeFnUrl&&custEmail&&(emailCfg2.clientSecret||emailCfg2.pass)&&notifEnabled("quoteReady")){
+      fetch(emailCfg2.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({to:custEmail,subject:"Your quote from "+company+" — "+quote.id,html:buildQuoteEmail(quote,company,link),
+          fromName:emailCfg2.fromName||company,fromEmail:emailCfg2.fromEmail,
+          tenantId:emailCfg2.tenantId,clientId:emailCfg2.clientId,clientSecret:emailCfg2.clientSecret})
+      }).then(function(){}).catch(function(){});
+      emailed=true;
+    }
+    var updated = Object.assign({},quote,{status:"sent",sentAt:new Date().toISOString(),quoteToken:token,acceptLink:link});
     setQuotes(function(prev){return prev.map(function(q){return q.id===quote.id?updated:q;});});
     dbSave("crm_quotes",quote.id,updated);
-    addToast("Quote sent to "+quote.custName,"success");
+    if(emailed){ addToast("Quote emailed to "+(custEmail||quote.custName),"success"); }
+    else { try{navigator.clipboard.writeText(link);}catch(e){}
+      addToast(custEmail?"Quote saved. Configure Settings → Email to auto-send — accept link copied.":"No customer email on file — accept link copied to clipboard.","warning"); }
     setViewQuote(updated);
   }
 
@@ -4135,8 +4288,21 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               <button onClick={function(){setItems(function(prev){return prev.concat([{prodId:"",qty:1}]);});}}
                 style={{width:"100%",padding:"8px",borderRadius:7,border:"1px dashed "+C.border,background:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>+ Add Item</button>
               <div style={{background:C.surface2,borderRadius:10,padding:"14px",marginTop:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,color:C.accent}}>
-                  <span>Quote Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcTotal())}</span>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
+                  <span>Products</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcCustomerSub())}</span>
+                </div>
+                {(parseFloat(quoteShip)||0)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
+                    <span>Shipping</span><span style={{fontFamily:"monospace"}}>{fmtMoney(parseFloat(quoteShip)||0)}</span>
+                  </div>
+                )}
+                {calcTax()>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginBottom:6}}>
+                    <span>Sales Tax ({((quoteTaxInfo()&&quoteTaxInfo().rate||0)*100).toFixed(1)}%)</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcTax())}</span>
+                  </div>
+                )}
+                <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,color:C.accent,paddingTop:8,borderTop:"1px solid "+C.border}}>
+                  <span>Quote Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcGrand())}</span>
                 </div>
               </div>
             </div>
@@ -4162,8 +4328,15 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
                 {(viewQuote.items||[]).map(function(it,i){
                   var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-                  return <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(p.price*it.qty)}</span></div>;
+                  var lp=it.customerPrice||p.price;
+                  return <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(lp*it.qty)}</span></div>;
                 })}
+                {(viewQuote.shipping||0)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>Shipping{viewQuote.shippingService?" — "+viewQuote.shippingService:""}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(viewQuote.shipping)}</span></div>
+                )}
+                {(viewQuote.tax||0)>0&&(
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>Sales Tax</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(viewQuote.tax)}</span></div>
+                )}
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewQuote.total||0)}</span></div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -5366,6 +5539,12 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     onUpdate(withAudit);
     setViewOrder(withAudit);
     dbSave("crm_orders",order.id,withAudit);
+    if(next==="Delivered"){
+      var cD=(customers||[]).find(function(x){return x.id===order.custId;})||{};
+      var coD=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+      notifyEmail("delivered",cD.email||"","Your order "+order.id+" was delivered",
+        notifEmailHtml(coD,"Delivered","<p>Hi "+(cD.name||"there")+",</p><p>Your order <strong>"+order.id+"</strong> has been delivered. Thank you for your business!</p>","#1ea672"));
+    }
     addToast("Order "+order.id+" → "+next,"info");
   }
 
@@ -5522,6 +5701,12 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
             var updated=addAuditEntry(Object.assign({},fulfillTarget2,patch),result.status==="Shipped"?"Tracking added → Shipped":"Sent to fulfillment","Admin",result.trackingNumber||"");
             onUpdate(updated); setViewOrder(updated); setFulfillTarget2(updated);
             dbSave("crm_orders",fulfillTarget2.id,updated);
+            if(result.status==="Shipped"){
+              var cS2=(customers||[]).find(function(x){return x.id===fulfillTarget2.custId;})||{};
+              var coSh2=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+              notifyEmail("shipped",cS2.email||"","Your order "+fulfillTarget2.id+" has shipped",
+                notifEmailHtml(coSh2,"Your order shipped","<p>Order <strong>"+fulfillTarget2.id+"</strong> is on its way."+(result.trackingNumber?(" Tracking number: <strong>"+result.trackingNumber+"</strong>"+(result.carrier?" ("+result.carrier+")":"")+"."):"")+"</p>",result.trackingUrl?"Track shipment":null,result.trackingUrl||null,"#0ea5e9"));
+            }
             addToast("Order "+fulfillTarget2.id+" → "+result.status,"success");
           }}
           onClose={function(){setFulfillTarget2(null);}}/>
@@ -5931,6 +6116,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
   const [showInvite, setShowInvite] = useState(false);
   const [inviteRep,  setInviteRep]  = useState(null);
   const [drawerRep,  setDrawerRep]  = useState(null);
+  const [expandedApp, setExpandedApp] = useState(null);
 
   function saveRep() {
     if(!name.trim()||!email.trim()){setFormErr("Name and email are required.");return;}
@@ -6103,8 +6289,9 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
                 <tbody>
                   {applications.map(function(app){
                     return (
-                      <tr key={app.id} style={{borderTop:"1px solid "+C.border}}>
-                        <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:C.text}}>{app.name}</td>
+                      <React.Fragment key={app.id}>
+                      <tr onClick={function(){setExpandedApp(expandedApp===app.id?null:app.id);}} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}}>
+                        <td style={{padding:"10px 14px",fontSize:13,fontWeight:600,color:C.text}}><span style={{color:C.dim,marginRight:6}}>{expandedApp===app.id?"▾":"▸"}</span>{app.name}</td>
                         <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{app.email}</td>
                         <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{app.company||"—"}</td>
                         <td style={{padding:"10px 14px",fontSize:11,color:C.dim}}>{fmtDate(app.submittedAt)}</td>
@@ -6116,10 +6303,11 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
                         </td>
                         <td style={{padding:"10px 14px"}}>
                           {(!app.status||app.status==="pending")&&(
-                            <div style={{display:"flex",gap:6}}>
+                            <div onClick={function(e){e.stopPropagation();}} style={{display:"flex",gap:6}}>
                               <Btn small onClick={function(){
                                 var id = genId("rep");
                                 var newRep = {id:id,name:app.name,email:app.email,company:app.company||"",
+                                  phone:app.phone||"",address:app.address||"",city:app.city||"",state:app.state||"",zip:app.zip||"",territory:app.territory||"",
                                   status:"active",subscriptionStatus:"trial",
                                   trialStartedAt:new Date().toISOString(),planId:"starter",
                                   createdAt:new Date().toISOString()};
@@ -6128,6 +6316,9 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
                                 var updated = Object.assign({},app,{status:"approved"});
                                 setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
                                 dbSave("crm_applications",app.id,updated);
+                                (function(){var coA=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+                                  notifyEmail("appApproved",app.email||"","You're approved — welcome to "+coA,
+                                    notifEmailHtml(coA,"Application approved","<p>Hi "+(app.name||"there")+",</p><p>Your application to join "+coA+" as a sales rep has been approved. You can now sign in to start placing orders.</p>","Sign in",getSiteUrl(),"#1ea672"));})();
                                 addToast(app.name+" approved as rep","success");
                               }}>Approve</Btn>
                               <Btn small variant="ghost" onClick={function(){
@@ -6140,6 +6331,23 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
                           )}
                         </td>
                       </tr>
+                      {expandedApp===app.id&&(
+                        <tr style={{background:C.surface2}}>
+                          <td colSpan={6} style={{padding:"2px 14px 16px 34px"}}>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"6px 24px",fontSize:12,color:C.muted,maxWidth:640}}>
+                              <div><strong style={{color:C.text}}>Phone:</strong> {app.phone||"—"}</div>
+                              <div><strong style={{color:C.text}}>Territory:</strong> {app.territory||"—"}</div>
+                              <div style={{gridColumn:"1 / -1"}}><strong style={{color:C.text}}>Address:</strong> {[app.address,app.city,app.state,app.zip].filter(Boolean).join(", ")||"—"}</div>
+                              <div><strong style={{color:C.text}}>Experience:</strong> {app.experience?app.experience+" yrs":"—"}</div>
+                              <div><strong style={{color:C.text}}>Industry:</strong> {app.industry||"—"}</div>
+                              <div style={{gridColumn:"1 / -1"}}><strong style={{color:C.text}}>Website:</strong> {app.website||"—"}</div>
+                              <div style={{gridColumn:"1 / -1"}}><strong style={{color:C.text}}>Heard about us:</strong> {app.heardAbout||"—"}</div>
+                              {app.message&&<div style={{gridColumn:"1 / -1",marginTop:4,paddingTop:8,borderTop:"1px solid "+C.border}}><strong style={{color:C.text}}>Message:</strong> {app.message}</div>}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -6502,6 +6710,11 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
         <RepPayModal order={payTarget.order} rep={payTarget.rep}
           onConfirm={function(opts){
             payCommission(payTarget.order);
+            (function(){var pr=payTarget.rep||{};var amt=(payTarget.order&&payTarget.order.totals&&payTarget.order.totals.commission)||0;
+              var coP=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+              notifyEmail("payoutPaid", pr.email||"", "Commission paid — $"+amt.toFixed(2),
+                notifEmailHtml(coP,"Payout sent","<p>Hi "+(pr.name||"there")+",</p><p>A commission payout of <strong>$"+amt.toFixed(2)+"</strong> has been marked as paid"+(payTarget.order?(" for order "+payTarget.order.id):"")+".</p>","#1ea672"),
+                {repId:pr.id||"", msg:"Commission of $"+amt.toFixed(2)+" was paid"+(payTarget.order?(" for order "+payTarget.order.id):"")+".", type:"success"});})();
             setPayTarget(null);
           }}
           onClose={function(){setPayTarget(null);}}/>
@@ -6516,6 +6729,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
 function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,orders,customers,commissions,reps,addToast}) {
   const [tab,      setTab]      = useState("supabase");
+  const [nprefs,   setNprefs]   = useState((function(){var d=Object.assign({},DEFAULT_NOTIF_PREFS);try{return Object.assign(d,JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}"));}catch(e){return d;}})());
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
   const [sbMsg,    setSbMsg]    = useState("");
@@ -6528,7 +6742,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
   const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
@@ -6706,6 +6920,42 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
             </div>
           </details>
 
+        </div>
+      )}
+
+      {tab==="notifications"&&(
+        <div style={{maxWidth:560}}>
+          <div style={{padding:"12px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:16,fontSize:12,color:C.muted,lineHeight:1.6}}>
+            Toggle which automatic emails the system sends. Customer-facing emails (confirmation, shipped, receipt) send when a rep or admin performs the action; customer-triggered ones (quote accept, signing) are delivered from an admin session. Requires Settings → Email to be configured.
+          </div>
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Admin notification email</div>
+            <input value={nprefs.adminEmail||""} onChange={function(e){setNprefs(Object.assign({},nprefs,{adminEmail:e.target.value}));}}
+              placeholder="admin@yourcompany.com" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+            <div style={{fontSize:10,color:C.dim,marginTop:4}}>Where admin alerts (new orders, applications, payout requests, terms requests) are sent. Defaults to the Email From address if left blank.</div>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+            {NOTIF_DEFS.map(function(d,i){
+              var on=nprefs[d.key]!==false;
+              return (
+                <div key={d.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,padding:"12px 16px",borderTop:i>0?"1px solid "+C.border:"none"}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600,color:C.text}}>{d.label} <span style={{fontSize:10,fontWeight:600,color:C.muted,marginLeft:6,padding:"1px 6px",borderRadius:10,background:C.surface2}}>{d.to}</span></div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>{d.desc}</div>
+                  </div>
+                  <button onClick={function(){var u=Object.assign({},nprefs);u[d.key]=!on;setNprefs(u);}}
+                    style={{flexShrink:0,width:42,height:24,borderRadius:12,border:"none",cursor:"pointer",position:"relative",background:on?C.success:C.border,transition:"background .15s"}}>
+                    <span style={{position:"absolute",top:2,left:on?20:2,width:20,height:20,borderRadius:"50%",background:"#fff",transition:"left .15s"}}/>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <Btn onClick={function(){
+            try{localStorage.setItem("__pv__notifPrefs",JSON.stringify(nprefs));}catch(e){}
+            var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"email_notifications",data:nprefs,updated_at:new Date().toISOString()}).then(function(){});
+            addToast("Notification settings saved","success");
+          }}>Save Notification Settings</Btn>
         </div>
       )}
 
@@ -7813,6 +8063,16 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       return isEdit?prev.map(function(o){return o.id===id?order:o;}): [order].concat(prev);
     });
     dbSave("crm_orders",id,order);
+    if(!isEdit){
+      var coN=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+      var custEmailN=(selCust&&selCust.email)||custEmail||"";
+      var grandN=(totals&&totals.grand)||0;
+      var custNm=(selCust&&selCust.name)||custName||"there";
+      notifyEmail("orderConfirm",custEmailN,"Order confirmation — "+id,
+        notifEmailHtml(coN,"Order received","<p>Hi "+custNm+",</p><p>We've received your order <strong>"+id+"</strong> totaling <strong>$"+grandN.toFixed(2)+"</strong>. We'll let you know as it progresses.</p>"));
+      notifyEmail("newOrderAdmin",getAdminNotifyEmail(),"New order "+id+" — "+custNm,
+        notifEmailHtml(coN,"New order placed","<p><strong>"+(repName||"A rep")+"</strong> placed order <strong>"+id+"</strong> for <strong>"+custNm+"</strong>.</p><p>Total: $"+grandN.toFixed(2)+"</p>","#1ea672"));
+    }
 
     // ── DOR: Send Invoice Link — email customer immediately ──
     if(payMethod==="due_receipt"&&dorPath==="link"&&sendOnPlace&&placeEmail.trim()) {
@@ -7820,7 +8080,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
       if(emailCfg2&&emailCfg2.edgeFnUrl&&(emailCfg2.clientSecret||emailCfg2.pass)) {
         var payTok2 = id+"_"+Math.random().toString(36).slice(2,9);
-        var payD2   = {token:payTok2,status:"pending",orderId:id,custId:order.custId,custName:order.custName||"",custEmail:placeEmail,company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",items:(order.items||[]).map(function(it){var p=(products||[]).find(function(px){return px.id===it.prodId;})||{};return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,name:p.name||it.prodId||""};}) ,totals:order.totals||{},createdAt:new Date().toISOString()};
+        var payD2   = {token:payTok2,status:"pending",orderId:id,custId:order.custId,custName:order.custName||"",custEmail:placeEmail,company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",items:(order.items||[]).map(function(it){var p=(products||[]).find(function(px){return px.id===it.prodId;})||{};return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,customerPrice:it.customerPrice||it.unitPrice||0,name:p.name||it.prodId||""};}) ,totals:order.totals||{},createdAt:new Date().toISOString()};
         localStorage.setItem("__pv__pay_"+payTok2,JSON.stringify(payD2));
         // Mark invoice as sent on the order
         var updatedWithInv = Object.assign({},order,{invoiceSentAt:new Date().toISOString(),payToken:payTok2});
@@ -9018,6 +9278,8 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
             var newReq=Object.assign({},req,{id:id});
             setTermsRequests(function(prev){return [newReq].concat(prev);});
             dbSave("crm_terms_requests",id,newReq);
+            notifyEmail("termsReq",getAdminNotifyEmail(),"Credit terms request — "+(termsReqCust&&termsReqCust.name||""),
+              notifEmailHtml("PreVasive USA","Credit terms requested","<p><strong>"+(termsReqCust&&termsReqCust.name||"A customer")+"</strong> requested credit terms"+(newReq.requestedLimit?(" with a limit of $"+newReq.requestedLimit):"")+". Review it under Tasks.</p>","#f6ab2f"));
             var updated=Object.assign({},termsReqCust,{termsStatus:"pending",termsRequestedAt:new Date().toISOString()});
             setCustomers(function(prev){return prev.map(function(x){return x.id===termsReqCust.id?updated:x;});});
             dbSave("crm_customers",termsReqCust.id,updated);
@@ -9158,6 +9420,8 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
                                status:"pending",requestedAt:new Date().toISOString()};
                       if(setPayoutRequests) setPayoutRequests(function(prev){return [req].concat(prev);});
                       dbSave("crm_payout_requests",id,req);
+                      notifyEmail("payoutReq",getAdminNotifyEmail(),"Payout requested — "+repName+" · $"+((req.amount||0)).toFixed(2),
+                        notifEmailHtml("PreVasive USA","Payout requested","<p><strong>"+repName+"</strong> requested a commission payout of <strong>$"+((req.amount||0)).toFixed(2)+"</strong> for order "+o.id+".</p>","#f6ab2f"));
                       if(addToast) addToast("Payout requested for "+o.id,"success");
                     }}>Request Payout</Btn>
                   )}
@@ -9439,6 +9703,163 @@ function getSiteUrl(){
   return origin+window.location.pathname.replace(/\/+$/,"");
 }
 
+function generateReceiptToken(order, customer, payRef, company){
+  var token=((order&&order.id)?order.id:"rcpt")+"_rcpt_"+Math.random().toString(36).slice(2,9);
+  var method=(payRef&&payRef.type)||"card";
+  var methodLabel=method==="card"
+    ?("Card"+((payRef&&payRef.last4)?" ····"+payRef.last4:""))
+    :(method.charAt(0).toUpperCase()+method.slice(1));
+  var rcptData={
+    token:token, order:order||{}, customer:customer||{},
+    company:company||"PreVasive USA",
+    paidAt:new Date().toISOString(), payMethod:methodLabel,
+    payRef:payRef||{}, createdAt:new Date().toISOString()
+  };
+  try{localStorage.setItem("__pv__rcpt_"+token,JSON.stringify(rcptData));}catch(e){}
+  var _sbR=getSB();
+  if(_sbR){_sbR.from("crm_receipt_tokens").upsert({id:token,data:rcptData,created_at:rcptData.createdAt}).then(function(){});}
+  return token;
+}
+
+function buildQuoteEmail(quote, company, link){
+  var rows=(quote.items||[]).map(function(it){
+    var lp=it.customerPrice||it.unitPrice||0;
+    return "<tr><td style='padding:6px 0;color:#4a5568'>"+(it.qty||1)+"&times; "+(it.name||it.prodId||"Item")+"</td><td style='padding:6px 0;text-align:right;color:#1a1a2e'>$"+(lp*(it.qty||1)).toFixed(2)+"</td></tr>";
+  }).join("");
+  return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
+    +"<div style='max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
+    +"<div style='background:#635bff;padding:24px 32px'><div style='color:#fff;font-size:20px;font-weight:800'>"+company+"</div>"
+    +"<div style='color:rgba(255,255,255,.8);font-size:12px'>Quote "+quote.id+"</div></div>"
+    +"<div style='padding:32px'>"
+    +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:20px'>Please review your quote below. Click to accept and we'll get your order started.</div>"
+    +"<table style='width:100%;border-collapse:collapse;font-size:13px;border-bottom:1px solid #e8ecef;margin-bottom:8px'>"+rows+"</table>"
+    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 24px'><span>Total</span><span style='color:#635bff'>$"+((quote.total||0)).toFixed(2)+"</span></div>"
+    +"<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:14px;border-radius:8px;font-weight:700;font-size:15px'>Review &amp; accept quote</a>"
+    +"<div style='font-size:11px;color:#a0aec0;text-align:center;margin-top:16px'>Or open this link:<br>"+link+"</div>"
+    +"</div></div></body></html>";
+}
+
+function buildRepNotifyEmail(snap, quote, orderId, action){
+  var accepted = action==="accepted";
+  var company = snap.company||"PreVasive USA";
+  return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
+    +"<div style='max-width:520px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
+    +"<div style='background:"+(accepted?"#1ea672":"#df1b41")+";padding:20px 28px;color:#fff;font-size:17px;font-weight:800'>Quote "+(accepted?"accepted":"declined")+"</div>"
+    +"<div style='padding:28px;font-size:14px;color:#1a1a2e;line-height:1.7'>"
+    +"<p><strong>"+(snap.custName||"A customer")+"</strong> "+(accepted?"accepted":"declined")+" quote <strong>"+quote.id+"</strong>"+(accepted&&orderId?" — order <strong>"+orderId+"</strong> has been created.":".")+"</p>"
+    +"<p style='color:#6b7c93;font-size:13px'>Total: $"+((quote.total||0)).toFixed(2)+"</p>"
+    +(accepted?"<p style='color:#6b7c93;font-size:13px'>The order is in your pipeline as Submitted. Send a payment link or invoice when ready.</p>":"")
+    +"</div></div></body></html>";
+}
+
+var NOTIF_DEFS = [
+  {key:"orderConfirm",  label:"Order confirmation",        to:"Customer", desc:"When a rep places an order."},
+  {key:"shipped",       label:"Shipped + tracking",        to:"Customer", desc:"When tracking is entered and the order ships."},
+  {key:"delivered",     label:"Delivered",                 to:"Customer", desc:"When an order is marked delivered."},
+  {key:"receipt",       label:"Payment receipt",           to:"Customer", desc:"When a payment is collected / marked paid."},
+  {key:"quoteReady",    label:"Quote ready",               to:"Customer", desc:"When a rep sends a quote (accept link)."},
+  {key:"quoteResult",   label:"Quote accepted / declined", to:"Rep",      desc:"When a customer accepts or declines a quote."},
+  {key:"newOrderAdmin", label:"New order placed",          to:"Admin",    desc:"When a rep submits an order."},
+  {key:"newApp",        label:"New rep application",       to:"Admin",    desc:"When someone applies to become a rep."},
+  {key:"appApproved",   label:"Application approved",      to:"Rep",      desc:"When an admin approves a rep application."},
+  {key:"termsReq",      label:"Credit terms request",      to:"Admin",    desc:"When a customer requests credit terms."},
+  {key:"termsApproved", label:"Credit terms approved",     to:"Rep",      desc:"When an admin approves credit terms."},
+  {key:"payoutReq",     label:"Payout requested",          to:"Admin",    desc:"When a rep requests a commission payout."},
+  {key:"payoutPaid",    label:"Payout paid",               to:"Rep",      desc:"When an admin marks a payout as paid."},
+  {key:"signed",        label:"Agreement signed",          to:"Rep",      desc:"When a customer signs a credit agreement."}
+];
+var DEFAULT_NOTIF_PREFS = (function(){var p={adminEmail:""};NOTIF_DEFS.forEach(function(d){p[d.key]=true;});return p;})();
+
+function getNotifPrefs(){ try{return JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}");}catch(e){return {};} }
+function notifEnabled(key){ return getNotifPrefs()[key]!==false; }
+function getAdminNotifyEmail(){ var p=getNotifPrefs(); var e=(p.adminEmail||"").trim(); if(e) return e; try{return JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}").fromEmail||"";}catch(x){return "";} }
+
+function notifEmailHtml(company, heading, bodyHtml, ctaLabel, ctaLink, accent){
+  accent=accent||"#635bff";
+  return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
+    +"<div style='max-width:540px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
+    +"<div style='background:"+accent+";padding:22px 30px'><div style='color:#fff;font-size:19px;font-weight:800'>"+(company||"PreVasive USA")+"</div>"
+    +"<div style='color:rgba(255,255,255,.85);font-size:13px;margin-top:2px'>"+heading+"</div></div>"
+    +"<div style='padding:28px 30px;font-size:14px;color:#1a1a2e;line-height:1.7'>"+bodyHtml
+    +(ctaLink?("<div style='margin-top:18px'><a href='"+ctaLink+"' style='display:inline-block;background:"+accent+";color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:700;font-size:14px'>"+(ctaLabel||"View")+"</a></div>"):"")
+    +"</div></div></body></html>";
+}
+
+function _writeNotifRow(o){
+  var sb=getSB(); if(!sb) return;
+  if(!o.to && !o.msg) return;
+  var id="ntf_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+  var row=Object.assign({id:id,ts:new Date().toISOString(),read:false},o);
+  sb.from("crm_notifications").upsert({id:id,data:row,created_at:row.ts}).then(function(){});
+}
+// Central notification. Sends immediately if this session has email credentials (admin),
+// otherwise queues a row that an admin session delivers. `bell` optionally shows in a rep's bell.
+function notifyEmail(key, to, subject, html, bell){
+  if(!notifEnabled(key)){ if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"}); return; }
+  var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+  var canSend = to && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
+  if(canSend){
+    fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){});
+    if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"});
+    return;
+  }
+  _writeNotifRow({key:key,to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,
+    repId:(bell&&bell.repId)||"",msg:(bell&&bell.msg)||"",type:(bell&&bell.type)||"info"});
+}
+
+function QuoteAcceptPage({snap, onAccept, onDecline}){
+  const [busy,setBusy]=useState(false);
+  var quote=snap.quote||{};
+  var company=snap.company||"PreVasive USA";
+  var items=quote.items||[];
+  var expired=quote.validUntil&&new Date(quote.validUntil)<new Date();
+  function money(n){return "$"+(Math.round((n||0)*100)/100).toFixed(2);}
+  return (
+    <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
+      <div style={{maxWidth:520,margin:"0 auto"}}>
+        <div style={{textAlign:"center",marginBottom:24}}>
+          <div style={{fontWeight:800,fontSize:20,color:"#1a1a2e",marginBottom:4}}>{company}</div>
+          <div style={{fontSize:13,color:"#6b7c93"}}>Quote {quote.id}</div>
+        </div>
+        <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>Order summary</div>
+          {items.map(function(it,i){
+            var lp=it.customerPrice||it.unitPrice||0;
+            return (
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:8}}>
+                <span>{(it.qty||1)}× {it.name||it.prodId||"Item"}</span>
+                <span style={{fontWeight:600,color:"#1a1a2e"}}>{money(lp*(it.qty||1))}</span>
+              </div>
+            );
+          })}
+          <div style={{borderTop:"1px solid #e8ecef",marginTop:12,paddingTop:12}}>
+            {(quote.shipping||0)>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span>{money(quote.shipping)}</span></div>}
+            {(quote.tax||0)>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Sales Tax</span><span>{money(quote.tax)}</span></div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,color:"#1a1a2e",marginTop:8}}>
+              <span>Total</span><span style={{color:"#635bff"}}>{money(quote.total)}</span>
+            </div>
+          </div>
+          {quote.validUntil&&<div style={{fontSize:11,color:expired?"#df1b41":"#a0aec0",marginTop:12,textAlign:"center"}}>{expired?"This quote has expired.":"Valid until "+new Date(quote.validUntil).toLocaleDateString()}</div>}
+        </div>
+        {!expired&&(
+          <div style={{background:"#fff",borderRadius:12,padding:"20px",boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
+            <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+              style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"14px",borderRadius:8,fontWeight:700,fontSize:15,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit"}}>
+              {busy?"Processing…":"Accept quote"}
+            </button>
+            <button disabled={busy} onClick={function(){if(busy)return;setBusy(true);onDecline();}}
+              style={{width:"100%",background:"none",color:"#6b7c93",border:"none",padding:"12px",marginTop:6,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+              Decline
+            </button>
+            <div style={{fontSize:10,color:"#a0aec0",textAlign:"center",marginTop:8}}>Accepting creates your order. We'll be in touch with next steps.</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 
 /* ─── PayTokenLoader ─────────────────────────────────────────────────────── */
 
@@ -9505,6 +9926,7 @@ function App() {
   const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",tenantId:"",clientId:"",clientSecret:"",edgeFnUrl:""});
   const [discountCodes, setDiscountCodes] = useLS("discountCodes", [{id:"dc1",code:"PREVA10",type:"percent",value:10,active:true,uses:0},{id:"dc2",code:"PREVA50",type:"fixed",value:50,active:true,uses:0}]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
+  const [notifPrefs,  setNotifPrefs]  = useLS("notifPrefs", DEFAULT_NOTIF_PREFS);
   const [toasts,      setToasts]      = useState([]);
   const [resultModal, setResultModal] = useState(null);
   const [viewAsRep,   setViewAsRep]   = useState(null);
@@ -9514,6 +9936,17 @@ function App() {
   const [payDataFromDB,setPayDataFromDB] = useState(null);
   const [payDataLoading,setPayDataLoading] = useState(false);
   const [payDataNotFound,setPayDataNotFound] = useState(false);
+  const [rcptDataFromDB, setRcptDataFromDB]  = useState(null);
+  const [rcptLoading,    setRcptLoading]     = useState(false);
+  const [rcptNotFound,   setRcptNotFound]    = useState(false);
+  const [signDataFromDB, setSignDataFromDB]  = useState(null);
+  const [signLoading,    setSignLoading]     = useState(false);
+  const [signNotFound,   setSignNotFound]    = useState(false);
+  const [qToken,         setQToken]          = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]quote=([^&]+)/);return m?m[1]:null;})());
+  const [quoteSnap,      setQuoteSnap]       = useState(null);
+  const [quoteLoading,   setQuoteLoading]    = useState(false);
+  const [quoteNotFound,  setQuoteNotFound]   = useState(false);
+  const [quoteDone,      setQuoteDone]       = useState(null);
 
   // Fetch payment token from Supabase if not in localStorage
   useEffect(function(){
@@ -9537,6 +9970,131 @@ function App() {
       }).catch(function(){setPayDataLoading(false);setPayDataNotFound(true);});
   },[payToken]);
   const [receiptToken, setReceiptToken] = useState((function(){var h=window.location.hash||"";var m=h.match(/[#&]receipt=([^&]+)/);return m?m[1]:null;})());
+
+  // Fetch receipt token from Supabase if not in localStorage (cross-device)
+  useEffect(function(){
+    if(!receiptToken) return;
+    var local=null;
+    try{local=JSON.parse(localStorage.getItem("__pv__rcpt_"+receiptToken)||"null");}catch(e){}
+    if(local){setRcptDataFromDB(local);return;}
+    var sbR=getSB();
+    if(!sbR){setRcptNotFound(true);return;}
+    setRcptLoading(true);
+    sbR.from("crm_receipt_tokens").select("*").eq("id",receiptToken).single()
+      .then(function(result){
+        setRcptLoading(false);
+        if(result.data&&result.data.data){
+          localStorage.setItem("__pv__rcpt_"+receiptToken,JSON.stringify(result.data.data));
+          setRcptDataFromDB(result.data.data);
+        } else { setRcptNotFound(true); }
+      }).catch(function(){setRcptLoading(false);setRcptNotFound(true);});
+  },[receiptToken]);
+
+  // Fetch signing token from Supabase if not in localStorage (cross-device)
+  useEffect(function(){
+    if(!signingToken) return;
+    var local=null;
+    try{local=JSON.parse(localStorage.getItem("__pv__sign_"+signingToken)||"null");}catch(e){}
+    if(local){setSignDataFromDB(local);return;}
+    var sbS=getSB();
+    if(!sbS){setSignNotFound(true);return;}
+    setSignLoading(true);
+    sbS.from("crm_sign_tokens").select("*").eq("id",signingToken).single()
+      .then(function(result){
+        setSignLoading(false);
+        if(result.data&&result.data.data){
+          localStorage.setItem("__pv__sign_"+signingToken,JSON.stringify(result.data.data));
+          setSignDataFromDB(result.data.data);
+        } else { setSignNotFound(true); }
+      }).catch(function(){setSignLoading(false);setSignNotFound(true);});
+  },[signingToken]);
+
+  // Fetch quote token from Supabase if not in localStorage (cross-device)
+  useEffect(function(){
+    if(!qToken) return;
+    var local=null; try{local=JSON.parse(localStorage.getItem("__pv__quote_"+qToken)||"null");}catch(e){}
+    if(local){setQuoteSnap(local);return;}
+    var sbq=getSB(); if(!sbq){setQuoteNotFound(true);return;}
+    setQuoteLoading(true);
+    sbq.from("crm_quote_tokens").select("*").eq("id",qToken).single().then(function(res){
+      setQuoteLoading(false);
+      if(res.data&&res.data.data){localStorage.setItem("__pv__quote_"+qToken,JSON.stringify(res.data.data));setQuoteSnap(res.data.data);}
+      else setQuoteNotFound(true);
+    }).catch(function(){setQuoteLoading(false);setQuoteNotFound(true);});
+  },[qToken]);
+
+  function writeRepNotif(snap, quote, orderId, action){
+    var accepted=action==="accepted";
+    var msg="Quote "+quote.id+(accepted?(" accepted by "+(snap.custName||"customer")+" — order "+orderId+" created."):(" declined by "+(snap.custName||"customer")+"."));
+    var subject="Quote "+quote.id+(accepted?(" accepted — order "+orderId+" created"):" declined");
+    notifyEmail("quoteResult", snap.repEmail||"", subject, buildRepNotifyEmail(snap,quote,orderId,action),
+      {repId:snap.repId||quote.repId||"", msg:msg, type:accepted?"success":"error"});
+  }
+
+  function acceptQuote(){
+    var snap=quoteSnap; if(!snap) return;
+    var q=snap.quote||{};
+    var commR=q.commissionRate||0;
+    var base=(q.productBase!=null)?q.productBase:(q.total||0);
+    var ship=q.shipping||0, tax=q.tax||0;
+    var subtotal=Math.round(base*(1+commR/100)*100)/100;
+    var grand=(q.total!=null)?q.total:Math.round((subtotal+ship+tax)*100)/100;
+    var oid="ORD-"+String(Date.now()).slice(-6);
+    var order=Object.assign({},q,{id:oid,status:"Submitted",createdAt:new Date().toISOString(),
+      commissionRate:commR,shipAddress:q.shipAddress||snap.shipAddress||null,
+      totals:{baseSubtotal:base,subtotal:subtotal,shipping:ship,tax:tax,taxRate:q.taxRate||0,grand:grand,
+              commission:Math.round(base*commR/100*100)/100,commRate:commR,shippingService:q.shippingService||""},
+      quoteId:q.id,payMethod:"pay_later",acceptedByCustomer:true,acceptedAt:new Date().toISOString()});
+    var sb=getSB();
+    if(sb){
+      sb.from("crm_orders").upsert({id:oid,data:order,updated_at:new Date().toISOString()}).then(function(){});
+      sb.from("crm_quotes").upsert({id:q.id,data:Object.assign({},q,{status:"accepted",convertedOrderId:oid,acceptedAt:new Date().toISOString()}),updated_at:new Date().toISOString()}).then(function(){});
+      var snapUpd=Object.assign({},snap,{status:"accepted",orderId:oid,acceptedAt:new Date().toISOString()});
+      sb.from("crm_quote_tokens").upsert({id:qToken,data:snapUpd,updated_at:new Date().toISOString()}).then(function(){});
+      try{localStorage.setItem("__pv__quote_"+qToken,JSON.stringify(snapUpd));}catch(e){}
+      writeRepNotif(snap,q,oid,"accepted");
+    }
+    setQuoteDone("accepted");
+  }
+
+  function declineQuote(){
+    var snap=quoteSnap; if(!snap) return;
+    var q=snap.quote||{};
+    var sb=getSB();
+    if(sb){
+      sb.from("crm_quotes").upsert({id:q.id,data:Object.assign({},q,{status:"declined",declinedAt:new Date().toISOString()}),updated_at:new Date().toISOString()}).then(function(){});
+      var snapUpd=Object.assign({},snap,{status:"declined",declinedAt:new Date().toISOString()});
+      sb.from("crm_quote_tokens").upsert({id:qToken,data:snapUpd,updated_at:new Date().toISOString()}).then(function(){});
+      try{localStorage.setItem("__pv__quote_"+qToken,JSON.stringify(snapUpd));}catch(e){}
+      writeRepNotif(snap,q,"","declined");
+    }
+    setQuoteDone("declined");
+  }
+
+  // Admin sessions deliver queued rep-notification emails (customer device has no email creds)
+  useEffect(function(){
+    if(!currentUser||currentUser.role!=="admin") return;
+    var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    if(!cfg||!cfg.edgeFnUrl||!(cfg.clientSecret||cfg.pass)) return;
+    notifications.forEach(function(n){
+      var dest = n && (n.to||n.repEmail);
+      if(n&&n.emailPending&&dest){
+        if(n.key&&!notifEnabled(n.key)){
+          var skip=Object.assign({},n,{emailPending:false,skipped:true});
+          setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?skip:x;});});
+          var sbx=getSB(); if(sbx) sbx.from("crm_notifications").upsert({id:n.id,data:skip,created_at:n.ts||new Date().toISOString()}).then(function(){});
+          return;
+        }
+        var marked=Object.assign({},n,{emailPending:false,emailSentAt:new Date().toISOString()});
+        setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?marked:x;});});
+        var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:marked,created_at:n.ts||new Date().toISOString()}).then(function(){});
+        fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({to:dest,subject:n.emailSubject||"Notification",html:n.emailHtml||"",
+            fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})
+        }).then(function(){}).catch(function(){});
+      }
+    });
+  },[notifications,currentUser]);
 
   // Handle Stripe Connect return — update rep stripeConnectId
   useEffect(function(){
@@ -9626,6 +10184,14 @@ function App() {
     dbLoad("crm_quotes").then(function(d){if(alive) setQuotes(d);});
     dbLoad("crm_terms_requests").then(function(d){if(alive) setTermsRequests(d);});
     dbLoad("crm_payout_requests").then(function(d){if(alive) setPayoutRequests(d);});
+    dbLoad("crm_notifications").then(function(d){if(alive){
+      var rid=currentUser.rep_id||currentUser.id;
+      var mine=(currentUser.role==="admin")?d:d.filter(function(n){return n.repId===rid;});
+      mine.sort(function(a,b){return (b.ts||"").localeCompare(a.ts||"");});
+      setNotifications(mine.slice(0,50));
+    }});
+    (function(){var sbs=getSB(); if(sbs) sbs.from("crm_settings").select("data").eq("id","email_notifications").single()
+      .then(function(r){if(alive&&r.data&&r.data.data) setNotifPrefs(r.data.data);}).catch(function(){});})();
     Promise.all([]).then(function(){if(alive) setDataLoading(false);}); 
     return function(){alive=false;};
   }, [currentUser&&currentUser.id]);
@@ -9637,11 +10203,19 @@ function App() {
     setCurrentUser(null); setActiveTab("dashboard");
   }
 
-  // Receipt page — no auth required
+  // Receipt page — no auth required (cross-device via Supabase)
   if(receiptToken) {
-    var rcptData = null;
-    try { rcptData = JSON.parse(localStorage.getItem("__pv__rcpt_"+receiptToken)||"null"); } catch(e){}
+    var rcptData = rcptDataFromDB;
+    if(!rcptData){ try { rcptData = JSON.parse(localStorage.getItem("__pv__rcpt_"+receiptToken)||"null"); } catch(e){} }
     if(rcptData) return React.createElement(ReceiptPage, {receiptData:rcptData});
+    if(rcptNotFound) return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:40}},"❌"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Receipt not found or expired")
+    );
+    return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:40}},"⏳"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading receipt…")
+    );
   }
 
   // Invoice payment page — no auth required
@@ -9669,6 +10243,8 @@ function App() {
           var co2 = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
           var rToken = generateReceiptToken(payData2.order,payData2.customer,{type:result.method},co2);
           var rLink  = getSiteUrl()+"#receipt="+rToken;
+          notifyEmail("receipt",(payData2.custEmail||(payData2.customer&&payData2.customer.email)||""),"Payment receipt — "+((payData2.order&&payData2.order.id)||payData2.orderId||""),
+            notifEmailHtml(co2,"Payment received","<p>Thank you — we've received your payment"+((payData2.order&&payData2.order.id)?(" for order "+payData2.order.id):"")+".</p>","View receipt",rLink,"#1ea672"));
           updated.receiptToken = rToken;
           updated.receiptLink  = rLink;
           localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
@@ -9687,10 +10263,23 @@ function App() {
     }
   }
 
-  // Credit agreement signing page — no auth required
+  // Credit agreement signing page — no auth required (cross-device via Supabase)
   if(signingToken) {
-    var sigData = null;
-    try { sigData = JSON.parse(localStorage.getItem("__pv__sign_"+signingToken)||"null"); } catch(e){}
+    var sigData = signDataFromDB;
+    if(!sigData){ try { sigData = JSON.parse(localStorage.getItem("__pv__sign_"+signingToken)||"null"); } catch(e){} }
+    if(!sigData && signLoading) return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:40}},"⏳"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading agreement…")
+    );
+    if(!sigData && signNotFound) return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12}},
+      React.createElement("div",{style:{fontSize:40}},"❌"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Signing link not found or expired")
+    );
+    if(sigData && sigData.status==="signed") return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:12,textAlign:"center",padding:"0 16px"}},
+      React.createElement("div",{style:{fontSize:40}},"✅"),
+      React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"This agreement has already been signed"),
+      React.createElement("div",{style:{fontSize:13,color:"#6b7c93"}},"Thank you — no further action is needed.")
+    );
     if(sigData && sigData.status!=="signed") {
       return React.createElement(CustomerSigningPage, {
         signingData: sigData,
@@ -9699,6 +10288,13 @@ function App() {
             signerName:sig.signerName,signerTitle:sig.signerTitle,signedAt:sig.signedAt});
           localStorage.setItem("__pv__sign_"+signingToken, JSON.stringify(updatedSig));
           var sb = getSB();
+          if(sb){ sb.from("crm_sign_tokens").upsert({id:signingToken,data:updatedSig,updated_at:new Date().toISOString()}).then(function(){}); }
+          (function(){
+            var cnm=(sigData.customer&&sigData.customer.name)||"A customer";
+            notifyEmail("signed", sigData.repEmail||"", "Credit agreement signed — "+cnm,
+              notifEmailHtml(sigData.company||"PreVasive USA","Agreement signed","<p><strong>"+cnm+"</strong> has signed their credit agreement. Their account is now active.</p>","#1ea672"),
+              {repId:sigData.repId||"", msg:cnm+" signed their credit agreement.", type:"success"});
+          })();
           if(sb && sigData.customer && sigData.customer.id) {
             // Merge signing data INTO existing customer — do NOT overwrite entire record
             var updatedCust = Object.assign({},sigData.customer,{
@@ -9741,6 +10337,22 @@ function App() {
         },
       });
     }
+  }
+
+  if(qToken){
+    var qScreen=function(icon,title,sub){return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",flexDirection:"column",gap:10,textAlign:"center",padding:"0 16px"}},
+      React.createElement("div",{style:{fontSize:42}},icon),
+      React.createElement("div",{style:{fontWeight:800,fontSize:18,color:"#1a1a2e"}},title),
+      sub?React.createElement("div",{style:{fontSize:13,color:"#6b7c93",maxWidth:340}},sub):null);};
+    if(quoteDone==="accepted") return qScreen("✅","Quote accepted!","Thanks — your order has been created. We'll be in touch with next steps.");
+    if(quoteDone==="declined") return qScreen("👍","Quote declined","Thanks for letting us know. Reach out anytime if anything changes.");
+    var qs=quoteSnap;
+    if(!qs && quoteLoading) return qScreen("⏳","Loading quote…");
+    if(!qs && quoteNotFound) return qScreen("❌","Quote link not found or expired");
+    if(qs && qs.status==="accepted") return qScreen("✅","This quote was already accepted","Your order is being processed — no further action needed.");
+    if(qs && qs.status==="declined") return qScreen("👍","This quote was declined","No further action is needed.");
+    if(qs) return React.createElement(QuoteAcceptPage,{snap:qs,onAccept:acceptQuote,onDecline:declineQuote});
+    return qScreen("⏳","Loading…");
   }
 
   if(inviteToken) return React.createElement(InviteRegistration,{
