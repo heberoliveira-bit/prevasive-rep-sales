@@ -1673,7 +1673,13 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     doc.text(cust.name || order.custName || 'Customer', margin, y); y += 5;
     if(cust.email) { doc.text(cust.email, margin, y); y += 5; }
     if(cust.phone) { doc.text(cust.phone, margin, y); y += 5; }
-    var addr = (cust.addresses&&cust.addresses[0])||cust;
+    var addr = {
+      address: cust.billingAddress||cust.address||"",
+      address2: cust.billingAddress2||"",
+      city: cust.billingCity||cust.city||"",
+      state: cust.billingState||cust.state||"",
+      zip: cust.billingZip||cust.zip||""
+    };
     if(addr.address) { doc.text(addr.address, margin, y); y += 5; }
     if(addr.city) { doc.text((addr.city||'') + (addr.state ? ', '+addr.state : '') + (addr.zip ? ' '+addr.zip : ''), margin, y); y += 5; }
     y += 6;
@@ -2546,43 +2552,132 @@ function MultiAddressManager({addresses,onChange}) {
 
 function CustomerEditModal({customer,onSave,onClose,addToast}) {
   var approved=customer.termsStatus==="active"||customer.termsStatus==="awaiting_signature"||customer.termsStatus==="approved";
-  const [name,      setName]      = useState(customer.name||"");
-  const [email,     setEmail]     = useState(customer.email||"");
-  const [phone,     setPhone]     = useState(customer.phone||"");
-  const [company,   setCompany]   = useState(customer.company||"");
-  const [addresses, setAddresses] = useState((function(){
-    if(customer.addresses&&customer.addresses.length>0) return customer.addresses;
-    if(customer.address) return [{id:genId("adr"),label:"Primary",address:customer.address||"",city:customer.city||"",state:customer.state||"",zip:customer.zip||"",isPrimary:true}];
-    return [];
-  })());
+  const [name,     setName]     = useState(customer.name||"");
+  const [email,    setEmail]    = useState(customer.email||"");
+  const [phone,    setPhone]    = useState(customer.phone||"");
+  const [company,  setCompany]  = useState(customer.company||"");
+  /* Billing address */
+  const [bAddr,  setBAddr]  = useState(customer.billingAddress||customer.address||"");
+  const [bAddr2, setBAddr2] = useState(customer.billingAddress2||"");
+  const [bCity,  setBCity]  = useState(customer.billingCity||customer.city||"");
+  const [bState, setBState] = useState(customer.billingState||customer.state||"");
+  const [bZip,   setBZip]   = useState(customer.billingZip||customer.zip||"");
+  /* Shipping address */
+  const [sameAs,  setSameAs]  = useState(customer.shippingSameAsBilling!==false&&!customer.shippingAddress);
+  const [sAddr,  setSAddr]  = useState(customer.shippingAddress||"");
+  const [sAddr2, setSAddr2] = useState(customer.shippingAddress2||"");
+  const [sCity,  setSCity]  = useState(customer.shippingCity||"");
+  const [sState, setSState] = useState(customer.shippingState||"");
+  const [sZip,   setSZip]   = useState(customer.shippingZip||"");
+
+  var inpS={width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
+  var secHdr={fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10,marginTop:2};
+
   function save(){
     if(!name.trim()) return;
-    var primary=addresses.find(function(a){return a.isPrimary;})||addresses[0]||{};
     var updated=Object.assign({},customer,{
-      name:approved?customer.name:name.trim(),email:email.trim(),phone:phone.trim(),company:company.trim(),
-      addresses:addresses,address:primary.address||"",city:primary.city||"",state:primary.state||"",zip:primary.zip||"",
+      name:approved?customer.name:name.trim(),
+      email:email.trim(),phone:phone.trim(),company:company.trim(),
+      /* billing */
+      billingAddress:bAddr.trim(),billingAddress2:bAddr2.trim(),
+      billingCity:bCity.trim(),billingState:bState.trim(),billingZip:bZip.trim(),
+      /* legacy flat fields — keep in sync with billing */
+      address:bAddr.trim(),city:bCity.trim(),state:bState.trim(),zip:bZip.trim(),
+      /* shipping */
+      shippingSameAsBilling:sameAs,
+      shippingAddress:sameAs?bAddr.trim():sAddr.trim(),
+      shippingAddress2:sameAs?bAddr2.trim():sAddr2.trim(),
+      shippingCity:sameAs?bCity.trim():sCity.trim(),
+      shippingState:sameAs?bState.trim():sState.trim(),
+      shippingZip:sameAs?bZip.trim():sZip.trim(),
       updatedAt:new Date().toISOString(),
     });
     onSave(updated);addToast("Customer updated","success");onClose();
   }
+
   return (
-    <Modal title={"Edit Customer — "+customer.name} onClose={onClose}
+    <Modal title={"Edit Customer — "+customer.name} wide={true} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="ghost" onClick={onClose}>Cancel</Btn><Btn onClick={save}>Save Changes</Btn></div>}>
       {approved&&<div style={{padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,marginBottom:14,fontSize:12,color:C.warning,fontWeight:600}}>⚠ Credit account approved — name cannot be changed.</div>}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
         <div style={{gridColumn:"1/-1"}}>
           <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Full Name {approved&&<span style={{color:C.warning,fontSize:10}}>🔒 Locked</span>}</div>
-          <input value={approved?customer.name:name} onChange={function(e){if(!approved)setName(e.target.value);}} disabled={approved}
-            style={{width:"100%",background:approved?C.surface2:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:approved?C.dim:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+          <input value={approved?customer.name:name} onChange={function(e){if(!approved)setName(e.target.value);}} disabled={approved} style={Object.assign({},inpS,{background:approved?C.surface2:C.bg,color:approved?C.dim:C.text})}/>
         </div>
         <div style={{gridColumn:"1/-1"}}><Field label="Company / Practice" value={company} onChange={setCompany} placeholder="e.g. Atlanta Medical Group"/></div>
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="email@practice.com"/>
         <Field label="Phone" value={phone} onChange={setPhone} placeholder="(404) 555-0100"/>
-        <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
-        <div style={{gridColumn:"1/-1"}}>
-          <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Addresses</div>
-          <MultiAddressManager addresses={addresses} onChange={setAddresses}/>
+      </div>
+
+      {/* Billing Address */}
+      <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:12,border:"1px solid "+C.border}}>
+        <div style={secHdr}>🧾 Billing Address</div>
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Street Address</div>
+          <input value={bAddr} onChange={function(e){setBAddr(e.target.value);}} placeholder="123 Main St" style={inpS}/>
         </div>
+        <div style={{marginBottom:10}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Address Line 2 <span style={{color:C.dim}}>(Suite, Floor, etc.)</span></div>
+          <input value={bAddr2} onChange={function(e){setBAddr2(e.target.value);}} placeholder="Suite 400" style={inpS}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10}}>
+          <div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>City</div>
+            <input value={bCity} onChange={function(e){setBCity(e.target.value);}} placeholder="Atlanta" style={inpS}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>State</div>
+            <input value={bState} onChange={function(e){setBState(e.target.value);}} placeholder="GA" style={inpS}/>
+          </div>
+          <div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>ZIP</div>
+            <input value={bZip} onChange={function(e){setBZip(e.target.value);}} placeholder="30301" style={inpS}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Shipping Address */}
+      <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",border:"1px solid "+C.border}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+          <div style={Object.assign({},secHdr,{marginBottom:0,marginTop:0})}>📦 Shipping Address</div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",fontSize:12,color:C.muted}}>
+            <input type="checkbox" checked={sameAs} onChange={function(e){setSameAs(e.target.checked);}}
+              style={{width:14,height:14,accentColor:C.accent,cursor:"pointer"}}/>
+            Same as billing
+          </label>
+        </div>
+        {sameAs?(
+          <div style={{padding:"10px 14px",background:C.bg,borderRadius:7,border:"1px solid "+C.border,fontSize:12,color:C.muted,lineHeight:1.7}}>
+            {bAddr&&<div>{bAddr}{bAddr2?" · "+bAddr2:""}</div>}
+            {bCity&&<div>{bCity}{bState?", "+bState:""}{bZip?" "+bZip:""}</div>}
+            {!bAddr&&!bCity&&<span style={{color:C.dim}}>Enter billing address above</span>}
+          </div>
+        ):(
+          <div>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Street Address</div>
+              <input value={sAddr} onChange={function(e){setSAddr(e.target.value);}} placeholder="456 Industrial Blvd" style={inpS}/>
+            </div>
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Address Line 2</div>
+              <input value={sAddr2} onChange={function(e){setSAddr2(e.target.value);}} placeholder="Warehouse" style={inpS}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10}}>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>City</div>
+                <input value={sCity} onChange={function(e){setSCity(e.target.value);}} placeholder="Duluth" style={inpS}/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>State</div>
+                <input value={sState} onChange={function(e){setSState(e.target.value);}} placeholder="GA" style={inpS}/>
+              </div>
+              <div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:4}}>ZIP</div>
+                <input value={sZip} onChange={function(e){setSZip(e.target.value);}} placeholder="30097" style={inpS}/>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </Modal>
   );
@@ -2705,6 +2800,9 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCou
 
 
 
+
+</script>
+<script id="c5" type="text/plain">
 function FulfillmentModal({order,customers,products,onSend,onClose}) {
   const [carrier,  setCarrier]  = useState("UPS");
   const [trackNum, setTrackNum] = useState(order.trackingNumber||"");
@@ -2816,9 +2914,6 @@ function RepPayModal({order,rep,onConfirm,onClose}) {
 }
 
 
-
-</script>
-<script id="c5" type="text/plain">
 function ReturnModal({order,currentUser,onProcess,onClose}) {
   const [reason,   setReason]   = useState("");
   const [type,     setType]     = useState("full");
@@ -3019,17 +3114,20 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 
       {tab==="addresses"&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
-          {[["Billing Address",customer.billingAddress||customer.address],
-            ["Shipping Address",customer.shippingAddress||customer.address]
-          ].map(function(block,i){return (
+          {(function(){
+            var billing=[customer.billingAddress||customer.address,customer.billingAddress2,(customer.billingCity||customer.city)&&((customer.billingCity||customer.city)+(customer.billingState||customer.state?", "+(customer.billingState||customer.state):"")+(customer.billingZip||customer.zip?" "+(customer.billingZip||customer.zip):""))].filter(Boolean).join("\n");
+            var sameAs=customer.shippingSameAsBilling!==false&&!customer.shippingAddress;
+            var shipping=sameAs?"Same as billing":[customer.shippingAddress,customer.shippingAddress2,customer.shippingCity&&(customer.shippingCity+(customer.shippingState?", "+customer.shippingState:"")+(customer.shippingZip?" "+customer.shippingZip:""))].filter(Boolean).join("\n");
+            return [["🧾 Billing Address",billing],["📦 Shipping Address",shipping]].map(function(block,i){return (
             <div key={i} style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
               <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{block[0]}</div>
               {block[1] ? (
-                <div style={{fontSize:13,color:C.text,lineHeight:1.7}}>{block[1]}</div>
+                <div style={{fontSize:13,color:block[1]==="Same as billing"?C.muted:C.text,lineHeight:1.8,whiteSpace:"pre-line",fontStyle:block[1]==="Same as billing"?"italic":"normal"}}>{block[1]}</div>
               ) : (
                 <div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>Not set</div>
               )}
             </div>
+          );});})()}
           );})}
         </div>
       )}
@@ -3038,6 +3136,9 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
+
+</script>
+<script id="c6" type="text/plain">
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
@@ -3530,7 +3631,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 /* CustomerEditModal also rendered in AdminCustomers — see wiring below */
 
 </script>
-<script id="c6" type="text/plain">
+<script id="c7" type="text/plain">
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
   const [tab,      setTab]      = useState("docs");
   const [showForm, setShowForm] = useState(false);
@@ -3881,7 +3982,7 @@ function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
 
 
 </script>
-<script id="c7" type="text/plain">
+<script id="c8" type="text/plain">
 function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders,
                        currentUser,isAdmin,addToast,showResult}) {
   const [showForm,  setShowForm]  = useState(false);
@@ -4384,7 +4485,7 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
 
 
 </script>
-<script id="c8" type="text/plain">
+<script id="c9" type="text/plain">
 function HelpModal({isAdmin,onClose}) {
   const [tab, setTab] = useState(isAdmin?"admin":"rep");
   var ADMIN_FAQ = [
@@ -4966,7 +5067,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
 /* ─── Admin Dashboard ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c9" type="text/plain">
+<script id="c10" type="text/plain">
 function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   const [range, setRange] = useState("month");
   var now2 = new Date();
@@ -5647,7 +5748,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
 /* ─── Admin Products ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c10" type="text/plain">
+<script id="c11" type="text/plain">
 function AdminProducts({products,setProducts,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editing,  setEditing]  = useState(null);
@@ -6176,7 +6277,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 /* ─── Admin Commissions ──────────────────────────────────────────────────── */
 
 </script>
-<script id="c11" type="text/plain">
+<script id="c12" type="text/plain">
 function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests}) {
   const [payTarget,    setPayTarget]    = useState(null);
   const [releasingAll, setReleasingAll] = useState(false);
@@ -7180,7 +7281,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
 /* ─── Commission Statement ───────────────────────────────────────────────── */
 
 </script>
-<script id="c12" type="text/plain">
+<script id="c13" type="text/plain">
 function CommissionStatement({repId,orders,commissions,repName}) {
   var now3 = new Date();
   var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -8500,7 +8601,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 /* ─── Rep Dashboard ──────────────────────────────────────────────────────── */
 
 </script>
-<script id="c13" type="text/plain">
+<script id="c14" type="text/plain">
 function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast,reps,currentUser}) {
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -8947,7 +9048,7 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
 /* ─── Rep Commissions ────────────────────────────────────────────────────── */
 
 </script>
-<script id="c14" type="text/plain">
+<script id="c15" type="text/plain">
 function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
   var myOrds = orders.filter(function(o){return o.repId===repId;});
@@ -9346,7 +9447,7 @@ function getSiteUrl(){
 /* ─── PayTokenLoader ─────────────────────────────────────────────────────── */
 
 </script>
-<script id="c15" type="text/plain">
+<script id="c16" type="text/plain">
 function PayTokenLoader({token, sb, onLoaded, onNotFound}) {
   const [notFound, setNotFound] = useState(false);
   const [loaded,   setLoaded]   = useState(false);
@@ -9915,7 +10016,7 @@ function App() {
 </script>
 
 <script>
-var N=16;
+var N=17;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
