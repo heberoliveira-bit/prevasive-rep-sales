@@ -2770,7 +2770,7 @@ function ReceiptPage({receiptData}) {
 }
 
 /* ─── Sidebar ────────────────────────────────────────────────────────────── */
-function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount,legalBadge}) {
+function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCount,legalBadge,helpBadge}) {
   var isRep = user&&user.role==="rep";
   var isDark = theme==="dark";
   return (
@@ -2815,7 +2815,7 @@ function Sidebar({modules,active,onNav,user,onLogout,theme,onToggleTheme,taskCou
                                    textTransform:"uppercase",letterSpacing:".1em"}}>{m.label}</div>
           );
           var isActive = active===m.id;
-          var badge = m.badge===true?taskCount:(m.badge==="legal"?legalBadge:0);
+          var badge = m.badge===true?taskCount:(m.badge==="legal"?legalBadge:(m.badge==="help"?helpBadge:0));
           return (
             <button key={m.id} onClick={function(){onNav(m.id);}}
               style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"8px 18px",
@@ -9935,6 +9935,359 @@ function PayTokenLoader({token, sb, onLoaded, onNotFound}) {
   );
 }
 
+/* ═══════════════════════ HELP DESK ═══════════════════════ */
+var HELPDESK_CATS = ["Orders","Commissions/Billing","Account","Technical","Other"];
+function ticketStatusMeta(s){
+  return ({
+    open:        {label:"Open",        c:C.warning, bg:C.warning+"18"},
+    in_progress: {label:"In Progress", c:C.accent,  bg:C.accent+"18"},
+    resolved:    {label:"Resolved",    c:C.success, bg:C.success+"18"},
+    closed:      {label:"Closed",      c:C.muted,   bg:C.surface2},
+  })[s]||{label:s||"Open",c:C.muted,bg:C.surface2};
+}
+function ticketPriMeta(p){
+  return ({
+    Urgent:{c:C.danger, bg:C.danger+"18"},
+    High:  {c:C.warning,bg:C.warning+"18"},
+    Normal:{c:C.accent, bg:C.accent+"15"},
+    Low:   {c:C.muted,  bg:C.surface2},
+  })[p]||{c:C.muted,bg:C.surface2};
+}
+function tktPill(meta,text){
+  return <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:meta.bg,color:meta.c,whiteSpace:"nowrap"}}>{text}</span>;
+}
+function tktWhen(iso){
+  if(!iso) return "";
+  var d=new Date(iso), diff=(Date.now()-d.getTime())/1000;
+  if(diff<60) return "just now";
+  if(diff<3600) return Math.floor(diff/60)+"m ago";
+  if(diff<86400) return Math.floor(diff/3600)+"h ago";
+  if(diff<604800) return Math.floor(diff/86400)+"d ago";
+  return d.toLocaleDateString();
+}
+// Always-on ticket notification: in-app bell + best-effort email (no prefs gate).
+function tktNotify(opts){
+  try{
+    var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var canSend = opts.toEmail && opts.html && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
+    if(canSend){
+      fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({to:opts.toEmail,subject:opts.subject||"Support ticket",html:opts.html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){});
+      _writeNotifRow({key:"ticket",repId:opts.repId||"",msg:opts.msg||"",type:opts.type||"info"});
+    } else {
+      _writeNotifRow({key:"ticket",to:opts.toEmail||"",emailSubject:opts.subject||"",emailHtml:opts.html||"",emailPending:!!(opts.toEmail&&opts.html),repId:opts.repId||"",msg:opts.msg||"",type:opts.type||"info"});
+    }
+  }catch(e){}
+}
+function tktSafe(s){return String(s||"").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+
+function NewTicketModal({role,reps,orders,onCreate,onClose}){
+  const [repId,setRepId]=useState("");
+  const [subject,setSubject]=useState("");
+  const [cat,setCat]=useState(HELPDESK_CATS[0]);
+  const [pri,setPri]=useState("Normal");
+  const [orderId,setOrderId]=useState("");
+  const [body,setBody]=useState("");
+  var repList=(reps||[]).filter(function(r){return r.status!=="suspended";});
+  var ok=subject.trim()&&body.trim()&&(role!=="admin"||repId);
+  function submit(){ if(ok) onCreate({repId:repId,subject:subject.trim(),category:cat,priority:pri,orderId:orderId,body:body.trim()}); }
+  return (
+    <Modal title={role==="admin"?"New Ticket to Rep":"New Support Ticket"} onClose={onClose}
+      footer={<div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+        <Btn variant="ghost" small onClick={onClose}>Cancel</Btn>
+        <Btn small onClick={submit} disabled={!ok}>Send</Btn>
+      </div>}>
+      {role==="admin"&&(
+        <Drop label="To rep" value={repId} onChange={setRepId}
+          opts={[{v:"",label:"Select a rep…"}].concat(repList.map(function(r){return {v:(r.rep_id||r.id),label:r.name||r.email};}))}/>
+      )}
+      <Field label="Subject" value={subject} onChange={setSubject} placeholder="Brief summary"/>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1}}><Drop label="Category" value={cat} onChange={setCat} opts={HELPDESK_CATS}/></div>
+        <div style={{flex:1}}><Drop label="Priority" value={pri} onChange={setPri} opts={["Low","Normal","High","Urgent"]}/></div>
+      </div>
+      <Drop label="Related order (optional)" value={orderId} onChange={setOrderId}
+        opts={[{v:"",label:"— none —"}].concat((orders||[]).slice(0,200).map(function(o){return {v:o.id,label:o.id+" · "+(o.custName||"")};}))}/>
+      <TextArea label="Message" value={body} onChange={setBody} rows={5} placeholder="Describe the issue or question…"/>
+    </Modal>
+  );
+}
+
+function TicketThread({ticket,role,onReply,onStatus,onClose}){
+  const [reply,setReply]=useState("");
+  var sm=ticketStatusMeta(ticket.status), msgs=ticket.messages||[];
+  function send(){ if(reply.trim()){ onReply(ticket,reply.trim()); setReply(""); } }
+  return (
+    <Modal title={ticket.subject} onClose={onClose} wide
+      footer={<div style={{display:"flex",gap:8,alignItems:"flex-end"}}>
+        <textarea value={reply} onChange={function(e){setReply(e.target.value);}} rows={2} placeholder="Write a reply…"
+          style={{flex:1,background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"9px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical"}}/>
+        <Btn small onClick={send} disabled={!reply.trim()}>Send</Btn>
+      </div>}>
+      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",marginBottom:14}}>
+        {tktPill(sm,sm.label)}
+        {tktPill(ticketPriMeta(ticket.priority),ticket.priority||"Normal")}
+        <span style={{fontSize:11,color:C.dim}}>{ticket.category}</span>
+        {ticket.orderId&&<span style={{fontSize:11,color:C.accent,fontFamily:"monospace"}}>🧾 {ticket.orderId}</span>}
+        <span style={{fontSize:11,color:C.dim,marginLeft:"auto"}}>{role==="admin"?("Rep: "+(ticket.repName||"")):("Ticket "+ticket.id)}</span>
+      </div>
+      {role==="admin"&&(
+        <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+          {["open","in_progress","resolved","closed"].map(function(s){
+            var act=ticket.status===s, m=ticketStatusMeta(s);
+            return <button key={s} onClick={function(){onStatus(ticket,s);}}
+              style={{padding:"4px 10px",borderRadius:6,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",
+                      border:"1px solid "+(act?m.c:C.border),background:act?m.bg:"transparent",color:act?m.c:C.muted}}>{m.label}</button>;
+          })}
+        </div>
+      )}
+      {role!=="admin"&&ticket.status!=="closed"&&(
+        <div style={{marginBottom:16}}>
+          <Btn small variant="ghost" onClick={function(){onStatus(ticket,ticket.status==="resolved"?"open":"closed");}}>
+            {ticket.status==="resolved"?"Reopen ticket":"Close ticket"}
+          </Btn>
+        </div>
+      )}
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {msgs.map(function(m,i){
+          var mine=(m.from===(role==="admin"?"admin":"rep"));
+          return (
+            <div key={m.id||i} style={{alignSelf:mine?"flex-end":"flex-start",maxWidth:"82%"}}>
+              <div style={{fontSize:10,color:C.dim,marginBottom:3,textAlign:mine?"right":"left"}}>
+                {(m.from==="admin"?"🎧 ":"")}{m.name||(m.from==="admin"?"Support":"Rep")} · {tktWhen(m.at)}
+              </div>
+              <div style={{background:mine?C.accent+"18":C.surface2,border:"1px solid "+(mine?C.accent+"35":C.border),
+                           borderRadius:10,padding:"9px 13px",fontSize:13,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.body}</div>
+            </div>
+          );
+        })}
+        {!msgs.length&&<div style={{fontSize:12,color:C.dim}}>No messages yet.</div>}
+      </div>
+    </Modal>
+  );
+}
+
+function FaqList({faqs,search}){
+  const [open,setOpen]=useState({});
+  var list=(faqs||[]).slice().sort(function(a,b){return (a.order||0)-(b.order||0);});
+  var q=(search||"").toLowerCase();
+  if(q) list=list.filter(function(f){return (f.question||"").toLowerCase().indexOf(q)>=0||(f.answer||"").toLowerCase().indexOf(q)>=0;});
+  if(!list.length) return <div style={{fontSize:13,color:C.dim,padding:"24px 0"}}>No articles{q?" match your search":" yet"}.</div>;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:8}}>
+      {list.map(function(f){
+        var isO=!!open[f.id];
+        return (
+          <div key={f.id} style={{border:"1px solid "+C.border,borderRadius:10,background:C.surface,overflow:"hidden"}}>
+            <button onClick={function(){setOpen(function(p){var n=Object.assign({},p);n[f.id]=!n[f.id];return n;});}}
+              style={{width:"100%",display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:"transparent",border:"none",cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+              <span style={{fontSize:13,fontWeight:700,color:C.text,flex:1}}>{f.question}</span>
+              {f.category&&<span style={{fontSize:10,color:C.dim}}>{f.category}</span>}
+              <span style={{color:C.dim,fontSize:11}}>{isO?"▲":"▼"}</span>
+            </button>
+            {isO&&<div style={{padding:"0 14px 14px",fontSize:13,color:C.muted,lineHeight:1.7,whiteSpace:"pre-wrap"}}>{f.answer}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function FaqEditorModal({faq,onSave,onClose}){
+  const [q,setQ]=useState(faq?faq.question:"");
+  const [a,setA]=useState(faq?faq.answer:"");
+  const [cat,setCat]=useState(faq?(faq.category||HELPDESK_CATS[0]):HELPDESK_CATS[0]);
+  return (
+    <Modal title={faq?"Edit Article":"New FAQ Article"} onClose={onClose}
+      footer={<div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+        <Btn variant="ghost" small onClick={onClose}>Cancel</Btn>
+        <Btn small onClick={function(){if(q.trim()&&a.trim())onSave({question:q.trim(),answer:a.trim(),category:cat});}} disabled={!q.trim()||!a.trim()}>Save</Btn>
+      </div>}>
+      <Field label="Question" value={q} onChange={setQ} placeholder="e.g. How do I request a commission payout?"/>
+      <Drop label="Category" value={cat} onChange={setCat} opts={HELPDESK_CATS}/>
+      <TextArea label="Answer" value={a} onChange={setA} rows={7} placeholder="Write the answer reps will see…"/>
+    </Modal>
+  );
+}
+
+function HelpDeskModule({currentUser,tickets,setTickets,faqs,orders,addToast}){
+  const [tab,setTab]=useState("tickets");
+  const [showNew,setShowNew]=useState(false);
+  const [active,setActive]=useState(null);
+  const [search,setSearch]=useState("");
+  var rid=currentUser.rep_id||currentUser.id, myName=currentUser.name||"Rep";
+  var mine=(tickets||[]).filter(function(t){return t.repId===rid;}).sort(function(a,b){return (b.updatedAt||"").localeCompare(a.updatedAt||"");});
+  function saveTicket(t){ setTickets(function(prev){return prev.some(function(x){return x.id===t.id;})?prev.map(function(x){return x.id===t.id?t:x;}):[t].concat(prev);}); dbSave("crm_tickets",t.id,t); if(active&&active.id===t.id)setActive(t); }
+  function create(d){
+    var now=new Date().toISOString();
+    var t={id:genId("tkt"),repId:rid,repName:myName,openedBy:"rep",status:"open",subject:d.subject,category:d.category,priority:d.priority,orderId:d.orderId||"",createdAt:now,updatedAt:now,lastBy:"rep",
+      messages:[{id:genId("msg"),from:"rep",name:myName,body:d.body,at:now}]};
+    saveTicket(t); setShowNew(false);
+    tktNotify({repId:"",msg:"🎧 New ticket from "+myName+": "+t.subject,type:"info"});
+    if(addToast) addToast("Ticket submitted","success");
+  }
+  function reply(t,body){
+    var now=new Date().toISOString();
+    var up=Object.assign({},t,{updatedAt:now,lastBy:"rep",status:t.status==="closed"?"open":t.status,messages:(t.messages||[]).concat([{id:genId("msg"),from:"rep",name:myName,body:body,at:now}])});
+    saveTicket(up);
+    tktNotify({repId:"",msg:"💬 "+myName+" replied: "+t.subject,type:"info"});
+  }
+  function setStatus(t,s){ saveTicket(Object.assign({},t,{status:s,updatedAt:new Date().toISOString()})); }
+  return (
+    <div style={{padding:"4px 0"}}>
+      <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:18}}>
+        <h2 style={{fontSize:20,fontWeight:800,color:C.text,margin:0}}>Help Desk</h2>
+        <div style={{display:"flex",gap:4,background:C.surface2,borderRadius:8,padding:3}}>
+          {[["tickets","My Tickets"],["faq","FAQ"]].map(function(t){
+            var act=tab===t[0];
+            return <button key={t[0]} onClick={function(){setTab(t[0]);}}
+              style={{padding:"6px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:act?C.surface:"transparent",color:act?C.text:C.muted}}>{t[1]}</button>;
+          })}
+        </div>
+        {tab==="tickets"&&<div style={{marginLeft:"auto"}}><Btn small onClick={function(){setShowNew(true);}}>+ New Ticket</Btn></div>}
+      </div>
+      {tab==="tickets"&&(mine.length?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {mine.map(function(t){
+            var sm=ticketStatusMeta(t.status), needs=t.lastBy==="admin"&&t.status!=="closed";
+            return (
+              <button key={t.id} onClick={function(){setActive(t);}}
+                style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderRadius:10,cursor:"pointer",textAlign:"left",fontFamily:"inherit",background:C.surface,border:"1px solid "+(needs?C.accent+"55":C.border)}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:3}}>{t.subject}{needs&&<span style={{color:C.accent,marginLeft:8,fontSize:11}}>● new reply</span>}</div>
+                  <div style={{fontSize:11,color:C.dim}}>{t.category} · {(t.messages||[]).length} msg · {tktWhen(t.updatedAt)}</div>
+                </div>
+                {tktPill(ticketPriMeta(t.priority),t.priority||"Normal")}
+                {tktPill(sm,sm.label)}
+              </button>
+            );
+          })}
+        </div>
+      ):<div style={{padding:"40px 0",textAlign:"center",color:C.dim,fontSize:13}}>No tickets yet. Open one if you need help.</div>)}
+      {tab==="faq"&&(<div><Field placeholder="Search the FAQ…" value={search} onChange={setSearch}/><FaqList faqs={faqs} search={search}/></div>)}
+      {showNew&&<NewTicketModal role="rep" orders={orders} onCreate={create} onClose={function(){setShowNew(false);}}/>}
+      {active&&<TicketThread ticket={active} role="rep" onReply={reply} onStatus={setStatus} onClose={function(){setActive(null);}}/>}
+    </div>
+  );
+}
+
+function AdminHelpDesk({tickets,setTickets,faqs,setFaqs,reps,orders,currentUser,addToast}){
+  const [tab,setTab]=useState("tickets");
+  const [fStatus,setFStatus]=useState("all");
+  const [fRep,setFRep]=useState("all");
+  const [active,setActive]=useState(null);
+  const [showNew,setShowNew]=useState(false);
+  const [editFaq,setEditFaq]=useState(null);
+  var myName=currentUser.name||"Support";
+  function saveTicket(t){ setTickets(function(prev){return prev.some(function(x){return x.id===t.id;})?prev.map(function(x){return x.id===t.id?t:x;}):[t].concat(prev);}); dbSave("crm_tickets",t.id,t); if(active&&active.id===t.id)setActive(t); }
+  function repEmail(repId){ var r=(reps||[]).find(function(x){return (x.rep_id||x.id)===repId;}); return r?r.email:""; }
+  function reply(t,body){
+    var now=new Date().toISOString();
+    var up=Object.assign({},t,{updatedAt:now,lastBy:"admin",status:t.status==="open"?"in_progress":t.status,messages:(t.messages||[]).concat([{id:genId("msg"),from:"admin",name:myName,body:body,at:now}])});
+    saveTicket(up);
+    tktNotify({toEmail:repEmail(t.repId),repId:t.repId,subject:"Reply on your ticket: "+t.subject,
+      html:notifEmailHtml("PreVasive USA","Support replied","<p>Support replied to your ticket <strong>"+tktSafe(t.subject)+"</strong>:</p><p>"+tktSafe(body)+"</p>",null,null,"#635bff"),
+      msg:"🎧 Support replied: "+t.subject,type:"info"});
+  }
+  function setStatus(t,s){
+    saveTicket(Object.assign({},t,{status:s,updatedAt:new Date().toISOString()}));
+    tktNotify({toEmail:repEmail(t.repId),repId:t.repId,subject:"Ticket "+ticketStatusMeta(s).label+": "+t.subject,msg:"Ticket "+ticketStatusMeta(s).label+": "+t.subject,type:"info"});
+  }
+  function createToRep(d){
+    var now=new Date().toISOString();
+    var r=(reps||[]).find(function(x){return (x.rep_id||x.id)===d.repId;})||{};
+    var t={id:genId("tkt"),repId:d.repId,repName:r.name||d.repId,openedBy:"admin",status:"open",subject:d.subject,category:d.category,priority:d.priority,orderId:d.orderId||"",createdAt:now,updatedAt:now,lastBy:"admin",
+      messages:[{id:genId("msg"),from:"admin",name:myName,body:d.body,at:now}]};
+    saveTicket(t); setShowNew(false);
+    tktNotify({toEmail:r.email,repId:d.repId,subject:"New message from Support: "+t.subject,
+      html:notifEmailHtml("PreVasive USA","New message from Support","<p>"+tktSafe(myName)+" opened a ticket: <strong>"+tktSafe(t.subject)+"</strong></p><p>"+tktSafe(d.body)+"</p>",null,null,"#635bff"),
+      msg:"🎧 Support opened a ticket: "+t.subject,type:"info"});
+    if(addToast) addToast("Ticket sent to "+(r.name||"rep"),"success");
+  }
+  function saveFaq(d){
+    var now=new Date().toISOString();
+    if(editFaq&&editFaq.id){
+      var up=Object.assign({},editFaq,d,{updatedAt:now});
+      setFaqs(function(prev){return prev.map(function(x){return x.id===up.id?up:x;});}); dbSave("crm_faq",up.id,up);
+    } else {
+      var f=Object.assign({id:genId("faq"),order:(faqs||[]).length,createdAt:now,updatedAt:now},d);
+      setFaqs(function(prev){return [f].concat(prev);}); dbSave("crm_faq",f.id,f);
+    }
+    setEditFaq(null);
+  }
+  function delFaq(f){ if(!window.confirm("Delete this article?"))return; setFaqs(function(prev){return prev.filter(function(x){return x.id!==f.id;});}); dbDel("crm_faq",f.id); }
+  var list=(tickets||[]).slice().sort(function(a,b){return (b.updatedAt||"").localeCompare(a.updatedAt||"");});
+  if(fStatus!=="all") list=list.filter(function(t){return t.status===fStatus;});
+  if(fRep!=="all") list=list.filter(function(t){return t.repId===fRep;});
+  var openCount=(tickets||[]).filter(function(t){return t.lastBy==="rep"&&t.status!=="closed"&&t.status!=="resolved";}).length;
+  return (
+    <div style={{padding:"4px 0"}}>
+      <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18,flexWrap:"wrap"}}>
+        <h2 style={{fontSize:20,fontWeight:800,color:C.text,margin:0}}>Help Desk</h2>
+        {openCount>0&&<span style={{background:C.accent,color:"#fff",fontSize:11,fontWeight:700,padding:"2px 9px",borderRadius:20}}>{openCount} need reply</span>}
+        <div style={{display:"flex",gap:4,background:C.surface2,borderRadius:8,padding:3}}>
+          {[["tickets","Tickets"],["faq","FAQ"]].map(function(t){
+            var act=tab===t[0];
+            return <button key={t[0]} onClick={function(){setTab(t[0]);}}
+              style={{padding:"6px 14px",borderRadius:6,border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,background:act?C.surface:"transparent",color:act?C.text:C.muted}}>{t[1]}</button>;
+          })}
+        </div>
+        <div style={{marginLeft:"auto"}}>
+          {tab==="tickets"?<Btn small onClick={function(){setShowNew(true);}}>+ Ticket to Rep</Btn>:<Btn small onClick={function(){setEditFaq({});}}>+ FAQ Article</Btn>}
+        </div>
+      </div>
+      {tab==="tickets"&&(
+        <div>
+          <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap"}}>
+            <div style={{width:170}}><Drop value={fStatus} onChange={setFStatus} opts={[{v:"all",label:"All statuses"},{v:"open",label:"Open"},{v:"in_progress",label:"In Progress"},{v:"resolved",label:"Resolved"},{v:"closed",label:"Closed"}]}/></div>
+            <div style={{width:200}}><Drop value={fRep} onChange={setFRep} opts={[{v:"all",label:"All reps"}].concat((reps||[]).map(function(r){return {v:(r.rep_id||r.id),label:r.name||r.email};}))}/></div>
+          </div>
+          {list.length?(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {list.map(function(t){
+                var sm=ticketStatusMeta(t.status), needs=t.lastBy==="rep"&&t.status!=="closed"&&t.status!=="resolved";
+                return (
+                  <button key={t.id} onClick={function(){setActive(t);}}
+                    style={{display:"flex",alignItems:"center",gap:12,padding:"13px 16px",borderRadius:10,cursor:"pointer",textAlign:"left",fontFamily:"inherit",background:C.surface,border:"1px solid "+(needs?C.accent+"55":C.border)}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:3}}>{t.subject}{needs&&<span style={{color:C.accent,marginLeft:8,fontSize:11}}>● awaiting reply</span>}</div>
+                      <div style={{fontSize:11,color:C.dim}}>{t.repName} · {t.category} · {tktWhen(t.updatedAt)}</div>
+                    </div>
+                    {tktPill(ticketPriMeta(t.priority),t.priority||"Normal")}
+                    {tktPill(sm,sm.label)}
+                  </button>
+                );
+              })}
+            </div>
+          ):<div style={{padding:"40px 0",textAlign:"center",color:C.dim,fontSize:13}}>No tickets match.</div>}
+        </div>
+      )}
+      {tab==="faq"&&((faqs||[]).length?(
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {(faqs||[]).slice().sort(function(a,b){return (a.order||0)-(b.order||0);}).map(function(f){
+            return (
+              <div key={f.id} style={{display:"flex",alignItems:"flex-start",gap:12,padding:"13px 16px",borderRadius:10,background:C.surface,border:"1px solid "+C.border}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:3}}>{f.question}</div>
+                  <div style={{fontSize:12,color:C.muted,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{f.answer}</div>
+                  {f.category&&<div style={{fontSize:10,color:C.dim,marginTop:5}}>{f.category}</div>}
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <Btn small variant="ghost" onClick={function(){setEditFaq(f);}}>Edit</Btn>
+                  <Btn small variant="ghost" onClick={function(){delFaq(f);}}>✕</Btn>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ):<div style={{padding:"40px 0",textAlign:"center",color:C.dim,fontSize:13}}>No FAQ articles yet. Add one to help reps self-serve.</div>)}
+      {active&&<TicketThread ticket={active} role="admin" onReply={reply} onStatus={setStatus} onClose={function(){setActive(null);}}/>}
+      {showNew&&<NewTicketModal role="admin" reps={reps} orders={orders} onCreate={createToRep} onClose={function(){setShowNew(false);}}/>}
+      {editFaq&&<FaqEditorModal faq={editFaq.id?editFaq:null} onSave={saveFaq} onClose={function(){setEditFaq(null);}}/>}
+    </div>
+  );
+}
+
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -9951,6 +10304,8 @@ function App() {
   const [legalDocs,     setLegalDocs]     = useState([]);
   const [signatures,    setSignatures]    = useState([]);
   const [notifications, setNotifications] = useState([]);
+  const [tickets,       setTickets]       = useState([]);
+  const [faqs,          setFaqs]          = useState([]);
   const [showHelp,      setShowHelp]      = useState(false);
   const [showSearch,    setShowSearch]    = useState(false);
   function addNotification(msg,type){
@@ -10253,6 +10608,8 @@ function App() {
     dbLoad("crm_quotes").then(function(d){if(alive) setQuotes(d);});
     dbLoad("crm_terms_requests").then(function(d){if(alive) setTermsRequests(d);});
     dbLoad("crm_payout_requests").then(function(d){if(alive) setPayoutRequests(d);});
+    dbLoad("crm_tickets").then(function(d){if(alive) setTickets(d);});
+    dbLoad("crm_faq").then(function(d){if(alive) setFaqs(d);});
     dbLoad("crm_notifications").then(function(d){if(alive){
       var rid=currentUser.rep_id||currentUser.id;
       var mine=(currentUser.role==="admin")?d:d.filter(function(n){return n.repId===rid;});
@@ -10534,6 +10891,7 @@ function App() {
     {id:"tasks",       name:"Tasks",       icon:"✅", badge:true},
     {id:"legal",       name:"Legal & Compliance", icon:"⚖️", badge:"legal"},
     {id:"commissions",name:"Commissions", icon:"💰"},
+    {id:"helpdesk",    name:"Help Desk",   icon:"🎧", badge:"help"},
     {id:"settings",   name:"Settings",    icon:"⚙️"},
   ];
 
@@ -10545,6 +10903,7 @@ function App() {
     {id:"orders",     name:"My Orders",   icon:"📦"},
     {id:"customers",  name:"Customers",   icon:"👥"},
     {id:"commissions",name:"Commissions", icon:"💰"},
+    {id:"helpdesk",    name:"Help Desk",   icon:"🎧", badge:"help"},
     {id:"profile",    name:"My Profile",  icon:"👤"},
   ];
 
@@ -10562,7 +10921,10 @@ function App() {
           return r.status==="active"&&legalDocs.filter(function(d){return d.active&&d.requiresResign;}).some(function(d){
             return !signatures.some(function(s){return s.docId===d.id&&s.version===d.version&&s.repId===r.id;});
           });
-        }).length:0}/>
+        }).length:0}
+        helpBadge={isAdmin
+          ? (tickets||[]).filter(function(t){return t.lastBy==="rep"&&t.status!=="closed"&&t.status!=="resolved";}).length
+          : (tickets||[]).filter(function(t){return t.repId===(effectiveUser.rep_id||effectiveUser.id)&&t.lastBy==="admin"&&t.status!=="closed";}).length}/>
 
       <div style={{display:"flex",flexDirection:"column",flex:1,minWidth:0}}>
       <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:8,padding:"10px 20px 0",flexShrink:0}}>
@@ -10650,6 +11012,11 @@ function App() {
             reps={reps} addToast={addToast}/>
         )}
 
+        {isAdmin&&activeTab==="helpdesk"&&(
+          <AdminHelpDesk tickets={tickets} setTickets={setTickets} faqs={faqs} setFaqs={setFaqs}
+            reps={reps} orders={orders} currentUser={currentUser} addToast={addToast}/>
+        )}
+
         {/* Rep Modules */}
         {!isAdmin&&activeTab==="dashboard"&&(
           <RepDashboard repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
@@ -10678,6 +11045,10 @@ function App() {
         )}
         {!isAdmin&&activeTab==="profile"&&(
           <RepProfile user={effectiveUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast}/>
+        )}
+        {!isAdmin&&activeTab==="helpdesk"&&(
+          <HelpDeskModule currentUser={effectiveUser} tickets={tickets} setTickets={setTickets}
+            faqs={faqs} orders={orders} addToast={addToast}/>
         )}
         {!isAdmin&&activeTab==="new_order"&&null}
       </main>
