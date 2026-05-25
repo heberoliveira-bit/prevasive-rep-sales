@@ -5675,12 +5675,13 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                     {(function(){
                       var delivered=o.status==="Delivered"||o.shippingStatus==="delivered";
                       if(delivered) return <div style={{fontSize:11,fontWeight:600,color:"#22c55e"}}>✅ Delivered</div>;
-                      if(o.trackingNum) return (
+                      var _tn=o.trackingNumber||o.trackingNum;
+                      if(_tn) return (
                         <div>
                           <div style={{fontSize:11,fontWeight:600,color:"#3b82f6",marginBottom:2}}>🚚 In Transit</div>
-                          <a href={getTrackingUrl(o.trackingNum,o.carrier)} target="_blank" rel="noopener noreferrer"
+                          <a href={o.trackingUrl||getTrackingUrl(o.carrier,_tn)} target="_blank" rel="noopener noreferrer"
                             style={{fontSize:10,color:C.accent,fontFamily:"monospace",textDecoration:"none"}}
-                            onClick={function(e){e.stopPropagation();}}>{o.trackingNum}</a>
+                            onClick={function(e){e.stopPropagation();}}>{_tn}</a>
                         </div>
                       );
                       if(o.labelCreated) return <div style={{fontSize:11,color:C.muted}}>📦 Label Created</div>;
@@ -8992,10 +8993,11 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                       {(function(){
                         var delivered=o.status==="Delivered"||o.shippingStatus==="delivered";
                         if(delivered) return <div style={{fontSize:11,fontWeight:600,color:"#22c55e"}}>✅ Delivered</div>;
-                        if(o.trackingNum) return (
+                        var _tn=o.trackingNumber||o.trackingNum;
+                        if(_tn) return (
                           <div>
                             <div style={{fontSize:11,fontWeight:600,color:"#3b82f6"}}>🚚 In Transit</div>
-                            <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{o.trackingNum}</div>
+                            <div style={{fontSize:10,color:C.muted,fontFamily:"monospace"}}>{_tn}</div>
                           </div>
                         );
                         if(o.labelCreated) return <div style={{fontSize:11,color:C.muted}}>📦 Label Created</div>;
