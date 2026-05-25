@@ -10516,7 +10516,7 @@ function App() {
         {(activeTab==="quotes"||activeTab==="rep_quotes")&&(
           <QuotesModule quotes={quotes} setQuotes={setQuotes}
             products={products} customers={customers} reps={reps} orders={orders}
-            setOrders={setOrders} currentUser={currentUser} isAdmin={isAdmin}
+            setOrders={setOrders} currentUser={effectiveUser} isAdmin={isAdmin}
             addToast={addToast} showResult={showResult}/>
         )}
         {isAdmin&&activeTab==="pricing"&&(
