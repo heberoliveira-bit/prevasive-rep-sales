@@ -8753,7 +8753,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
 }
 
 /* ─── Rep Customers ──────────────────────────────────────────────────────── */
-function RepCustomers({repId,customers,setCustomers,orders,termsRequests,setTermsRequests,addToast}) {
+function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests,setTermsRequests,addToast}) {
   const [showForm, setShowForm] = useState(false);
   const [editCust, setEditCust] = useState(null);
   const [viewCust2,setViewCust2] = useState(null);
