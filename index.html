@@ -5687,10 +5687,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                       return (
                         <div>
                           <div style={{fontSize:11,color:C.dim,marginBottom:4}}>— Not Shipped</div>
-                          <Btn small onClick={function(){
-                            var url="https://ship.shipstation.com/orders?source=PreVasive&orderNumber="+encodeURIComponent(o.id);
-                            window.open(url,"_blank");
-                          }}>Ship →</Btn>
+                          <Btn small onClick={function(){setFulfillTarget2(o);}}>Ship →</Btn>
                         </div>
                       );
                     })()}
