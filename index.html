@@ -2320,7 +2320,7 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
     sr.card=card;
     card.on("change",function(e){if(e.error){setErr(e.error.message);}else{setErr("");}});
     return function(){card.destroy();};
-  },[]);
+  },[pubKey,isTerms]);
 
   function pay(){
     if(paying) return;
@@ -10170,6 +10170,31 @@ function App() {
     starterPriceId:"", proPriceId:"",
   });
   const [payoutRequests,setPayoutRequests] = useState([]);
+
+  // ── Shared non-secret settings (crm_settings/public_settings) ──
+  // Load on mount for EVERY session — incl. customers on public pay/quote/receipt pages —
+  // so they get the real company branding, tax, payment links, and Stripe publishable key
+  // instead of falling back to per-browser localStorage defaults. Secrets are never shared.
+  useEffect(function(){
+    var sb=getSB(); if(!sb) return;
+    sb.from("crm_settings").select("data").eq("id","public_settings").single().then(function(r){
+      var d = r && r.data && r.data.data; if(!d) return;
+      if(d.invoice && Object.keys(d.invoice).length) setInvoiceCfg(d.invoice);
+      if(d.tax && Object.keys(d.tax).length) setTaxCfg(d.tax);
+      if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
+      if(d.stripePublishableKey) setStripeAccountA(function(prev){var p=prev||{}; return p.publishableKey?p:Object.assign({},p,{publishableKey:d.stripePublishableKey});});
+    }).catch(function(){});
+  },[]);
+
+  // Publish shared settings whenever an admin changes them (never from rep/customer sessions).
+  useEffect(function(){
+    if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
+    var sb=getSB(); if(!sb) return;
+    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{},
+                stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"" };
+    sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
+  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),currentUser,viewAsRep]);
+
 
   // Apply theme
   Object.assign(C, THEMES[theme]||THEMES.dark);
