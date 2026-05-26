@@ -1220,29 +1220,58 @@ function ApplyForm({onSubmit,onCancel}) {
   );
 }
 
-function InviteModal({rep,onClose,addToast}) {
+function InviteModal({rep,onClose,addToast,setReps}) {
   var token = rep.inviteToken||(rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
   var baseUrl = getSiteUrl();
   var link = baseUrl+"#invite="+token;
   const [copied, setCopied] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  // Make sure the link's token is saved on the rep so registration can match it.
+  useEffect(function(){
+    if(!rep.inviteToken){
+      var updated=Object.assign({},rep,{inviteToken:token});
+      if(setReps) setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+      dbSave("crm_reps",rep.id,updated);
+    }
+  },[]);
   function copy() {
     navigator.clipboard.writeText(link).then(function(){
       setCopied(true); setTimeout(function(){setCopied(false);},2000);
       addToast("Invite link copied","success");
     });
   }
+  function emailInvite() {
+    if(sending) return;
+    if(!rep.email){ addToast("This rep has no email on file","warning"); return; }
+    setSending(true);
+    var updated=Object.assign({},rep,{inviteToken:token});
+    if(setReps) setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
+    dbSave("crm_reps",rep.id,updated);
+    var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+    sendRepEmail(rep.email, "You're invited — set up your "+company+" account",
+      notifEmailHtml(company,"Set up your account",
+        "<p>Hi "+(rep.name||"there")+",</p><p>You've been invited to join "+company+" as a sales rep. Click below to set your password and access your dashboard.</p>",
+        "Set Up My Account", link, "#1ea672"));
+    setSending(false); setSent(true); setTimeout(function(){setSent(false);},3000);
+    addToast("Invite emailed to "+rep.email,"success");
+  }
   return (
     <Modal title={"Invite Link — "+rep.name} onClose={onClose}
       footer={<Btn variant="ghost" onClick={onClose} fullWidth={true}>Close</Btn>}>
       <div style={{marginBottom:16,fontSize:13,color:C.muted,lineHeight:1.6}}>
-        Share this link with <strong style={{color:C.text}}>{rep.name}</strong>. They'll click it to set up their login — no manual Supabase steps needed.
+        Email the invite to <strong style={{color:C.text}}>{rep.name}</strong>, or copy the link to share it yourself. They'll click it to set up their login — no manual Supabase steps needed.
       </div>
       <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:8,
                    padding:"10px 14px",marginBottom:14,fontFamily:"monospace",fontSize:11,
                    color:C.accent,wordBreak:"break-all",lineHeight:1.6}}>{link}</div>
-      <Btn onClick={copy} fullWidth={true}>{copied?"✓ Copied!":"Copy Invite Link"}</Btn>
+      <div style={{display:"flex",gap:10}}>
+        <Btn onClick={emailInvite} disabled={sending||!rep.email} fullWidth={true}>{sent?"✓ Sent!":(sending?"Sending…":"✉ Email Invite")}</Btn>
+        <Btn variant="outline" onClick={copy} fullWidth={true}>{copied?"✓ Copied!":"Copy Link"}</Btn>
+      </div>
+      {!rep.email&&<div style={{marginTop:8,fontSize:11,color:C.warning}}>No email on file for this rep — add one to send the invite by email.</div>}
       <div style={{marginTop:12,fontSize:11,color:C.dim,lineHeight:1.6}}>
-        Link expires in 7 days. Rep will create their own password. Once registered, they can log in immediately.
+        {rep.email?("Sends to "+rep.email+". "):""}Rep creates their own password. Once registered, they can log in immediately.
       </div>
     </Modal>
   );
@@ -6503,7 +6532,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
       )}
 
       {showInvite&&inviteRep&&(
-        <InviteModal rep={inviteRep} onClose={function(){setShowInvite(false);setInviteRep(null);}} addToast={addToast}/>
+        <InviteModal rep={inviteRep} onClose={function(){setShowInvite(false);setInviteRep(null);}} addToast={addToast} setReps={setReps}/>
       )}
       {drawerRep&&(
         <RepDrawer rep={drawerRep}
