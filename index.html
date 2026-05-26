@@ -10502,6 +10502,92 @@ function AdminReturns({returns,setReturns,orders,setOrders,reps,currentUser,addT
   );
 }
 
+/* ═══════════════════════ REP SETUP CHECKLIST ═══════════════════════ */
+function W9SubmitModal({repData,setReps,addToast,onClose}){
+  const [w9Name,setW9Name]=useState(repData&&repData.w9LegalName||"");
+  const [w9Ssn,setW9Ssn]=useState("");
+  const [w9Type,setW9Type]=useState(repData&&repData.w9EntityType||"individual");
+  const [w9Addr,setW9Addr]=useState(repData&&repData.w9Address||"");
+  const [err,setErr]=useState("");
+  function submit(){
+    if(!w9Name.trim()||!w9Ssn.trim()){setErr("Legal name and EIN/SSN are required.");return;}
+    var u=Object.assign({},repData,{w9LegalName:w9Name.trim(),w9EntityType:w9Type,w9Address:w9Addr.trim(),w9Status:"received",w9ReviewStatus:"pending",w9SubmittedAt:new Date().toISOString()});
+    setReps(function(prev){return prev.map(function(r){return r.id===repData.id?u:r;});});
+    dbSave("crm_reps",repData.id,u);
+    if(addToast) addToast("W-9 submitted — admin will review","success");
+    onClose();
+  }
+  return (
+    <Modal title="Submit W-9" onClose={onClose}
+      footer={<div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+        <Btn variant="ghost" small onClick={onClose}>Cancel</Btn>
+        <Btn small onClick={submit}>Submit W-9</Btn>
+      </div>}>
+      <div style={{fontSize:12,color:C.muted,marginBottom:14,lineHeight:1.6}}>Required for commission payouts and 1099 reporting. An admin reviews and approves before order access is unlocked.</div>
+      <Field label="Legal Name *" value={w9Name} onChange={setW9Name} placeholder="Jane Smith"/>
+      <Drop label="Entity Type" value={w9Type} onChange={setW9Type} opts={[{v:"individual",label:"Individual / Sole Proprietor"},{v:"llc",label:"LLC"},{v:"corporation",label:"Corporation"},{v:"partnership",label:"Partnership"}]}/>
+      <Field label="EIN or SSN *" value={w9Ssn} onChange={setW9Ssn} placeholder="XX-XXXXXXX" type="password" hint="Never stored in plain text"/>
+      <Field label="Address" value={w9Addr} onChange={setW9Addr} placeholder="123 Main St, City, State ZIP"/>
+      {err&&<div style={{color:C.danger,fontSize:12,marginTop:8}}>{err}</div>}
+    </Modal>
+  );
+}
+
+function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,setSignatures,effectiveUser,addToast,onComplete}){
+  const [modal,setModal]=useState(null); // "terms" | "agreement" | "w9" | <docId>
+  if(!myRepData) return <div style={{padding:"40px 0",textAlign:"center",color:C.dim}}>Loading…</div>;
+  var rid=effectiveUser.rep_id||effectiveUser.id;
+  function patchRep(patch){
+    var u=Object.assign({},myRepData,patch);
+    setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?u:r;});});
+    dbSave("crm_reps",myRepData.id,u);
+  }
+  var w9State = myRepData.w9ReviewStatus==="approved"?"done":(myRepData.w9Status==="received"?"pending":"todo");
+  var steps=[
+    {key:"terms",     label:"Accept Terms of Service", done:!!myRepData.termsAcceptedAt,  open:function(){setModal("terms");},     btn:"Review & Accept"},
+    {key:"agreement", label:"Sign Rep Agreement",      done:!!myRepData.agreementSignedAt,open:function(){setModal("agreement");}, btn:"Review & Sign"},
+  ];
+  (legalDocs||[]).filter(function(d){return d.active;}).forEach(function(d){
+    var signed=(signatures||[]).some(function(s){return s.docId===d.id&&s.repId===rid&&s.version===d.version;});
+    steps.push({key:d.id,label:"Sign: "+(d.title||"Document"),done:signed,open:function(){setModal(d.id);},btn:"Review & Sign"});
+  });
+  steps.push({key:"w9",label:"Submit W-9 (tax information)",done:w9State==="done",pending:w9State==="pending",open:function(){setModal("w9");},btn:"Submit W-9"});
+  var allDone=steps.every(function(s){return s.done;});
+  var doc=(legalDocs||[]).find(function(d){return d.id===modal;});
+  return (
+    <div style={{maxWidth:620,margin:"0 auto"}}>
+      <div style={{textAlign:"center",fontSize:30,marginBottom:6}}>{allDone?"✅":"🚀"}</div>
+      <h2 style={{textAlign:"center",fontSize:22,fontWeight:800,color:C.text,margin:"0 0 6px"}}>{allDone?"You're all set!":"Finish setting up your account"}</h2>
+      <p style={{textAlign:"center",fontSize:13,color:C.muted,margin:"0 0 24px",lineHeight:1.6}}>{allDone?"Your account is fully verified — you can now add orders.":"Complete these steps to unlock order creation. Your W-9 is verified by an admin before orders open up."}</p>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        {steps.map(function(s){
+          return (
+            <div key={s.key} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 16px",borderRadius:12,background:C.surface,border:"1px solid "+(s.done?C.success+"40":(s.pending?C.warning+"40":C.border))}}>
+              <div style={{width:26,height:26,borderRadius:"50%",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,
+                background:s.done?C.success:(s.pending?C.warning:C.surface2),color:(s.done||s.pending)?"#fff":C.dim,border:(s.done||s.pending)?"none":"1px solid "+C.border}}>{s.done?"✓":(s.pending?"…":"")}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>{s.label}</div>
+                {s.pending&&<div style={{fontSize:11,color:C.warning,marginTop:2}}>Submitted — waiting on admin approval</div>}
+              </div>
+              {s.done?<span style={{fontSize:11,fontWeight:700,color:C.success}}>Done</span>
+                :s.pending?<span style={{fontSize:11,fontWeight:700,color:C.warning}}>Pending</span>
+                :<Btn small onClick={s.open}>{s.btn}</Btn>}
+            </div>
+          );
+        })}
+      </div>
+      {allDone&&<div style={{marginTop:24,textAlign:"center"}}><Btn onClick={onComplete}>Add Your First Order →</Btn></div>}
+
+      {modal==="terms"&&<TermsModal onAccept={function(){patchRep({termsAcceptedAt:new Date().toISOString()});setModal(null);}} onDecline={function(){setModal(null);}}/>}
+      {modal==="agreement"&&<RepAgreementModal repName={effectiveUser.name} onAgree={function(){patchRep({agreementSignedAt:new Date().toISOString(),agreementVersion:REP_AGREEMENT_VERSION});setModal(null);}} onDecline={function(){setModal(null);}}/>}
+      {doc&&<LegalDocSignModal doc={doc} repId={rid} repName={effectiveUser.name}
+        onSign={function(){var sig={id:genId("sig"),docId:doc.id,version:doc.version,repId:rid,repName:effectiveUser.name,signedAt:new Date().toISOString()};setSignatures(function(prev){return prev.concat([sig]);});dbSave("crm_legal_signatures",sig.id,sig);setModal(null);}}
+        onDecline={function(){setModal(null);}}/>}
+      {modal==="w9"&&<W9SubmitModal repData={myRepData} setReps={setReps} addToast={addToast} onClose={function(){setModal(null);}}/>}
+    </div>
+  );
+}
+
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
@@ -11042,44 +11128,10 @@ function App() {
   // Terms of service gate — first login only for reps (skip when admin impersonating)
   var needsTerms = !isAdmin && !viewAsRep && myRepData && !myRepData.termsAcceptedAt;
 
-  if(needsTerms) return React.createElement(TermsModal, {
-    onAccept: function() {
-      var updated = Object.assign({},myRepData,{termsAcceptedAt:new Date().toISOString()});
-      setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?updated:r;});});
-      dbSave("crm_reps",myRepData.id,updated);
-    },
-    onDecline: handleLogout,
-  });
-
-  if(!isAdmin && !viewAsRep && unsignedDocs.length>0 && myRepData && myRepData.agreementSignedAt) {
-    var doc = unsignedDocs[0];
-    return React.createElement(LegalDocSignModal, {
-      doc: doc,
-      repId: effectiveUser.rep_id||effectiveUser.id,
-      repName: effectiveUser.name,
-      onSign: function() {
-        var sig = {id:genId("sig"),docId:doc.id,version:doc.version,
-                   repId:effectiveUser.rep_id||effectiveUser.id,
-                   repName:effectiveUser.name,signedAt:new Date().toISOString()};
-        setSignatures(function(prev){return prev.concat([sig]);});
-        dbSave("crm_legal_signatures",sig.id,sig);
-      },
-      onDecline: handleLogout,
-    });
-  }
-
-  if(needsAgreement) return React.createElement(RepAgreementModal, {
-    repName: currentUser.name,
-    onAgree: function() {
-      var updated = Object.assign({},myRepData,{
-        agreementSignedAt: new Date().toISOString(),
-        agreementVersion: REP_AGREEMENT_VERSION,
-      });
-      setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?updated:r;});});
-      dbSave("crm_reps",myRepData.id,updated);
-    },
-    onDecline: handleLogout,
-  });
+  // Onboarding is now a checklist that gates ONLY order creation (see RepSetupChecklist),
+  // so reps can log in and look around. W-9 must be admin-approved to count as complete.
+  var w9Approved = !!(myRepData && myRepData.w9ReviewStatus==="approved");
+  var repSetupComplete = isAdmin || !!viewAsRep || !!(myRepData && myRepData.termsAcceptedAt && myRepData.agreementSignedAt && unsignedDocs.length===0 && w9Approved);
 
   if(trialExpired) return React.createElement(RepSubscriptionWall, {
     rep: myRepData,
@@ -11157,6 +11209,15 @@ function App() {
                   borderRadius:8,color:C.muted,fontSize:16,lineHeight:1}}>?</button>
       </div>
       <main style={{flex:1,overflowY:"auto",padding:viewAsRep?"28px 32px 28px":"12px 32px 28px",minWidth:0}}>
+        {!isAdmin&&!repSetupComplete&&activeTab!=="new_order"&&(
+          <button onClick={function(){setActiveTab("new_order");}}
+            style={{width:"100%",textAlign:"left",cursor:"pointer",fontFamily:"inherit",marginBottom:16,
+                    padding:"12px 16px",borderRadius:10,border:"1px solid "+C.warning+"55",background:C.warning+"14",
+                    color:C.text,fontSize:13,fontWeight:600,display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:16}}>🚀</span> Finish your account setup to start adding orders
+            <span style={{marginLeft:"auto",color:C.warning,fontWeight:700}}>Complete setup →</span>
+          </button>
+        )}
         {/* Admin Modules */}
         {(activeTab==="email")&&(
           <EmailModule currentUser={currentUser} customers={customers} orders={orders}
@@ -11246,7 +11307,12 @@ function App() {
           <RepDashboard repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
             orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast} reps={reps} currentUser={effectiveUser}/>
         )}
-        {!isAdmin&&(activeTab==="orders"||activeTab==="new_order")&&(
+        {!isAdmin&&activeTab==="new_order"&&!repSetupComplete&&(
+          <RepSetupChecklist myRepData={myRepData} setReps={setReps}
+            legalDocs={legalDocs} unsignedDocs={unsignedDocs} signatures={signatures} setSignatures={setSignatures}
+            effectiveUser={effectiveUser} addToast={addToast} onComplete={function(){setActiveTab("new_order");}}/>
+        )}
+        {!isAdmin&&(activeTab==="orders"||(activeTab==="new_order"&&repSetupComplete))&&(
           <RepOrders repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
             currentUser={effectiveUser} repData={myRepData} orders={orders} customers={customers} products={products}
             setOrders={setOrders} setCustomers={setCustomers}
