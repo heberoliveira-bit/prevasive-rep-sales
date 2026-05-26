@@ -3330,6 +3330,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
         </div>
       )}
 
+      {tasksTab==="active"&&total===0&&(
         <EmptyState icon="✅" title="All caught up!" subtitle="No pending tasks. New items appear here when reps submit forms or apply to join."/>
       )}
 
