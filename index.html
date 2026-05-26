@@ -9572,6 +9572,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
   const [w9Name,setW9Name] = useState(repData&&repData.w9LegalName||"");
   const [w9Ssn, setW9Ssn]  = useState(""); const [w9Type,setW9Type] = useState(repData&&repData.w9EntityType||"individual");
   const [w9Addr,setW9Addr] = useState(repData&&repData.w9Address||""); const [w9Msg,setW9Msg] = useState("");
+  const [poBusy,setPoBusy] = useState(false); const [poErr,setPoErr] = useState(""); const [poStatus,setPoStatus] = useState(null);
 
   function saveProfile(){
     if(!name.trim()) return;
@@ -9601,7 +9602,47 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
     dbSave("crm_reps",repData.id,updated);
     addToast("Switched to "+(target?target.name:newPlanId)+(repData.subscriptionStatus==="active"?" — confirm the new price in Stripe":" — activate billing to start"),isDowngrade?"info":"success");
   }
-  var TABS = [{id:"profile",l:"Profile"},{id:"documents",l:"Documents"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+  var TABS = [{id:"profile",l:"Profile"},{id:"documents",l:"Documents"},{id:"payouts",l:"Payouts"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+
+  function _connectCfg(){ try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};} }
+  function connectStripe(){
+    if(poBusy) return;
+    if(!repData){ setPoErr("Couldn't load your rep record — please contact your admin."); return; }
+    var fn=(_connectCfg().connectFnUrl)||"";
+    if(!fn){ setPoErr("Payouts aren't enabled yet. Ask your admin to finish Stripe Connect setup in Settings."); return; }
+    setPoBusy(true); setPoErr("");
+    var _em=repData.email||(user&&user.email)||""; var _site=getSiteUrl(); var _acct=repData.stripeConnectId||"";
+    fetch(fn,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"onboard",repId:repData.id,
+        email:_em,repEmail:_em,
+        accountId:_acct,connectAccountId:_acct,
+        returnUrl:_site,refreshUrl:_site})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d&&d.ok&&d.url){
+          if(d.accountId&&d.accountId!==repData.stripeConnectId){
+            var updated=Object.assign({},repData,{stripeConnectId:d.accountId});
+            setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
+            dbSave("crm_reps",repData.id,updated);
+          }
+          window.location.href=d.url;
+        } else { setPoBusy(false); setPoErr((d&&d.error)||"Could not start Stripe onboarding. Try again."); }
+      })
+      .catch(function(){ setPoBusy(false); setPoErr("Could not reach the payouts service. Try again in a moment."); });
+  }
+  function checkPayoutStatus(){
+    if(poBusy) return;
+    if(!repData||!repData.stripeConnectId) return;
+    var fn=(_connectCfg().connectFnUrl)||""; if(!fn) return;
+    setPoBusy(true);
+    fetch(fn,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"status",connectAccountId:repData.stripeConnectId})})
+      .then(function(r){return r.json();})
+      .then(function(d){ setPoBusy(false); if(d&&d.ok) setPoStatus(d); })
+      .catch(function(){ setPoBusy(false); });
+  }
+  useEffect(function(){ if(tab==="payouts"&&repData&&repData.stripeConnectId&&!poStatus) checkPayoutStatus(); },[tab]);
+
 
   return (
     <div>
@@ -9795,6 +9836,39 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
           ):(
             <div style={{padding:"24px",textAlign:"center",color:C.muted,fontSize:13}}>Your rep record isn't loaded yet. If this keeps happening, contact your admin.</div>
           )}
+        </div>
+      )}
+
+      {tab==="payouts"&&(
+        <div style={{maxWidth:480}}>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"18px 20px"}}>
+            <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:6}}>Get paid via Stripe</div>
+            <div style={{fontSize:12.5,color:C.muted,lineHeight:1.6,marginBottom:16}}>
+              Connect a Stripe account to receive your commission payouts straight to your bank. Once your commissions clear the return window and are approved, PreVasive sends them to your connected account.
+            </div>
+            {poErr&&<div style={{padding:"9px 12px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:6,color:C.danger,fontSize:12,marginBottom:14}}>{poErr}</div>}
+            {repData&&repData.stripeConnectId?(
+              <div>
+                <div style={{display:"flex",alignItems:"center",gap:11,padding:"12px 14px",background:(poStatus&&poStatus.payouts_enabled?C.success:C.warning)+"10",border:"1px solid "+(poStatus&&poStatus.payouts_enabled?C.success:C.warning)+"30",borderRadius:10,marginBottom:14}}>
+                  <span style={{fontSize:18}}>{poStatus?(poStatus.payouts_enabled?"✅":"⏳"):"🔗"}</span>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:13,color:C.text}}>{poStatus?(poStatus.payouts_enabled?"Connected — ready for payouts":(poStatus.details_submitted?"Connected — Stripe is reviewing your details":"Setup incomplete")):"Stripe account connected"}</div>
+                    <div style={{fontSize:11,color:C.muted,fontFamily:"monospace"}}>{String(repData.stripeConnectId).slice(0,14)}…</div>
+                  </div>
+                </div>
+                {poStatus&&!poStatus.payouts_enabled&&(
+                  <div style={{fontSize:11.5,color:C.warning,marginBottom:12,lineHeight:1.5}}>Stripe still needs a few details before payouts can be sent. Tap “Finish payout setup” to complete it.</div>
+                )}
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  <Btn small variant="outline" onClick={connectStripe} disabled={poBusy}>{poBusy?"Opening…":(poStatus&&!poStatus.payouts_enabled?"Finish payout setup":"Update payout details")}</Btn>
+                  <Btn small variant="ghost" onClick={checkPayoutStatus} disabled={poBusy}>Refresh status</Btn>
+                </div>
+              </div>
+            ):(
+              <Btn onClick={connectStripe} disabled={poBusy}>{poBusy?"Opening Stripe…":"Connect Stripe to receive payouts →"}</Btn>
+            )}
+          </div>
+          <div style={{fontSize:11,color:C.dim,marginTop:10,lineHeight:1.5}}>Powered by Stripe Connect. Your bank details are held securely by Stripe — PreVasive never sees or stores them.</div>
         </div>
       )}
 
