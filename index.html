@@ -108,10 +108,10 @@ function dbDel(table, id) {
 function dbLoad(table) {
   var sb = getSB();
   if(!sb) return Promise.resolve([]);
-  return sb.from(table).select("data").order("updated_at",{ascending:false})
+  return sb.from(table).select("id,data").order("updated_at",{ascending:false})
     .then(function(r){
       if(r.error){console.warn("dbLoad ["+table+"]:",r.error.message);return [];}
-      return (r.data||[]).map(function(row){return row.data;}).filter(Boolean);
+      return (r.data||[]).map(function(row){var d=row.data; if(d&&d.id==null) d.id=row.id; return d;}).filter(Boolean);
     })
     .catch(function(e){console.warn("dbLoad ["+table+"] fetch error:",e.message);return [];});
 }
@@ -1686,8 +1686,9 @@ function AppLanding({onLogin}) {
                 <ApplyForm onSubmit={function(data){
                   var sb = window.supabase?window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
                   if(sb) {
+                    var _appId="app_"+Date.now();
                     sb.from("crm_applications").insert({
-                      id:"app_"+Date.now(), data:Object.assign({},data,{submittedAt:new Date().toISOString(),status:"pending"}),
+                      id:_appId, data:Object.assign({},data,{id:_appId,submittedAt:new Date().toISOString(),status:"pending"}),
                       updated_at:new Date().toISOString()
                     }).then(function(r){if(r.error) console.warn("Apply error:",r.error.message);});
                   }
