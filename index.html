@@ -1256,6 +1256,17 @@ function InviteRegistration({token,onComplete}) {
   const [err,     setErr]     = useState("");
   const [busy,    setBusy]    = useState(false);
   const [done,    setDone]    = useState(false);
+  const [matchedRep, setMatchedRep] = useState(null);
+  const [emailLocked, setEmailLocked] = useState(false);
+
+  useEffect(function(){
+    var sb=getSB(); if(!sb||!token) return;
+    sb.from("crm_reps").select("id,data").then(function(rr){
+      var rows=(rr&&rr.data)||[];
+      var m=rows.find(function(x){return x.data&&x.data.inviteToken===token;});
+      if(m){ setMatchedRep(m); if(m.data.name) setName(m.data.name); if(m.data.email){ setEmail(m.data.email); setEmailLocked(true); } }
+    },function(){});
+  },[]);
 
   function register() {
     if(!name.trim()||!email.trim()||!pass){setErr("All fields are required.");return;}
@@ -1269,14 +1280,22 @@ function InviteRegistration({token,onComplete}) {
         if(r.error){setBusy(false);setErr(r.error.message);return;}
         var uid = r.data&&r.data.user&&r.data.user.id;
         if(!uid){setBusy(false);setErr("Registration failed.");return;}
+        var repRowId = matchedRep ? matchedRep.id : genId("rep");
+        var repData = Object.assign({}, (matchedRep&&matchedRep.data)||{}, {
+          name:name.trim(), email:email.trim(), status:"active",
+          subscriptionStatus:(matchedRep&&matchedRep.data&&matchedRep.data.subscriptionStatus)||"trial",
+          trialStartedAt:(matchedRep&&matchedRep.data&&matchedRep.data.trialStartedAt)||new Date().toISOString(),
+          planId:(matchedRep&&matchedRep.data&&matchedRep.data.planId)||"starter",
+          inviteToken:token, authUid:uid, registeredAt:new Date().toISOString()
+        });
         return Promise.all([
-          sb.from("crm_users").upsert({id:uid,email:email.trim(),name:name.trim(),role:"rep",updated_at:new Date().toISOString()}),
-          sb.from("crm_reps").upsert({id:genId("rep"),data:Object.assign({},{
-            name:name.trim(),email:email.trim(),status:"active",
-            subscriptionStatus:"trial",trialStartedAt:new Date().toISOString(),
-            planId:"starter",inviteToken:token,createdAt:new Date().toISOString()
-          }),updated_at:new Date().toISOString()})
-        ]).then(function(){setBusy(false);setDone(true);});
+          sb.from("crm_users").upsert({id:uid,email:email.trim(),name:name.trim(),role:"rep",rep_id:repRowId,updated_at:new Date().toISOString()}),
+          sb.from("crm_reps").upsert({id:repRowId,data:repData,updated_at:new Date().toISOString()})
+        ]).then(function(res){
+          // If crm_users has no rep_id column yet, the first upsert errors — retry without it so the account still works.
+          var uErr = res && res[0] && res[0].error;
+          if(uErr){ return sb.from("crm_users").upsert({id:uid,email:email.trim(),name:name.trim(),role:"rep",updated_at:new Date().toISOString()}); }
+        }).then(function(){setBusy(false);setDone(true);});
       })
       .catch(function(e){setBusy(false);setErr(e.message||"Error");});
   }
@@ -1309,9 +1328,10 @@ function InviteRegistration({token,onComplete}) {
         {[["Full Name",name,setName,"text","Jane Smith"],["Email",email,setEmail,"email","you@company.com"],["Password",pass,setPass,"password","Min 8 characters"],["Confirm Password",pass2,setPass2,"password","Re-enter password"]].map(function(f){return (
           <div key={f[0]} style={{marginBottom:12}}>
             <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>{f[0]}</div>
-            <input value={f[1]} onChange={function(e){f[2](e.target.value);}} type={f[3]} placeholder={f[4]}
+            <input value={f[1]} onChange={function(e){if(f[0]==="Email"&&emailLocked)return;f[2](e.target.value);}} type={f[3]} placeholder={f[4]}
+              readOnly={f[0]==="Email"&&emailLocked}
               onKeyDown={f[0]==="Confirm Password"?function(e){if(e.key==="Enter")register();}:undefined}
-              style={inp}/>
+              style={Object.assign({},inp,(f[0]==="Email"&&emailLocked)?{opacity:.65,cursor:"not-allowed"}:{})}/>
           </div>
         );})}
         <div style={{marginTop:18}}>
