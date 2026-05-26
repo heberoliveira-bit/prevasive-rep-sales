@@ -9389,8 +9389,10 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
 <script id="c14" type="text/plain">
 function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
   var now6 = Date.now();
-  var myOrds = orders.filter(function(o){return o.repId===repId;});
-  var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
+  var myIds = [repId]; if(repData&&repData.id&&myIds.indexOf(repData.id)<0) myIds.push(repData.id);
+  function _isMine(id){ return myIds.indexOf(id)>=0; }
+  var myOrds = orders.filter(function(o){return _isMine(o.repId);});
+  var myComm = (commissions||[]).filter(function(cp){return _isMine(cp.repId);});
   var paidIds = myComm.map(function(cp){return cp.orderId;});
   var held = myOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
@@ -9495,7 +9497,7 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
                   ):(
                     <Btn small onClick={function(){
                       var id=genId("pr");
-                      var req={id:id,repId:repId,repName:repName,orderId:o.id,
+                      var req={id:id,repId:(repData&&repData.id)||repId,repName:repName,orderId:o.id,
                                amount:o.totals&&o.totals.commission||0,
                                status:"pending",requestedAt:new Date().toISOString()};
                       if(setPayoutRequests) setPayoutRequests(function(prev){return [req].concat(prev);});
@@ -9553,7 +9555,10 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
   function saveProfile(){
     if(!name.trim()) return;
-    if(setReps&&repData){var updated=Object.assign({},repData,{name:name.trim(),phone:phone.trim()});setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});dbSave("crm_reps",repData.id,updated);}
+    if(!repData){ addToast("Couldn't load your rep record — please contact your admin.","danger"); return; }
+    var updated=Object.assign({},repData,{name:name.trim(),phone:phone.trim()});
+    setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
+    dbSave("crm_reps",repData.id,updated);
     addToast("Profile updated","success"); setMsg("Saved!"); setTimeout(function(){setMsg("");},3000);
   }
   function changePw(){
@@ -9623,9 +9628,11 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
             {w9Msg&&<div style={{padding:"8px 12px",borderRadius:6,fontSize:12,fontWeight:600,marginBottom:8,background:w9Msg.indexOf("ubmitted")>=0?C.success+"12":C.danger+"12",color:w9Msg.indexOf("ubmitted")>=0?C.success:C.danger}}>{w9Msg}</div>}
             <Btn onClick={function(){
               if(!w9Name.trim()||!w9Ssn.trim()){setW9Msg("Name and EIN/SSN are required.");return;}
-              if(setReps&&repData){var u=Object.assign({},repData,{w9LegalName:w9Name.trim(),w9EntityType:w9Type,w9Address:w9Addr.trim(),w9Status:"received",w9ReviewStatus:"pending",w9SubmittedAt:new Date().toISOString()});setReps(function(prev){return prev.map(function(r){return r.id===repData.id?u:r;});});dbSave("crm_reps",repData.id,u);}
+              if(!repData){setW9Msg("Couldn't load your rep record — contact your admin.");return;}
+              if(repData.w9ReviewStatus==="approved" && !window.confirm("Your W-9 is already approved. Re-submitting requires admin re-approval and may temporarily lock order creation. Continue?")) return;
+              var u=Object.assign({},repData,{w9LegalName:w9Name.trim(),w9EntityType:w9Type,w9Address:w9Addr.trim(),w9Status:"received",w9ReviewStatus:"pending",w9SubmittedAt:new Date().toISOString()});setReps(function(prev){return prev.map(function(r){return r.id===repData.id?u:r;});});dbSave("crm_reps",repData.id,u);
               setW9Ssn(""); setW9Msg("W-9 submitted! Admin will review shortly."); addToast("W-9 submitted","success");
-            }}>Submit W-9</Btn>
+            }}>{repData&&repData.w9ReviewStatus==="approved"?"Re-submit W-9":"Submit W-9"}</Btn>
           </div>
           {(function(){
             var taxYear=new Date().getFullYear()-1;
@@ -9653,7 +9660,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
       {tab==="subscription"&&(
         <div style={{maxWidth:520}}>
-          {repData&&(
+          {repData?(
             <div>
               {/* Current plan card */}
               <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"20px 22px",marginBottom:16}}>
@@ -9765,6 +9772,8 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                 </div>
               </div>
             </div>
+          ):(
+            <div style={{padding:"24px",textAlign:"center",color:C.muted,fontSize:13}}>Your rep record isn't loaded yet. If this keeps happening, contact your admin.</div>
           )}
         </div>
       )}
