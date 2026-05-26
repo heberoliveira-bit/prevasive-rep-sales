@@ -6191,6 +6191,15 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
     addToast(rep.name+" suspended","warning");
   }
 
+  function deleteRep(rep) {
+    if(!window.confirm("Permanently delete \""+(rep.name||"this rep")+"\" ("+(rep.email||"")+")?\n\nThis removes the rep account. Past orders and commissions are kept for your records but will no longer link to an active rep. This cannot be undone."))return;
+    setReps(function(prev){return prev.filter(function(r){return r.id!==rep.id;});});
+    dbDel("crm_reps",rep.id);
+    // best-effort: remove the matching login role record so the orphaned account can't sign in
+    try{ var sb=getSB(); if(sb&&rep.email){ sb.from("crm_users").delete().eq("email",rep.email).then(function(){},function(){}); } }catch(e){}
+    addToast((rep.name||"Rep")+" deleted","warning");
+  }
+
   function changePlan(rep, planId) {
     var updated = Object.assign({},rep,{planId:planId,subscriptionStatus:planId?"active":"trial"});
     setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
@@ -6302,6 +6311,14 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
                                     fontFamily:"inherit",fontWeight:700,fontSize:11,
                                     display:"flex",alignItems:"center",gap:4,whiteSpace:"nowrap"}}>
                             👁 View Account
+                          </button>
+                          <button
+                            onClick={function(){deleteRep(rep);}}
+                            title="Delete rep account"
+                            style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+C.danger+"40",
+                                    background:"transparent",color:C.danger,cursor:"pointer",
+                                    fontFamily:"inherit",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>
+                            🗑 Delete
                           </button>
                         </div>
                       </td>
