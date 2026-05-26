@@ -1295,7 +1295,20 @@ function InviteRegistration({token,onComplete}) {
           // If crm_users has no rep_id column yet, the first upsert errors — retry without it so the account still works.
           var uErr = res && res[0] && res[0].error;
           if(uErr){ return sb.from("crm_users").upsert({id:uid,email:email.trim(),name:name.trim(),role:"rep",updated_at:new Date().toISOString()}); }
-        }).then(function(){setBusy(false);setDone(true);});
+        }).then(function(){
+          var company2=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+          try{
+            sendRepEmail(email.trim(), "Welcome to "+company2+" — your account is ready",
+              notifEmailHtml(company2,"You're all set",
+                "<p>Hi "+name.trim()+",</p><p>Your "+company2+" rep account is now active. Sign in any time to manage customers, place orders, and track your commissions.</p><p>Next, finish your quick setup (Rep Agreement and W-9) from your dashboard so you can start placing orders.</p>",
+                "Go to my dashboard", getSiteUrl(), "#1ea672"));
+            notifyAdmin("New rep activated — "+name.trim(),
+              notifEmailHtml(company2,"Rep activated",
+                "<p><strong>"+name.trim()+"</strong> ("+email.trim()+") just set their password and activated their rep account.</p>","View reps", getSiteUrl(), "#635bff"),
+              name.trim()+" activated their rep account", "rep_signup");
+          }catch(e){}
+          setBusy(false);setDone(true);
+        });
       })
       .catch(function(e){setBusy(false);setErr(e.message||"Error");});
   }
@@ -3239,9 +3252,10 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 
   function approveRep(rep) {
     var updated = Object.assign({},rep,{status:"active",approvedAt:new Date().toISOString()});
+    sendSetPasswordEmail(updated);
     setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
     dbSave("crm_reps",rep.id,updated);
-    addToast(rep.name+" approved","success");
+    addToast(rep.name+" approved — invitation email sent to "+(rep.email||"rep"),"success");
   }
 
   function approveApp(app) {
@@ -3256,7 +3270,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
     var updated = Object.assign({},app,{status:"approved"});
     setApplications(function(prev){return prev.map(function(a){return a.id===app.id?updated:a;});});
     dbSave("crm_applications",app.id,updated);
-    addToast(app.name+" approved","success");
+    addToast(app.name+" approved — invitation email sent to "+(app.email||"applicant"),"success");
   }
 
   function declineApp(app) {
@@ -10043,6 +10057,13 @@ function sendSetPasswordEmail(rep){
   return rep.inviteToken;
 }
 
+// Notify the admin: writes a bell entry and queues an email that any admin session delivers
+// (the admin address is resolved at delivery time, since the rep's browser doesn't have it).
+function notifyAdmin(subject, html, msg, key){
+  _writeNotifRow({key:key||"admin_alert", adminNotify:true, to:"", emailSubject:subject||"", emailHtml:html||"",
+    emailPending:!!(subject&&html), forAdmin:true, repId:"", msg:msg||"", type:"info"});
+}
+
 function QuoteAcceptPage({snap, onAccept, onDecline}){
   const [busy,setBusy]=useState(false);
   var quote=snap.quote||{};
@@ -10701,7 +10722,7 @@ function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,
       {allDone&&<div style={{marginTop:24,textAlign:"center"}}><Btn onClick={onComplete}>Add Your First Order →</Btn></div>}
 
       {modal==="terms"&&<TermsModal onAccept={function(){patchRep({termsAcceptedAt:new Date().toISOString()});setModal(null);}} onDecline={function(){setModal(null);}}/>}
-      {modal==="agreement"&&<RepAgreementModal repName={effectiveUser.name} onAgree={function(){patchRep({agreementSignedAt:new Date().toISOString(),agreementVersion:REP_AGREEMENT_VERSION});setModal(null);}} onDecline={function(){setModal(null);}}/>}
+      {modal==="agreement"&&<RepAgreementModal repName={effectiveUser.name} onAgree={function(){patchRep({agreementSignedAt:new Date().toISOString(),agreementVersion:REP_AGREEMENT_VERSION});try{var _cn=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();notifyAdmin("Rep signed the agreement — "+(effectiveUser.name||""),notifEmailHtml(_cn,"Agreement signed","<p><strong>"+(effectiveUser.name||"A rep")+"</strong> signed the Rep Agreement (v"+REP_AGREEMENT_VERSION+").</p>",null,null,"#635bff"),(effectiveUser.name||"A rep")+" signed the Rep Agreement","rep_agreement");}catch(e){}setModal(null);}} onDecline={function(){setModal(null);}}/>}
       {doc&&<LegalDocSignModal doc={doc} repId={rid} repName={effectiveUser.name}
         onSign={function(){var sig={id:genId("sig"),docId:doc.id,version:doc.version,repId:rid,repName:effectiveUser.name,signedAt:new Date().toISOString()};setSignatures(function(prev){return prev.concat([sig]);});dbSave("crm_legal_signatures",sig.id,sig);setModal(null);}}
         onDecline={function(){setModal(null);}}/>}
@@ -10900,6 +10921,7 @@ function App() {
     if(!cfg||!cfg.edgeFnUrl||!(cfg.clientSecret||cfg.pass)) return;
     notifications.forEach(function(n){
       var dest = n && (n.to||n.repEmail);
+      if(!dest && n && n.adminNotify) dest = getAdminNotifyEmail();
       if(n&&n.emailPending&&dest){
         if(n.key&&!notifEnabled(n.key)){
           var skip=Object.assign({},n,{emailPending:false,skipped:true});
