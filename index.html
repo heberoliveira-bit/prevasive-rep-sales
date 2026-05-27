@@ -1619,8 +1619,6 @@ function AppLanding({onLogin}) {
               ["📦","Order Management","Place and track orders from quote to delivery with full status visibility."],
               ["💸","Commission Tracking","Real-time commission calculation with 15-day return window protection."],
               ["👥","Customer Management","Manage your entire customer book in one place with full order history."],
-              ["📋","Compliance Built-in","W-9 collection, rep agreement, and 1099-NEC download included."],
-              ["🔔","Subscription Plans","Starter and Pro plans with commission ceilings. 15-day free trial."],
               ["📊","Your Dashboard","At-a-glance view of your pipeline, earnings, and customer activity."],
             ].map(function(f,i){return (
               <div key={i} style={{padding:"24px",background:C.bg}}>
@@ -11279,7 +11277,8 @@ function App() {
   if(!currentUser) return React.createElement(AppLanding, {onLogin:handleLogin});
 
   // Impersonation override
-  var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName,_isImpersonated:true}) : currentUser;
+  var _imRep = viewAsRep ? (reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData||{}) : null;
+  var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName,email:(_imRep&&_imRep.email)||viewAsRep.repEmail||currentUser.email,_isImpersonated:true}) : currentUser;
   var isAdmin = !viewAsRep && currentUser.role==="admin";
   var myRepData = isAdmin ? null : (viewAsRep ? reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null);
 
@@ -11357,7 +11356,7 @@ function App() {
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,
                  fontFamily:"'Inter',system-ui,-apple-system,sans-serif"}}>
       <Sidebar modules={modules} active={activeTab} onNav={function(id){setActiveTab(id);}}
-        user={viewAsRep?Object.assign({},currentUser,{name:viewAsRep.repName,role:"rep",_impersonating:currentUser.name}):currentUser}
+        user={viewAsRep?Object.assign({},currentUser,{name:viewAsRep.repName,email:(_imRep&&_imRep.email)||viewAsRep.repEmail||currentUser.email,role:"rep",_impersonating:currentUser.name}):currentUser}
         onLogout={handleLogout} theme={theme}
         onToggleTheme={function(){setTheme(theme==="dark"?"light":"dark");}}
         taskCount={isAdmin?(reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length+applications.filter(function(a){return !a.status||a.status==="pending";}).length+(termsRequests||[]).filter(function(r){return r.status==="pending";}).length+orders.filter(function(o){return o.status==="Submitted";}).length):0}
