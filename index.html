@@ -4331,11 +4331,11 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               {/* Live shipping rates */}
               {(function(){
                 var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
-                if(!ss||!ss.ratesFnUrl) return null;
+                if(!ss||!ss.ratesFnUrl) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
                 var cust = customers&&customers.find(function(cx){return cx.id===custId;});
                 var toZip = cust&&(cust.zip||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].zip))||"";
                 var toState = cust&&(cust.state||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].state))||"";
-                if(!toZip) return <div style={{fontSize:10,color:C.muted,marginTop:8}}>Select a customer to see shipping rates</div>;
+                if(!toZip) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: select a customer with a zip code to see carrier rates.</div>;
                 return (
                   <div style={{marginTop:12}}>
                     <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Shipping to {toZip}</div>
@@ -8636,7 +8636,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     if(custZip) return {zip:custZip,state:custState2};
                     return null;
                   })();
-                  if(!ss||!ss.ratesFnUrl||!shipAddr||!shipAddr.zip) return null;
+                  if(!ss||!ss.ratesFnUrl) return <div style={{fontSize:10,color:C.dim,marginBottom:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
+                  if(!shipAddr||!shipAddr.zip) return <div style={{fontSize:10,color:C.dim,marginBottom:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: add a zip code to this customer to see carrier rates.</div>;
                   return (
                     <div style={{marginBottom:12}}>
                       <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Live carrier rates to {shipAddr.zip}:</div>
