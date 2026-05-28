@@ -7996,20 +7996,28 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   useEffect(function(){
     if(step!==3||payMethod!=="due_receipt"||dorPath!=="card"||cardMode!=="online") return;
     var key = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").publishableKey||"";}catch(e){return "";}})();
-    if(!key||!window.Stripe) return;
-    setTimeout(function(){
+    if(!key){ setChargeErr("Card form unavailable — add a Stripe Publishable Key in Settings → Stripe."); return; }
+    if(!window.Stripe){ setChargeErr("Stripe failed to load — check your connection and reopen."); return; }
+    var cancelled=false, tries=0;
+    function tryMount(){
+      if(cancelled) return;
       var el = document.getElementById("stripe-card-element");
-      if(!el||stripeRef.card) return;
-      stripeRef.stripe = window.Stripe(key);
-      var elements = stripeRef.stripe.elements();
-      stripeRef.card = elements.create("card",{
-        style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"13px",color:"#f0f4ff","::placeholder":{color:"#6b7c93"}}},
-        hidePostalCode:true,
-      });
-      stripeRef.card.mount("#stripe-card-element");
-      stripeRef.el = el;
-    }, 100);
-    return function(){if(stripeRef.card){stripeRef.card.unmount();stripeRef.card=null;}};
+      if(!el){ if(tries++<25) setTimeout(tryMount,80); return; }
+      if(stripeRef.card) return;
+      try{
+        if(!stripeRef.stripe) stripeRef.stripe = window.Stripe(key);
+        var elements = stripeRef.stripe.elements();
+        var card = elements.create("card",{
+          style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"14px",color:C.text,"::placeholder":{color:C.muted}}},
+          hidePostalCode:true,
+        });
+        card.mount("#stripe-card-element");
+        card.on("change",function(e){setChargeErr(e.error?e.error.message:"");});
+        stripeRef.card = card; stripeRef.el = el;
+      }catch(e){ setChargeErr("Could not load card form: "+((e&&e.message)||"")); }
+    }
+    tryMount();
+    return function(){cancelled=true; if(stripeRef.card){try{stripeRef.card.unmount();}catch(e){} stripeRef.card=null;}};
   }, [step, dorPath, cardMode]);
   const [placeEmail,   setPlaceEmail]   = useState(""); // "link" or "card"
   const [showPostInv,  setShowPostInv]  = useState(false);
