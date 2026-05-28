@@ -428,7 +428,7 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
   useEffect(function(){
     if(!toZip||toZip===fetched) return;
     var ss = getSS();
-    if(!ss.ratesFnUrl||!ss.apiKey||!ss.warehouseZip) return;
+    if(!ss.ratesFnUrl||!ss.warehouseZip) return;
     setLoading(true); setError(""); setFetched(toZip);
     fetch(ss.ratesFnUrl,{
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -4331,7 +4331,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               {/* Live shipping rates */}
               {(function(){
                 var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
-                if(!ss||!ss.ratesFnUrl||!ss.apiKey) return null;
+                if(!ss||!ss.ratesFnUrl) return null;
                 var cust = customers&&customers.find(function(cx){return cx.id===custId;});
                 var toZip = cust&&(cust.zip||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].zip))||"";
                 var toState = cust&&(cust.state||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].state))||"";
@@ -8636,7 +8636,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     if(custZip) return {zip:custZip,state:custState2};
                     return null;
                   })();
-                  if(!ss||!ss.ratesFnUrl||!ss.apiKey||!shipAddr||!shipAddr.zip) return null;
+                  if(!ss||!ss.ratesFnUrl||!shipAddr||!shipAddr.zip) return null;
                   return (
                     <div style={{marginBottom:12}}>
                       <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Live carrier rates to {shipAddr.zip}:</div>
@@ -11010,6 +11010,7 @@ function App() {
       if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
       if(d.stripePublishableKey) setStripeAccountA(function(prev){var p=prev||{}; return p.publishableKey?p:Object.assign({},p,{publishableKey:d.stripePublishableKey});});
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
+      if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
     }).catch(function(){});
   },[]);
 
@@ -11019,9 +11020,17 @@ function App() {
     var sb=getSB(); if(!sb) return;
     var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{},
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
-                googleApiKey:(googleCfg&&googleCfg.apiKey)||"", googleEnabled:!!(googleCfg&&googleCfg.enabled) };
+                googleApiKey:(googleCfg&&googleCfg.apiKey)||"", googleEnabled:!!(googleCfg&&googleCfg.enabled),
+                shipping: shipStationCfg ? {
+                  ratesFnUrl:shipStationCfg.ratesFnUrl||"", enabled:!!shipStationCfg.enabled,
+                  warehouseAddr:shipStationCfg.warehouseAddr||"", warehouseCity:shipStationCfg.warehouseCity||"",
+                  warehouseState:shipStationCfg.warehouseState||"", warehouseZip:shipStationCfg.warehouseZip||"",
+                  defaultWeight:shipStationCfg.defaultWeight||"1", weightUnit:shipStationCfg.weightUnit||"pounds",
+                  dimL:shipStationCfg.dimL||"12", dimW:shipStationCfg.dimW||"10", dimH:shipStationCfg.dimH||"6",
+                  carrierFilter:shipStationCfg.carrierFilter||""
+                } : null };
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
-  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,currentUser,viewAsRep]);
 
 
   // Apply theme
