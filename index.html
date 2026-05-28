@@ -10047,15 +10047,15 @@ function _writeNotifRow(o){
 function notifyEmail(key, to, subject, html, bell){
   if(!notifEnabled(key)){ if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"}); return; }
   var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-  var canSend = to && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
-  if(canSend){
+  function queueEmail(){ _writeNotifRow({key:key,to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:(bell&&bell.repId)||"",msg:(bell&&bell.msg)||"",type:(bell&&bell.type)||"info"}); }
+  if(to && cfg && cfg.edgeFnUrl){
     fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){});
+      body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})})
+      .then(function(r){return r.json();}).then(function(d){ if(!(d&&d.ok)) queueEmail(); }).catch(function(){ queueEmail(); });
     if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"});
     return;
   }
-  _writeNotifRow({key:key,to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,
-    repId:(bell&&bell.repId)||"",msg:(bell&&bell.msg)||"",type:(bell&&bell.type)||"info"});
+  queueEmail();
 }
 
 // Send a rep onboarding email — sends now if this session has email creds (admin),
@@ -10063,13 +10063,12 @@ function notifyEmail(key, to, subject, html, bell){
 function sendRepEmail(to, subject, html){
   try{
     var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    var canSend = to && html && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
-    if(canSend){
+    function queue(){ _writeNotifRow({key:"rep_onboarding",to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:"",msg:"",type:"info"}); }
+    if(to && html && cfg && cfg.edgeFnUrl){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){});
-    } else {
-      _writeNotifRow({key:"rep_onboarding",to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:"",msg:"",type:"info"});
-    }
+        body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})})
+        .then(function(r){return r.json();}).then(function(d){ if(!(d&&d.ok)) queue(); }).catch(function(){ queue(); });
+    } else { queue(); }
   }catch(e){}
 }
 // Ensures the rep has an invite token (mutates rep), emails the set-password link, returns the token.
@@ -10945,7 +10944,7 @@ function App() {
   useEffect(function(){
     if(!currentUser||currentUser.role!=="admin") return;
     var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(!cfg||!cfg.edgeFnUrl||!(cfg.clientSecret||cfg.pass)) return;
+    if(!cfg||!cfg.edgeFnUrl) return;
     notifications.forEach(function(n){
       var dest = n && (n.to||n.repEmail);
       if(!dest && n && n.adminNotify) dest = getAdminNotifyEmail();
