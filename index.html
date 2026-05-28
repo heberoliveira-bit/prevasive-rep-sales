@@ -7989,7 +7989,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [charging,     setCharging]     = useState(false);
   const [chargeErr,    setChargeErr]    = useState("");
   const [charged,      setCharged]      = useState(null); // {id, last4, brand}
-  const stripeRef = {el:null, stripe:null, card:null};
+  var _stripeRefState = useState({el:null, stripe:null, card:null}); var stripeRef = _stripeRefState[0];
   const [sendOnPlace,  setSendOnPlace]  = useState(true);
 
   // Mount Stripe Elements when reaching Step 3 + card mode
@@ -8010,7 +8010,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       stripeRef.el = el;
     }, 100);
     return function(){if(stripeRef.card){stripeRef.card.unmount();stripeRef.card=null;}};
-  });
+  }, [step, dorPath, cardMode]);
   const [placeEmail,   setPlaceEmail]   = useState(""); // "link" or "card"
   const [showPostInv,  setShowPostInv]  = useState(false);
   const [placedOrder,  setPlacedOrder]  = useState(null);
