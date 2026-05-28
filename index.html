@@ -1985,16 +1985,15 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     if(!toEmail.trim()){addToast("Enter a customer email first","warning");return;}
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail&&cfg.clientSecret){
+    if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail){
       setSending(true);
       var html = buildEmailHtml(link, cust.name||"", body, grand.toFixed(2), order.id);
 
       function sendWithAttachments(attachments){
         fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({action:"send",tenantId:cfg.tenantId,clientId:cfg.clientId,
-            clientSecret:cfg.clientSecret,fromEmail:cfg.fromEmail,
+          body:JSON.stringify({action:"send",fromEmail:cfg.fromEmail,
             to:toEmail.trim(),toEmail:toEmail.trim(),
-            subject:subject,body:html,message:html,isHtml:true,
+            subject:subject,body:html,message:html,html:html,isHtml:true,
             attachments:attachments||[]})
         }).then(function(r){return r.json();}).then(function(d){
           setSending(false);
@@ -7732,7 +7731,7 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
     if(!toEmail.trim()||!body.trim()) return;
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(!cfg||!cfg.edgeFnUrl||!(cfg.clientSecret||cfg.pass)){
+    if(!cfg||!cfg.edgeFnUrl||!cfg.fromEmail){
       addToast("Email not configured — go to Admin → Settings → Email","warning");
       return;
     }
@@ -7747,11 +7746,6 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
         html:htmlBody,
         fromName:cfg.fromName||"PreVasive USA",
         fromEmail:cfg.fromEmail,
-        tenantId:cfg.tenantId,
-        clientId:cfg.clientId,
-        clientSecret:cfg.clientSecret,
-        user:cfg.user,
-        pass:cfg.pass,
       }),
     }).then(function(r){return r.json();}).then(function(d){
       setSending(false);
@@ -7773,7 +7767,7 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
     if(!custEmail) return;
     var cfg=null;
     try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(!cfg||!cfg.edgeFnUrl||!(cfg.clientSecret||cfg.pass)) return;
+    if(!cfg||!cfg.edgeFnUrl) return;
     setLoadThread(true); setThreadErr("");
     fetch(cfg.edgeFnUrl,{
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -10207,7 +10201,7 @@ function tktWhen(iso){
 function tktNotify(opts){
   try{
     var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    var canSend = opts.toEmail && opts.html && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
+    var canSend = opts.toEmail && opts.html && cfg && cfg.edgeFnUrl;
     if(canSend){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({to:opts.toEmail,subject:opts.subject||"Support ticket",html:opts.html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})}).then(function(){}).catch(function(){});
@@ -10598,7 +10592,7 @@ function AdminReturns({returns,setReturns,orders,setOrders,reps,currentUser,addT
   function notifyRep(rec,msg,html,subject){
     try{
       var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-      var to=repEmail(rec.repId), canSend=to&&html&&cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass);
+      var to=repEmail(rec.repId), canSend=to&&html&&cfg&&cfg.edgeFnUrl;
       if(canSend){ fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:to,subject:subject||"Refund update",html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})}).then(function(){}).catch(function(){}); _writeNotifRow({key:"refund",repId:rec.repId,msg:msg,type:"info"}); }
       else { _writeNotifRow({key:"refund",to:to||"",emailSubject:subject||"",emailHtml:html||"",emailPending:!!(to&&html),repId:rec.repId,msg:msg,type:"info"}); }
     }catch(e){}
