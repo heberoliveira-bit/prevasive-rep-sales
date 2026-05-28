@@ -11000,7 +11000,8 @@ function App() {
       if(d.invoice && Object.keys(d.invoice).length) setInvoiceCfg(d.invoice);
       if(d.tax && Object.keys(d.tax).length) setTaxCfg(d.tax);
       if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
-      if(d.stripePublishableKey) setStripeAccountA(function(prev){var p=prev||{}; return p.publishableKey?p:Object.assign({},p,{publishableKey:d.stripePublishableKey});});
+      if(d.stripePublishableKey||d.stripeChargeFnUrl) setStripeAccountA(function(prev){var p=prev||{}; return Object.assign({},p,{publishableKey:p.publishableKey||d.stripePublishableKey||"",edgeFnUrl:p.edgeFnUrl||d.stripeChargeFnUrl||""});});
+      if(d.emailFnUrl) setEmailCfg(function(prev){var p=prev||{}; return Object.assign({},p,{edgeFnUrl:p.edgeFnUrl||d.emailFnUrl||"",fromName:p.fromName||d.emailFromName||"",fromEmail:p.fromEmail||d.emailFromEmail||""});});
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
       if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
     }).catch(function(){});
@@ -11012,6 +11013,8 @@ function App() {
     var sb=getSB(); if(!sb) return;
     var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{},
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
+                stripeChargeFnUrl:(stripeAccountA&&stripeAccountA.edgeFnUrl)||"",
+                emailFnUrl:(emailCfg&&emailCfg.edgeFnUrl)||"", emailFromName:(emailCfg&&emailCfg.fromName)||"", emailFromEmail:(emailCfg&&emailCfg.fromEmail)||"",
                 googleApiKey:(googleCfg&&googleCfg.apiKey)||"", googleEnabled:!!(googleCfg&&googleCfg.enabled),
                 shipping: shipStationCfg ? {
                   ratesFnUrl:shipStationCfg.ratesFnUrl||shipStationCfg.edgeFnUrl||"", enabled:!!shipStationCfg.enabled,
@@ -11022,7 +11025,7 @@ function App() {
                   carrierFilter:shipStationCfg.carrierFilter||""
                 } : null };
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
-  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,currentUser,viewAsRep]);
 
 
   // Apply theme
