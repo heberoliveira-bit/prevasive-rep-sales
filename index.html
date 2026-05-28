@@ -10050,7 +10050,7 @@ function notifyEmail(key, to, subject, html, bell){
   function queueEmail(){ _writeNotifRow({key:key,to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:(bell&&bell.repId)||"",msg:(bell&&bell.msg)||"",type:(bell&&bell.type)||"info"}); }
   if(to && cfg && cfg.edgeFnUrl){
     fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})})
+      body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})})
       .then(function(r){return r.json();}).then(function(d){ if(!(d&&d.ok)) queueEmail(); }).catch(function(){ queueEmail(); });
     if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"});
     return;
@@ -10066,7 +10066,7 @@ function sendRepEmail(to, subject, html){
     function queue(){ _writeNotifRow({key:"rep_onboarding",to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:"",msg:"",type:"info"}); }
     if(to && html && cfg && cfg.edgeFnUrl){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})})
+        body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})})
         .then(function(r){return r.json();}).then(function(d){ if(!(d&&d.ok)) queue(); }).catch(function(){ queue(); });
     } else { queue(); }
   }catch(e){}
@@ -10210,7 +10210,7 @@ function tktNotify(opts){
     var canSend = opts.toEmail && opts.html && cfg && cfg.edgeFnUrl && (cfg.clientSecret||cfg.pass);
     if(canSend){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({to:opts.toEmail,subject:opts.subject||"Support ticket",html:opts.html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){});
+        body:JSON.stringify({to:opts.toEmail,subject:opts.subject||"Support ticket",html:opts.html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})}).then(function(){}).catch(function(){});
       _writeNotifRow({key:"ticket",repId:opts.repId||"",msg:opts.msg||"",type:opts.type||"info"});
     } else {
       _writeNotifRow({key:"ticket",to:opts.toEmail||"",emailSubject:opts.subject||"",emailHtml:opts.html||"",emailPending:!!(opts.toEmail&&opts.html),repId:opts.repId||"",msg:opts.msg||"",type:opts.type||"info"});
@@ -10599,7 +10599,7 @@ function AdminReturns({returns,setReturns,orders,setOrders,reps,currentUser,addT
     try{
       var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
       var to=repEmail(rec.repId), canSend=to&&html&&cfg&&cfg.edgeFnUrl&&(cfg.clientSecret||cfg.pass);
-      if(canSend){ fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:to,subject:subject||"Refund update",html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})}).then(function(){}).catch(function(){}); _writeNotifRow({key:"refund",repId:rec.repId,msg:msg,type:"info"}); }
+      if(canSend){ fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:to,subject:subject||"Refund update",html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})}).then(function(){}).catch(function(){}); _writeNotifRow({key:"refund",repId:rec.repId,msg:msg,type:"info"}); }
       else { _writeNotifRow({key:"refund",to:to||"",emailSubject:subject||"",emailHtml:html||"",emailPending:!!(to&&html),repId:rec.repId,msg:msg,type:"info"}); }
     }catch(e){}
   }
@@ -10960,7 +10960,7 @@ function App() {
         var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:marked,created_at:n.ts||new Date().toISOString()}).then(function(){});
         fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({to:dest,subject:n.emailSubject||"Notification",html:n.emailHtml||"",
-            fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail,tenantId:cfg.tenantId,clientId:cfg.clientId,clientSecret:cfg.clientSecret})
+            fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})
         }).then(function(){}).catch(function(){});
       }
     });
