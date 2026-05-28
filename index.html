@@ -415,7 +415,7 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
 
 
 /* ─── ShippingRatePicker ─────────────────────────────────────────── */
-function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
+function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgDimH, onSelect, selected}) {
   const [rates,    setRates]    = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
@@ -440,9 +440,9 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
         toZip:toZip, toState:toState||"",
         weight:parseFloat(totalWeight||ss.defaultWeight)||1,
         weightUnit:ss.weightUnit||"pounds",
-        dimL:parseFloat(ss.dimL||ss.defaultL)||12,
-        dimW:parseFloat(ss.dimW||ss.defaultW)||10,
-        dimH:parseFloat(ss.dimH||ss.defaultH)||6,
+        dimL:parseFloat(pkgDimL)||parseFloat(ss.dimL||ss.defaultL)||12,
+        dimW:parseFloat(pkgDimW)||parseFloat(ss.dimW||ss.defaultW)||10,
+        dimH:parseFloat(pkgDimH)||parseFloat(ss.dimH||ss.defaultH)||6,
         carrierCodes:ss.carrierFilter ? ss.carrierFilter.split(",").map(function(x){return x.trim();}).filter(Boolean) : null,
       }),
     }).then(function(r){return r.json();}).then(function(d){
@@ -609,6 +609,9 @@ function lineUnit(p, it){
 // Effective SKU/name for a line (variant overrides product).
 function lineSku(p, it){ var v=prodVariant(p,it); return (v&&v.sku)?v.sku:((p&&p.sku)||""); }
 function lineLabel(p, it){ var v=prodVariant(p,it); return (p?p.name:"")+(v?(" — "+v.name):""); }
+// Per-line shipping packing: variant overrides product when set.
+function lineWeight(p, it){ var v=prodVariant(p,it); if(v&&v.weight!=null&&v.weight!=="") return parseFloat(v.weight)||0; return (p&&p.weight)?(parseFloat(p.weight)||0):0; }
+function lineDim(p, it, k){ var v=prodVariant(p,it); if(v&&v[k]!=null&&v[k]!=="") return parseFloat(v[k])||0; return (p&&p[k])?(parseFloat(p[k])||0):0; }
 
 function fmtTerms(code) {
   var map = {"due_receipt":"Due on Receipt","net_15":"Net 15","net_30":"Net 30","net_45":"Net 45","net_60":"Net 60","net_90":"Net 90"};
@@ -4377,6 +4380,12 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                   <div style={{marginTop:12}}>
                     <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Shipping to {toZip}</div>
                     <ShippingRatePicker toZip={toZip} toState={toState}
+                      totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products.find(function(px){return px.id===it.prodId;});var w=p?lineWeight(p,it):0;return s+((w||1)*it.qty);},0)||1;})()}
+                      {...(function(){
+                        var dom=null,domW=-1;
+                        items.filter(function(it){return it.prodId;}).forEach(function(it){var p=products.find(function(px){return px.id===it.prodId;});if(!p)return;var w=lineWeight(p,it)*it.qty;if(w>domW){domW=w;dom={l:lineDim(p,it,"dimL"),wd:lineDim(p,it,"dimW"),h:lineDim(p,it,"dimH")};}});
+                        return dom?{pkgDimL:dom.l,pkgDimW:dom.wd,pkgDimH:dom.h}:{};
+                      })()}
                       selected={quoteRate}
                       onSelect={function(r){setQuoteRate(r);setQuoteShip(r.shipmentCost||0);}}/>
                     {quoteRate&&<div style={{fontSize:11,color:C.accent,marginTop:6,fontWeight:600}}>
@@ -6059,12 +6068,12 @@ function AdminProducts({products,setProducts,addToast}) {
   const [stock,    setStock]    = useState("");
   const [variants, setVariants] = useState([]);
 
-  function addVariant(){ setVariants(function(prev){return prev.concat([{id:genId("var"),name:"",sku:"",price:"",stock:""}]);}); }
+  function addVariant(){ setVariants(function(prev){return prev.concat([{id:genId("var"),name:"",sku:"",price:"",stock:"",weight:"",dimL:"",dimW:"",dimH:""}]);}); }
   function updateVariant(id,field,val){ setVariants(function(prev){return prev.map(function(v){return v.id===id?Object.assign({},v,(function(o){o[field]=val;return o;})({})):v;});}); }
   function removeVariant(id){ setVariants(function(prev){return prev.filter(function(v){return v.id!==id;});}); }
 
   function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setVariants([]);setShowForm(true); }
-  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):""};}));setShowForm(true); }
+  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):"",weight:v.weight!=null?String(v.weight):"",dimL:v.dimL!=null?String(v.dimL):"",dimW:v.dimW!=null?String(v.dimW):"",dimH:v.dimH!=null?String(v.dimH):""};}));setShowForm(true); }
 
   function save() {
     if(!name.trim()||!price){return;}
@@ -6072,7 +6081,11 @@ function AdminProducts({products,setProducts,addToast}) {
       .filter(function(v){return (v.name||"").trim();})
       .map(function(v){return {id:v.id||genId("var"),name:(v.name||"").trim(),sku:(v.sku||"").trim(),
         price:v.price!==""?(parseFloat(v.price)||0):(parseFloat(price)||0),
-        stock:v.stock!==""?(parseInt(v.stock)):null};});
+        stock:v.stock!==""?(parseInt(v.stock)):null,
+        weight:v.weight!==""?(parseFloat(v.weight)||0):null,
+        dimL:v.dimL!==""?(parseFloat(v.dimL)||0):null,
+        dimW:v.dimW!==""?(parseFloat(v.dimW)||0):null,
+        dimH:v.dimH!==""?(parseFloat(v.dimH)||0):null};});
     var data = {id:editing?editing.id:genId("prod"),name:name.trim(),sku:sku.trim(),
                 price:parseFloat(price)||0,category:category.trim(),
                 description:desc.trim(),active:active,imageUrl:imgUrl.trim(),
@@ -6190,17 +6203,30 @@ function AdminProducts({products,setProducts,addToast}) {
                     <span>Variant Name *</span><span>SKU</span><span>Price</span><span>Stock</span><span></span>
                   </div>
                   {variants.map(function(v){return (
-                    <div key={v.id} style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 0.8fr 0.8fr 28px",gap:8,alignItems:"center"}}>
-                      <input value={v.name} onChange={function(e){updateVariant(v.id,"name",e.target.value);}} placeholder="Large / 12-pack"
-                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
-                      <input value={v.sku} onChange={function(e){updateVariant(v.id,"sku",e.target.value);}} placeholder="PV-X100-L"
-                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,fontFamily:"monospace",outline:"none"}}/>
-                      <input value={v.price} onChange={function(e){updateVariant(v.id,"price",e.target.value);}} type="number" placeholder={price||"0.00"}
-                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
-                      <input value={v.stock} onChange={function(e){updateVariant(v.id,"stock",e.target.value);}} type="number" placeholder="∞"
-                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
-                      <button onClick={function(){removeVariant(v.id);}} title="Remove variant"
-                        style={{width:28,height:28,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.danger,cursor:"pointer",fontSize:14,lineHeight:1}}>×</button>
+                    <div key={v.id} style={{border:"1px solid "+C.border,borderRadius:10,padding:"10px",background:C.surface2}}>
+                      <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 0.8fr 0.8fr 28px",gap:8,alignItems:"center"}}>
+                        <input value={v.name} onChange={function(e){updateVariant(v.id,"name",e.target.value);}} placeholder="Large / 12-pack"
+                          style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
+                        <input value={v.sku} onChange={function(e){updateVariant(v.id,"sku",e.target.value);}} placeholder="PV-X100-L"
+                          style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,fontFamily:"monospace",outline:"none"}}/>
+                        <input value={v.price} onChange={function(e){updateVariant(v.id,"price",e.target.value);}} type="number" placeholder={price||"0.00"}
+                          style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
+                        <input value={v.stock} onChange={function(e){updateVariant(v.id,"stock",e.target.value);}} type="number" placeholder="∞"
+                          style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
+                        <button onClick={function(){removeVariant(v.id);}} title="Remove variant"
+                          style={{width:28,height:28,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.danger,cursor:"pointer",fontSize:14,lineHeight:1}}>×</button>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr 1fr 1fr",gap:8,alignItems:"center",marginTop:8}}>
+                        <span style={{fontSize:9.5,color:C.dim,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,whiteSpace:"nowrap"}}>📦 Packing</span>
+                        <input value={v.weight} onChange={function(e){updateVariant(v.id,"weight",e.target.value);}} type="number" placeholder={"Wt "+(weight||"lbs")}
+                          style={{padding:"7px 9px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11.5,outline:"none"}}/>
+                        <input value={v.dimL} onChange={function(e){updateVariant(v.id,"dimL",e.target.value);}} type="number" placeholder={"L "+(dimL||"in")}
+                          style={{padding:"7px 9px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11.5,outline:"none"}}/>
+                        <input value={v.dimW} onChange={function(e){updateVariant(v.id,"dimW",e.target.value);}} type="number" placeholder={"W "+(dimW||"in")}
+                          style={{padding:"7px 9px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11.5,outline:"none"}}/>
+                        <input value={v.dimH} onChange={function(e){updateVariant(v.id,"dimH",e.target.value);}} type="number" placeholder={"H "+(dimH||"in")}
+                          style={{padding:"7px 9px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11.5,outline:"none"}}/>
+                      </div>
                     </div>
                   );})}
                   <div style={{fontSize:10.5,color:C.dim,marginTop:2}}>Blank price uses the base product price. Blank stock = unlimited.</div>
@@ -8731,7 +8757,12 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     <div style={{marginBottom:12}}>
                       <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Live carrier rates to {shipAddr.zip}:</div>
                       <ShippingRatePicker toZip={shipAddr.zip} toState={shipAddr.state}
-                        totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products&&products.find(function(px){return px.id===it.prodId;});return s+(p&&p.weight?parseFloat(p.weight)*it.qty:1);},0)||1;})()}
+                        totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products&&products.find(function(px){return px.id===it.prodId;});var w=p?lineWeight(p,it):0;return s+((w||1)*it.qty);},0)||1;})()}
+                        {...(function(){
+                          var dom=null,domW=-1;
+                          items.filter(function(it){return it.prodId;}).forEach(function(it){var p=products&&products.find(function(px){return px.id===it.prodId;});if(!p)return;var w=lineWeight(p,it)*it.qty;if(w>domW){domW=w;dom={l:lineDim(p,it,"dimL"),wd:lineDim(p,it,"dimW"),h:lineDim(p,it,"dimH")};}});
+                          return dom?{pkgDimL:dom.l,pkgDimW:dom.wd,pkgDimH:dom.h}:{};
+                        })()}
                         selected={selectedRate}
                         onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);}}/>
                     </div>
