@@ -420,6 +420,7 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
   const [fetched,  setFetched]  = useState("");
+  const [debug,    setDebug]    = useState(null);
 
   function getSS(){
     try{return JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"{}");}catch(e){return {};}
@@ -428,9 +429,10 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
   useEffect(function(){
     if(!toZip||toZip===fetched) return;
     var ss = getSS();
-    if(!ss.ratesFnUrl||!ss.warehouseZip) return;
+    var rfn = ss.ratesFnUrl||ss.edgeFnUrl;
+    if(!rfn||!ss.warehouseZip) return;
     setLoading(true); setError(""); setFetched(toZip);
-    fetch(ss.ratesFnUrl,{
+    fetch(rfn,{
       method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         apiKey:ss.apiKey, apiSecret:ss.apiSecret,
@@ -438,13 +440,14 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
         toZip:toZip, toState:toState||"",
         weight:parseFloat(totalWeight||ss.defaultWeight)||1,
         weightUnit:ss.weightUnit||"pounds",
-        dimL:parseFloat(ss.dimL)||12,
-        dimW:parseFloat(ss.dimW)||10,
-        dimH:parseFloat(ss.dimH)||6,
+        dimL:parseFloat(ss.dimL||ss.defaultL)||12,
+        dimW:parseFloat(ss.dimW||ss.defaultW)||10,
+        dimH:parseFloat(ss.dimH||ss.defaultH)||6,
         carrierCodes:ss.carrierFilter ? ss.carrierFilter.split(",").map(function(x){return x.trim();}).filter(Boolean) : null,
       }),
     }).then(function(r){return r.json();}).then(function(d){
       setLoading(false);
+      setDebug(d);
       if(d.ok){
         var allRates = d.rates||[];
         // Deduplicate by serviceCode+cost
@@ -469,7 +472,19 @@ function ShippingRatePicker({toZip, toState, totalWeight, onSelect, selected}) {
   if(error) return (
     <div style={{padding:"12px",background:C.danger+"10",borderRadius:10,fontSize:11,color:C.danger}}>{error}</div>
   );
-  if(rates.length===0) return null;
+  if(rates.length===0) {
+    var tried = (debug && Array.isArray(debug.carriers) && debug.carriers.length) ? debug.carriers.join(", ") : "";
+    return (
+      <div style={{padding:"10px 14px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:10,fontSize:11,color:C.muted,lineHeight:1.5}}>
+        <div style={{fontWeight:600,color:C.warning,marginBottom:4}}>No live rates returned</div>
+        {tried
+          ? <div>Tried: {tried}. None returned a rate to {toZip}. Check that those carriers are connected in ShipStation and that the package weight/dimensions are valid.</div>
+          : <div>The rate function returned no carriers. Confirm ShipStation has at least one connected carrier, and that <code>SHIPSTATION_API_KEY</code> / <code>SHIPSTATION_API_SECRET</code> are set as Supabase function secrets (or admin's keys are filled in Settings → Shipping).</div>
+        }
+        <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{background:C.surface2,borderRadius:10,overflow:"hidden"}}>
@@ -4331,7 +4346,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               {/* Live shipping rates */}
               {(function(){
                 var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
-                if(!ss||!ss.ratesFnUrl) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
+                if(!ss||!(ss.ratesFnUrl||ss.edgeFnUrl)) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
                 var cust = customers&&customers.find(function(cx){return cx.id===custId;});
                 var toZip = cust&&(cust.zip||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].zip))||"";
                 var toState = cust&&(cust.state||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].state))||"";
@@ -7278,9 +7293,9 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                 <Field label="H (in)" value={(shipStationCfg&&shipStationCfg.defaultH)||""}
                   onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{defaultH:v}));}} type="number"/>
               </div>
-              <Field label="Function URL" value={(shipStationCfg&&shipStationCfg.edgeFnUrl)||""}
-                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{edgeFnUrl:v}));}}
-                placeholder="https://xxx.supabase.co/functions/v1/get-shipping-rates"
+              <Field label="Function URL" value={(shipStationCfg&&(shipStationCfg.ratesFnUrl||shipStationCfg.edgeFnUrl))||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{ratesFnUrl:v,edgeFnUrl:v}));}}
+                placeholder="https://xxx.supabase.co/functions/v1/shipstation-rates"
                 hint="Edge Function for live rate lookup"/>
               <Field label="Show only carriers" value={(shipStationCfg&&shipStationCfg.carrierFilter)||""}
                 onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{carrierFilter:v}));}}
@@ -8636,7 +8651,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     if(custZip) return {zip:custZip,state:custState2};
                     return null;
                   })();
-                  if(!ss||!ss.ratesFnUrl) return <div style={{fontSize:10,color:C.dim,marginBottom:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
+                  if(!ss||!(ss.ratesFnUrl||ss.edgeFnUrl)) return <div style={{fontSize:10,color:C.dim,marginBottom:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
                   if(!shipAddr||!shipAddr.zip) return <div style={{fontSize:10,color:C.dim,marginBottom:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: add a zip code to this customer to see carrier rates.</div>;
                   return (
                     <div style={{marginBottom:12}}>
@@ -11023,11 +11038,11 @@ function App() {
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
                 googleApiKey:(googleCfg&&googleCfg.apiKey)||"", googleEnabled:!!(googleCfg&&googleCfg.enabled),
                 shipping: shipStationCfg ? {
-                  ratesFnUrl:shipStationCfg.ratesFnUrl||"", enabled:!!shipStationCfg.enabled,
-                  warehouseAddr:shipStationCfg.warehouseAddr||"", warehouseCity:shipStationCfg.warehouseCity||"",
+                  ratesFnUrl:shipStationCfg.ratesFnUrl||shipStationCfg.edgeFnUrl||"", enabled:!!shipStationCfg.enabled,
+                  warehouseAddr:shipStationCfg.warehouseAddr||shipStationCfg.warehouseAddress||"", warehouseCity:shipStationCfg.warehouseCity||"",
                   warehouseState:shipStationCfg.warehouseState||"", warehouseZip:shipStationCfg.warehouseZip||"",
                   defaultWeight:shipStationCfg.defaultWeight||"1", weightUnit:shipStationCfg.weightUnit||"pounds",
-                  dimL:shipStationCfg.dimL||"12", dimW:shipStationCfg.dimW||"10", dimH:shipStationCfg.dimH||"6",
+                  dimL:shipStationCfg.dimL||shipStationCfg.defaultL||"12", dimW:shipStationCfg.dimW||shipStationCfg.defaultW||"10", dimH:shipStationCfg.dimH||shipStationCfg.defaultH||"6",
                   carrierFilter:shipStationCfg.carrierFilter||""
                 } : null };
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
