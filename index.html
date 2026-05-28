@@ -8530,33 +8530,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     return (
                       <div>
                         <div style={{padding:"12px 14px",borderRadius:10,border:"2px solid "+C.success,
-                                     background:C.success+"08",marginBottom:8}}>
+                                     background:C.success+"08"}}>
                           <div style={{fontWeight:700,fontSize:14,color:C.success}}>Due on Receipt</div>
-                          <div style={{fontSize:11,color:C.muted,marginTop:3}}>Choose how to collect payment:</div>
+                          <div style={{fontSize:11,color:C.muted,marginTop:3}}>You'll choose how to collect payment on the Confirm step.</div>
                         </div>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:4}}>
-                          <div style={{padding:"14px",borderRadius:10,border:"2px solid "+C.accent,
-                                       background:C.accent+"08",cursor:"pointer",textAlign:"center"}}
-                            onClick={function(){setDorPath("link");}}>
-                            <div style={{fontSize:20,marginBottom:6}}>✉</div>
-                            <div style={{fontWeight:700,fontSize:12,color:C.accent}}>Send Invoice Link</div>
-                            <div style={{fontSize:10,color:C.muted,marginTop:3}}>Customer pays online</div>
-                            {dorPath==="link"&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:C.accent}}>✓ Selected</div>}
-                          </div>
-                          <div style={{padding:"14px",borderRadius:10,border:"2px solid "+C.warning,
-                                       background:C.warning+"08",cursor:"pointer",textAlign:"center"}}
-                            onClick={function(){setDorPath("card");}}>
-                            <div style={{fontSize:20,marginBottom:6}}>💳</div>
-                            <div style={{fontWeight:700,fontSize:12,color:C.warning}}>Collect Card</div>
-                            <div style={{fontSize:10,color:C.muted,marginTop:3}}>Enter card on delivery</div>
-                            {dorPath==="card"&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:C.warning}}>✓ Selected</div>}
-                          </div>
-                        </div>
-                        {dorPath==="link"&&(
-                          <div style={{marginTop:10,padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"20",borderRadius:8,fontSize:11,color:C.muted}}>
-                            📧 After placing the order, you can send the customer a payment link from the order detail.
-                          </div>
-                        )}
                       </div>
                     );
                   }
@@ -8792,6 +8769,31 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 );})}
               </div>
 
+              {/* ── DOR: choose how to collect (moved here from step 2) ── */}
+              {payMethod==="due_receipt"&&!charged&&(
+                <div style={{marginBottom:14}}>
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>How to collect payment</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                    <div style={{padding:"14px",borderRadius:10,border:"2px solid "+(dorPath==="link"?C.accent:C.border),
+                                 background:dorPath==="link"?C.accent+"08":C.surface,cursor:"pointer",textAlign:"center"}}
+                      onClick={function(){setDorPath("link");}}>
+                      <div style={{fontSize:20,marginBottom:6}}>✉</div>
+                      <div style={{fontWeight:700,fontSize:12,color:C.accent}}>Send Invoice Link</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:3}}>Customer pays online</div>
+                      {dorPath==="link"&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:C.accent}}>✓ Selected</div>}
+                    </div>
+                    <div style={{padding:"14px",borderRadius:10,border:"2px solid "+(dorPath==="card"?C.warning:C.border),
+                                 background:dorPath==="card"?C.warning+"08":C.surface,cursor:"pointer",textAlign:"center"}}
+                      onClick={function(){setDorPath("card");}}>
+                      <div style={{fontSize:20,marginBottom:6}}>💳</div>
+                      <div style={{fontWeight:700,fontSize:12,color:C.warning}}>Collect Card</div>
+                      <div style={{fontSize:10,color:C.muted,marginTop:3}}>Enter card now</div>
+                      {dorPath==="card"&&<div style={{marginTop:6,fontSize:10,fontWeight:700,color:C.warning}}>✓ Selected</div>}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* ── DOR: Send Invoice Link ── */}
               {payMethod==="due_receipt"&&dorPath==="link"&&(
                 <div style={{background:C.accent+"08",border:"1px solid "+C.accent+"25",borderRadius:10,padding:"14px",marginBottom:14}}>
@@ -8813,42 +8815,16 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 <div style={{background:C.surface2,border:"1px solid "+C.warning+"40",borderRadius:10,padding:"14px",marginBottom:14}}>
                   <div style={{fontSize:12,fontWeight:700,color:C.warning,marginBottom:10}}>💳 Collect Payment — {fmtMoney(totals.grand||0)}</div>
 
-                  {/* Mode toggle */}
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-                    {[["online","💳 Charge Card Now"],["terminal","📱 Stripe Terminal"]].map(function(m){
-                      var sel=cardMode===m[0];
-                      return (
-                        <div key={m[0]} onClick={function(){setCardMode(m[0]);setChargeErr("");}}
-                          style={{padding:"9px 12px",borderRadius:8,border:"2px solid "+(sel?C.accent:C.border),
-                                  background:sel?C.accent+"08":C.surface,cursor:"pointer",textAlign:"center"}}>
-                          <div style={{fontSize:12,fontWeight:sel?700:400,color:sel?C.accent:C.muted}}>{m[1]}</div>
-                        </div>
-                      );
-                    })}
+                  {/* Charge card online via Stripe */}
+                  <div>
+                    <Field label="Name on Card" value={cardName} onChange={setCardName} placeholder="Jane Smith"/>
+                    <div style={{marginBottom:8}}>
+                      <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:5}}>Card Number</div>
+                      <div id="stripe-card-element" style={{background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"10px 12px",fontSize:13,minHeight:38}}/>
+                      <div style={{fontSize:10,color:C.dim,marginTop:3}}>Powered by Stripe — card number never touches our servers</div>
+                    </div>
+                    {chargeErr&&<div style={{padding:"7px 10px",background:C.danger+"12",borderRadius:6,fontSize:11,color:C.danger,marginBottom:8}}>{chargeErr}</div>}
                   </div>
-
-                  {/* Online — Stripe Elements */}
-                  {cardMode==="online"&&(
-                    <div>
-                      <Field label="Name on Card" value={cardName} onChange={setCardName} placeholder="Jane Smith"/>
-                      <div style={{marginBottom:8}}>
-                        <div style={{fontSize:10,fontWeight:600,color:C.muted,marginBottom:5}}>Card Number</div>
-                        <div id="stripe-card-element" style={{background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"10px 12px",fontSize:13,minHeight:38}}/>
-                        <div style={{fontSize:10,color:C.dim,marginTop:3}}>Powered by Stripe — card number never touches our servers</div>
-                      </div>
-                      {chargeErr&&<div style={{padding:"7px 10px",background:C.danger+"12",borderRadius:6,fontSize:11,color:C.danger,marginBottom:8}}>{chargeErr}</div>}
-                    </div>
-                  )}
-
-                  {/* Terminal */}
-                  {cardMode==="terminal"&&(
-                    <div>
-                      <div style={{padding:"10px 12px",background:C.surface,borderRadius:8,fontSize:12,color:C.muted,lineHeight:1.7,marginBottom:8}}>
-                        Customer taps/swipes card on your Stripe Terminal reader. Have the reader ready before clicking Place Order.
-                      </div>
-                      {chargeErr&&<div style={{padding:"7px 10px",background:C.danger+"12",borderRadius:6,fontSize:11,color:C.danger}}>{chargeErr}</div>}
-                    </div>
-                  )}
                 </div>
               )}
 
