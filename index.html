@@ -8069,6 +8069,19 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     return (repData&&repData.defaultCommissionRate)||10;
   })();
   const [commRate,   setCommRate]   = useState(initCommRate);
+  // Keep commission rate in sync with whichever setting drives it:
+  // customer override → rep's defaultCommissionRate → fallback. Skip for edits (preserve stored rate).
+  useEffect(function(){
+    if(editOrder) return;
+    var custObj = custId ? (customers||[]).find(function(x){return x.id===custId;}) : null;
+    if(custObj && custObj.commissionRate!=null && custObj.commissionRate!=="") {
+      setCommRate(parseFloat(custObj.commissionRate)||0);
+      return;
+    }
+    if(repData && repData.defaultCommissionRate!=null && repData.defaultCommissionRate!=="") {
+      setCommRate(parseFloat(repData.defaultCommissionRate)||0);
+    }
+  }, [custId, customers, repData&&repData.defaultCommissionRate, repData&&repData.id]);
   const [notes,      setNotes]      = useState((editOrder&&editOrder.notes)||"");
   const [agreed,     setAgreed]     = useState(false);
   const [placing,    setPlacing]    = useState(false);
