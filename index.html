@@ -557,7 +557,10 @@ function formatShipStationSummary(order, customers, products) {
     "--- Items ---"];
   (order.items||[]).forEach(function(it){
     var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",sku:""};
-    lines.push(it.qty+"x "+p.name+(p.sku?" (SKU: "+p.sku+")":"")+" @ "+fmtMoney(p.price||0));
+    var nm=(p.name||"Product")+(it.variantName?(" — "+it.variantName):"");
+    var sk=it.variantSku||lineSku(p,it);
+    var up=it.unitPrice!=null?it.unitPrice:lineUnit(p,it);
+    lines.push(it.qty+"x "+nm+(sk?" (SKU: "+sk+")":"")+" @ "+fmtMoney(up||0));
   });
   lines.push("");
   lines.push("Subtotal: "+fmtMoney(order.totals&&order.totals.subtotal||0));
@@ -589,6 +592,23 @@ function genId(prefix) {
 function fmtMoney(n) {
   return "$"+(parseFloat(n)||0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g,",");
 }
+
+// ── Product variant helpers ──
+// A line item may carry it.variantId selecting one of p.variants [{id,name,sku,price,stock}].
+function prodVariant(p, it){
+  if(!p||!it||!it.variantId||!p.variants||!p.variants.length) return null;
+  for(var i=0;i<p.variants.length;i++){ if(p.variants[i] && p.variants[i].id===it.variantId) return p.variants[i]; }
+  return null;
+}
+// Effective base unit price for a line: variant price if a variant is selected, else product price.
+function lineUnit(p, it){
+  var v=prodVariant(p,it);
+  if(v && v.price!=null && v.price!=="") return parseFloat(v.price)||0;
+  return (p && p.price!=null) ? (parseFloat(p.price)||0) : (it && it.unitPrice ? parseFloat(it.unitPrice)||0 : 0);
+}
+// Effective SKU/name for a line (variant overrides product).
+function lineSku(p, it){ var v=prodVariant(p,it); return (v&&v.sku)?v.sku:((p&&p.sku)||""); }
+function lineLabel(p, it){ var v=prodVariant(p,it); return (p?p.name:"")+(v?(" — "+v.name):""); }
 
 function fmtTerms(code) {
   var map = {"due_receipt":"Due on Receipt","net_15":"Net 15","net_30":"Net 30","net_45":"Net 45","net_60":"Net 60","net_90":"Net 90"};
@@ -4157,7 +4177,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   function calcTotal() {
     return items.reduce(function(s,it){
       var p=products.find(function(x){return x.id===it.prodId;});
-      return s+(p?p.price:0)*it.qty;
+      return s+(p?lineUnit(p,it):0)*it.qty;
     },0);
   }
   // Customer-facing goods subtotal (base + commission markup), tax, and grand total
@@ -4184,7 +4204,10 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               custId:custId,custName:selCust?selCust.name:"",
               items:items.filter(function(it){return it.prodId;}).map(function(it){
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
-        return Object.assign({},it,{unitPrice:p.price,customerPrice:Math.round(p.price*(1+rate3/100)*100)/100});
+        var v=prodVariant(p,it);
+        var base=lineUnit(p,it);
+        return Object.assign({},it,{unitPrice:base,customerPrice:Math.round(base*(1+rate3/100)*100)/100,
+          variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""});
       }),
               productBase:productBase,productCustomer:productCustomer,
               commission:Math.round(productBase*rate3/100*100)/100,
@@ -4374,13 +4397,25 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
             </div>
             <div>
               <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Items</div>
-              {items.map(function(it,i){return (
+              {items.map(function(it,i){
+                var selP=products.find(function(x){return x.id===it.prodId;});
+                var hasVars=selP&&selP.variants&&selP.variants.length>0;
+                return (
                 <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px auto",gap:8,marginBottom:8,alignItems:"flex-end"}}>
-                  <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value}):x;});});}}
-                    style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                    <option value="">Product…</option>
-                    {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}</option>;})}
-                  </select>
+                  <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                    <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value,variantId:""}):x;});});}}
+                      style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
+                      <option value="">Product…</option>
+                      {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}</option>;})}
+                    </select>
+                    {hasVars&&(
+                      <select value={it.variantId||""} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{variantId:e.target.value}):x;});});}}
+                        style={{background:C.bg,border:"1px solid "+(it.variantId?C.accent:C.warning),borderRadius:7,padding:"7px 10px",color:it.variantId?C.text:C.warning,fontSize:11.5,fontFamily:"inherit",outline:"none"}}>
+                        <option value="">Choose variant…</option>
+                        {selP.variants.map(function(v){return <option key={v.id} value={v.id}>{v.name} — {fmtMoney(v.price!=null&&v.price!==""?v.price:selP.price)}{v.stock!=null?(" ("+v.stock+" in stock)"):""}</option>;})}
+                      </select>
+                    )}
+                  </div>
                   <input type="number" min="1" value={it.qty}
                     onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{qty:parseInt(e.target.value)||1}):x;});});}}
                     style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
@@ -4430,8 +4465,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
                 {(viewQuote.items||[]).map(function(it,i){
                   var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
-                  var lp=it.customerPrice||p.price;
-                  return <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(lp*it.qty)}</span></div>;
+                  var lp=it.customerPrice||lineUnit(p,it);
+                  var lbl=(it.qty)+"× "+(p.name||"Product")+(it.variantName?(" — "+it.variantName):"");
+                  return <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{lbl}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(lp*it.qty)}</span></div>;
                 })}
                 {(viewQuote.shipping||0)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>Shipping{viewQuote.shippingService?" — "+viewQuote.shippingService:""}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(viewQuote.shipping)}</span></div>
@@ -5874,12 +5910,12 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
                 {(viewOrder.items||[]).map(function(it,i){
                   var p   = products.find(function(x){return x.id===it.prodId;})||{name:"Unknown"};
-                  var cup = it.customerPrice||p.price||0;
+                  var cup = it.customerPrice||lineUnit(p,it)||0;
                   return (
                     <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
                                          padding:"4px 0",borderBottom:i<(viewOrder.items||[]).length-1?"1px solid "+C.border:"none"}}>
-                      <span style={{color:C.muted}}>{it.qty}× {p.name}</span>
-                      <span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney((it.unitPrice||0)*it.qty)}</span>
+                      <span style={{color:C.muted}}>{it.qty}× {p.name}{it.variantName?(" — "+it.variantName):""}</span>
+                      <span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney((it.unitPrice||lineUnit(p,it)||0)*it.qty)}</span>
                     </div>
                   );
                 })}
@@ -6021,18 +6057,29 @@ function AdminProducts({products,setProducts,addToast}) {
   const [dimH,     setDimH]     = useState("");
   const [barcode,  setBarcode]  = useState("");
   const [stock,    setStock]    = useState("");
+  const [variants, setVariants] = useState([]);
 
-  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setShowForm(true); }
-  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setShowForm(true); }
+  function addVariant(){ setVariants(function(prev){return prev.concat([{id:genId("var"),name:"",sku:"",price:"",stock:""}]);}); }
+  function updateVariant(id,field,val){ setVariants(function(prev){return prev.map(function(v){return v.id===id?Object.assign({},v,(function(o){o[field]=val;return o;})({})):v;});}); }
+  function removeVariant(id){ setVariants(function(prev){return prev.filter(function(v){return v.id!==id;});}); }
+
+  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setVariants([]);setShowForm(true); }
+  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):""};}));setShowForm(true); }
 
   function save() {
     if(!name.trim()||!price){return;}
+    var cleanVariants = (variants||[])
+      .filter(function(v){return (v.name||"").trim();})
+      .map(function(v){return {id:v.id||genId("var"),name:(v.name||"").trim(),sku:(v.sku||"").trim(),
+        price:v.price!==""?(parseFloat(v.price)||0):(parseFloat(price)||0),
+        stock:v.stock!==""?(parseInt(v.stock)):null};});
     var data = {id:editing?editing.id:genId("prod"),name:name.trim(),sku:sku.trim(),
                 price:parseFloat(price)||0,category:category.trim(),
                 description:desc.trim(),active:active,imageUrl:imgUrl.trim(),
                 weight:parseFloat(weight)||0,
                 dimL:parseFloat(dimL)||0,dimW:parseFloat(dimW)||0,dimH:parseFloat(dimH)||0,
                 barcode:barcode.trim(),stock:stock!==""?parseInt(stock):null,
+                variants:cleanVariants,
                 updatedAt:new Date().toISOString()};
     if(!editing) data.createdAt = new Date().toISOString();
     setProducts(function(prev){
@@ -6072,6 +6119,7 @@ function AdminProducts({products,setProducts,addToast}) {
                       {p.imageUrl&&<img src={p.imageUrl} alt="" style={{width:32,height:32,borderRadius:6,objectFit:"cover",border:"1px solid "+C.border}}/>}
                       <div>
                         <div style={{fontWeight:600,fontSize:13,color:C.text}}>{p.name}</div>
+                        {p.variants&&p.variants.length>0&&<div style={{fontSize:10,color:C.accent,fontWeight:600,marginTop:1}}>{p.variants.length} variant{p.variants.length>1?"s":""}</div>}
                         {p.description&&<div style={{fontSize:11,color:C.dim,marginTop:1}}>{p.description.slice(0,60)}{p.description.length>60?"…":""}</div>}
                       </div>
                     </div>
@@ -6126,6 +6174,38 @@ function AdminProducts({products,setProducts,addToast}) {
             <div style={{gridColumn:"1/-1",borderTop:"1px solid "+C.border,paddingTop:14,marginTop:2}}>
               <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>📊 Inventory</div>
               <Field label="Stock Quantity (optional)" value={stock} onChange={setStock} type="number" placeholder="Leave blank if unlimited"/>
+            </div>
+
+            {/* Variants */}
+            <div style={{gridColumn:"1/-1",borderTop:"1px solid "+C.border,paddingTop:14,marginTop:2}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+                <div style={{fontSize:11,fontWeight:700,color:C.text}}>🎚 Variants <span style={{fontWeight:400,color:C.dim}}>(optional — e.g. sizes, pack counts)</span></div>
+                <Btn small variant="outline" onClick={addVariant}>+ Add Variant</Btn>
+              </div>
+              {variants.length===0 ? (
+                <div style={{fontSize:11.5,color:C.dim}}>No variants. The product sells at its base price above. Add variants to offer options with their own price, SKU, and stock.</div>
+              ) : (
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 0.8fr 0.8fr 28px",gap:8,fontSize:9.5,color:C.dim,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,padding:"0 2px"}}>
+                    <span>Variant Name *</span><span>SKU</span><span>Price</span><span>Stock</span><span></span>
+                  </div>
+                  {variants.map(function(v){return (
+                    <div key={v.id} style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 0.8fr 0.8fr 28px",gap:8,alignItems:"center"}}>
+                      <input value={v.name} onChange={function(e){updateVariant(v.id,"name",e.target.value);}} placeholder="Large / 12-pack"
+                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
+                      <input value={v.sku} onChange={function(e){updateVariant(v.id,"sku",e.target.value);}} placeholder="PV-X100-L"
+                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,fontFamily:"monospace",outline:"none"}}/>
+                      <input value={v.price} onChange={function(e){updateVariant(v.id,"price",e.target.value);}} type="number" placeholder={price||"0.00"}
+                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
+                      <input value={v.stock} onChange={function(e){updateVariant(v.id,"stock",e.target.value);}} type="number" placeholder="∞"
+                        style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
+                      <button onClick={function(){removeVariant(v.id);}} title="Remove variant"
+                        style={{width:28,height:28,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.danger,cursor:"pointer",fontSize:14,lineHeight:1}}>×</button>
+                    </div>
+                  );})}
+                  <div style={{fontSize:10.5,color:C.dim,marginTop:2}}>Blank price uses the base product price. Blank stock = unlimited.</div>
+                </div>
+              )}
             </div>
           </div>
           <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginTop:4}}>
@@ -8062,7 +8142,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     // Base subtotal (catalog prices)
     var baseSubtotal = items.reduce(function(s,it){
       var p=products.find(function(x){return x.id===it.prodId;});
-      return s+(p?p.price:it.unitPrice||0)*it.qty;
+      return s+(p?lineUnit(p,it):it.unitPrice||0)*it.qty;
     },0);
     // Model B: commission = markup added to base price
     var commission  = Math.round(baseSubtotal*(rate2/100)*100)/100;
@@ -8183,7 +8263,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       items:items.filter(function(it){return it.prodId;}).map(function(it){
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
         var rate3=parseFloat(commRate)||0;
-        return Object.assign({},it,{unitPrice:p.price,customerPrice:Math.round(p.price*(1+rate3/100)*100)/100});
+        var v=prodVariant(p,it);
+        var base=lineUnit(p,it);
+        return Object.assign({},it,{unitPrice:base,customerPrice:Math.round(base*(1+rate3/100)*100)/100,
+          variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""});
       }),
       totals:totals, commissionRate:parseFloat(commRate)||0,
       payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
@@ -8480,13 +8563,25 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               {/* Items */}
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Products</div>
-                {items.map(function(it,i){return (
+                {items.map(function(it,i){
+                  var selP=products.find(function(x){return x.id===it.prodId;});
+                  var hasVars=selP&&selP.variants&&selP.variants.length>0;
+                  return (
                   <div key={i} style={{display:"grid",gridTemplateColumns:"1fr 70px auto",gap:8,marginBottom:8,alignItems:"center"}}>
-                    <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value}):x;});});}}
-                      style={{background:C.bg,border:"1px solid "+(showErrors&&!items.some(function(i){return i.prodId;})?C.danger:C.border),borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
-                      <option value="">Select product… *</option>
-                      {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}{p.sku?" ("+p.sku+")":""}</option>;})}
-                    </select>
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value,variantId:""}):x;});});}}
+                        style={{background:C.bg,border:"1px solid "+(showErrors&&!items.some(function(i){return i.prodId;})?C.danger:C.border),borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
+                        <option value="">Select product… *</option>
+                        {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}{p.sku?" ("+p.sku+")":""}</option>;})}
+                      </select>
+                      {hasVars&&(
+                        <select value={it.variantId||""} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{variantId:e.target.value}):x;});});}}
+                          style={{background:C.bg,border:"1px solid "+(it.variantId?C.accent:C.warning),borderRadius:7,padding:"7px 10px",color:it.variantId?C.text:C.warning,fontSize:11.5,fontFamily:"inherit",outline:"none"}}>
+                          <option value="">Choose variant… *</option>
+                          {selP.variants.map(function(v){return <option key={v.id} value={v.id}>{v.name} — {fmtMoney(v.price!=null&&v.price!==""?v.price:selP.price)}{v.stock!=null?(" ("+v.stock+" in stock)"):""}</option>;})}
+                        </select>
+                      )}
+                    </div>
                     <input type="number" min="1" value={it.qty}
                       onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{qty:parseInt(e.target.value)||1}):x;});});}}
                       style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",textAlign:"center"}}/>
@@ -9165,8 +9260,8 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
             </div>
             <div>
               <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:12}}>
-                {(viewOrd.items||[]).map(function(it,i){var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};return (
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(p.price*it.qty)}</span></div>
+                {(viewOrd.items||[]).map(function(it,i){var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};var up=it.customerPrice||it.unitPrice||lineUnit(p,it)||0;return (
+                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}{it.variantName?(" — "+it.variantName):""}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(up*it.qty)}</span></div>
                 );})}
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewOrd.totals&&viewOrd.totals.grand||0)}</span></div>
               </div>
@@ -10778,9 +10873,9 @@ function App() {
   const [quotes,        setQuotes]        = useState([]);
   const [termsRequests, setTermsRequests] = useState([]);
   const [shippingRules, setShippingRules] = useLS("shippingRules", [
-    {id:"sr1",label:"Under $500",type:"flat",maxOrder:500,rate:25,active:true},
-    {id:"sr2",label:"$500 – $2,000",type:"flat",maxOrder:2000,rate:15,active:true},
-    {id:"sr3",label:"Over $2,000",type:"free",maxOrder:999999,rate:0,label2:"Free",active:true},
+    {id:"sr1",label:"Under $500",type:"flat",maxOrder:500,rate:25,active:false},
+    {id:"sr2",label:"$500 – $2,000",type:"flat",maxOrder:2000,rate:15,active:false},
+    {id:"sr3",label:"Over $2,000",type:"free",maxOrder:999999,rate:0,label2:"Free",active:false},
   ]);
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",apiSecret:"",enabled:false,warehouseAddr:"",warehouseCity:"",warehouseState:"",warehouseZip:"",defaultWeight:"1",weightUnit:"pounds",dimL:"12",dimW:"10",dimH:"6",ratesFnUrl:""});
