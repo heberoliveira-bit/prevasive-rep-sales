@@ -6076,7 +6076,8 @@ function AdminProducts({products,setProducts,addToast}) {
   function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):"",weight:v.weight!=null?String(v.weight):"",dimL:v.dimL!=null?String(v.dimL):"",dimW:v.dimW!=null?String(v.dimW):"",dimH:v.dimH!=null?String(v.dimH):""};}));setShowForm(true); }
 
   function save() {
-    if(!name.trim()||!price){return;}
+    var anyNamedVariant = (variants||[]).some(function(v){return (v.name||"").trim();});
+    if(!name.trim() || (!price && !anyNamedVariant)){return;}
     var cleanVariants = (variants||[])
       .filter(function(v){return (v.name||"").trim();})
       .map(function(v){return {id:v.id||genId("var"),name:(v.name||"").trim(),sku:(v.sku||"").trim(),
@@ -6167,7 +6168,7 @@ function AdminProducts({products,setProducts,addToast}) {
             <div style={{gridColumn:"1/-1"}}><Field label="Product Name *" value={name} onChange={setName} placeholder="PreVasive X100"/></div>
             <div style={{gridColumn:"1/-1"}}><Field label="Image URL (optional)" value={imgUrl||""} onChange={setImgUrl} placeholder="https://…/product.jpg" hint="Shown in the order form product picker"/></div>
             <Field label="SKU" value={sku} onChange={setSku} placeholder="PV-X100"/>
-            <Field label="Price *" value={price} onChange={setPrice} type="number" placeholder="299.00"/>
+            <Field label={variants.length>0?"Price (optional — variants override)":"Price *"} value={price} onChange={setPrice} type="number" placeholder="299.00"/>
             <Field label="Category" value={category} onChange={setCategory} placeholder="Device, Supply…"/>
             <Field label="Barcode / UPC" value={barcode} onChange={setBarcode} placeholder="012345678901"/>
             <div style={{gridColumn:"1/-1"}}><TextArea label="Description" value={desc} onChange={setDesc} rows={3}/></div>
