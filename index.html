@@ -7142,6 +7142,10 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
             <Field label="Company Name" value={(stripeLinks&&stripeLinks.membershipCompany)||""}
               onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{membershipCompany:v});});}}
               placeholder="e.g. PreVasive Connect LLC"/>
+            <Field label="Billing Function URL" value={(stripeLinks&&stripeLinks.billingFnUrl)||""}
+              onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{billingFnUrl:v});});}}
+              placeholder="https://xxx.supabase.co/functions/v1/stripe-billing"
+              hint="Powers in-app subscription checkout + Customer Portal. Set Account 2's secret key as STRIPE_BILLING_SECRET_KEY in Edge Function Secrets."/>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <Field label="Monthly Plan Link" value={(stripeLinks&&stripeLinks.membershipMonthly)||""}
                 onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{membershipMonthly:v});});}}
@@ -9993,22 +9997,52 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
               {/* Stripe subscription action */}
               {(function(){
                 var links = JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
+                var billingFn = links.billingFnUrl || "";
                 var baseLink = repData.planId==="pro"?links.pro:links.starter;
                 var planLink = baseLink ? baseLink+(baseLink.indexOf("?")>=0?"&":"?")+"client_reference_id="+encodeURIComponent(repData.id)+"&prefilled_email="+encodeURIComponent((user&&user.email)||repData.email||"") : "";
                 var portalLink = links.portal;
                 var isActive = repData.subscriptionStatus==="active";
+                var pastDue  = repData.subscriptionStatus==="past_due";
                 var hasStripe = !!repData.stripeSubscriptionId;
+
+                function callBilling(action, planId){
+                  if(!billingFn){
+                    if(planLink && action==="create_checkout"){ window.open(planLink,"_blank"); return; }
+                    if(portalLink && action==="create_portal"){ window.open(portalLink,"_blank"); return; }
+                    addToast("Billing function not configured — admin must set Settings → Stripe → Billing Function URL","warning"); return;
+                  }
+                  var sb=getSB(); if(!sb){ addToast("Cannot connect","danger"); return; }
+                  sb.auth.getSession().then(function(res){
+                    var token = (res&&res.data&&res.data.session&&res.data.session.access_token)||"";
+                    if(!token){ addToast("Please sign in again","warning"); return; }
+                    fetch(billingFn,{
+                      method:"POST",
+                      headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+                      body:JSON.stringify({action:action, repId:repData.id, planId:planId||"", returnUrl:window.location.origin+window.location.pathname}),
+                    }).then(function(r){return r.json();}).then(function(d){
+                      if(d.url){ window.location.href = d.url; }
+                      else { addToast(d.error||"Billing request failed","danger"); }
+                    }).catch(function(e){ addToast("Billing error: "+(e.message||e),"danger"); });
+                  });
+                }
+
                 return (
                   <div>
-                    {!isActive&&planLink&&(
+                    {pastDue&&(
+                      <div style={{marginBottom:12,padding:"12px 14px",background:C.danger+"10",border:"1px solid "+C.danger+"25",borderRadius:10}}>
+                        <div style={{fontWeight:700,fontSize:12,color:C.danger,marginBottom:2}}>⚠ Payment past due</div>
+                        <div style={{fontSize:11,color:C.muted}}>Update your card to keep your subscription active.</div>
+                      </div>
+                    )}
+                    {!isActive&&(
                       <div style={{marginBottom:14}}>
-                        <a href={planLink} target="_blank"
-                          style={{display:"block",textAlign:"center",padding:"13px",borderRadius:10,
-                                  background:"linear-gradient(135deg,#635bff,#8b5cf6)",color:"#fff",
+                        <button onClick={function(){callBilling("create_checkout", repData.planId||"starter");}}
+                          style={{display:"block",width:"100%",textAlign:"center",padding:"13px",borderRadius:10,
+                                  background:"linear-gradient(135deg,#635bff,#8b5cf6)",color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",
                                   textDecoration:"none",fontWeight:800,fontSize:15,
                                   boxShadow:"0 4px 14px rgba(99,91,255,.35)"}}>
-                          ⚡ Activate {plan?plan.name:"Plan"} — ${plan?plan.price:0}/month →
-                        </a>
+                          ⚡ {pastDue?"Update Payment":("Activate "+(plan?plan.name:"Plan"))} — ${plan?plan.price:0}/month →
+                        </button>
                         <div style={{fontSize:10,color:C.dim,textAlign:"center",marginTop:8}}>
                           Secure checkout powered by Stripe. Your card is charged monthly.
                         </div>
@@ -10017,20 +10051,23 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                     {isActive&&(
                       <div style={{marginBottom:14,padding:"12px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:10}}>
                         <div style={{fontWeight:700,fontSize:12,color:C.success,marginBottom:2}}>✓ Membership active</div>
-                        <div style={{fontSize:11,color:C.muted}}>{hasStripe?("Billing ID: "+repData.stripeSubscriptionId):"Billed monthly via Stripe."}</div>
+                        <div style={{fontSize:11,color:C.muted}}>
+                          {repData.currentPeriodEnd?("Renews "+fmtDate(repData.currentPeriodEnd)):"Billed monthly via Stripe."}
+                          {repData.cancelAtPeriodEnd?" · Cancels at end of period":""}
+                        </div>
                       </div>
                     )}
-                    {portalLink&&(
-                      <a href={portalLink} target="_blank"
-                        style={{display:"block",textAlign:"center",padding:"10px",borderRadius:8,
-                                border:"1px solid "+C.border,background:C.surface2,color:C.text,
-                                textDecoration:"none",fontWeight:600,fontSize:13}}>
+                    {(billingFn||portalLink)&&(
+                      <button onClick={function(){callBilling("create_portal");}}
+                        style={{display:"block",width:"100%",textAlign:"center",padding:"10px",borderRadius:8,
+                                border:"1px solid "+C.border,background:C.surface2,color:C.text,cursor:"pointer",fontFamily:"inherit",
+                                fontWeight:600,fontSize:13}}>
                         Manage Billing & Invoices →
-                      </a>
+                      </button>
                     )}
-                    {!planLink&&!isActive&&(
+                    {!billingFn&&!planLink&&!isActive&&(
                       <div style={{padding:"12px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:10,fontSize:12,color:C.warning}}>
-                        ⚠ Stripe payment link not configured yet. Contact your admin to set up billing.
+                        ⚠ Stripe billing not configured yet. Contact your admin to set up.
                       </div>
                     )}
                   </div>
@@ -11218,6 +11255,20 @@ function App() {
   // Load on mount for EVERY session — incl. customers on public pay/quote/receipt pages —
   // so they get the real company branding, tax, payment links, and Stripe publishable key
   // instead of falling back to per-browser localStorage defaults. Secrets are never shared.
+  useEffect(function(){
+    // Stripe Checkout/Portal return — toast on success/cancel, clear the URL param
+    try{
+      var p = new URLSearchParams(window.location.search);
+      if(p.get("sub")==="success"){
+        addToast("✓ Subscription activated — welcome to your plan!","success");
+        window.history.replaceState(null,"",window.location.pathname);
+      } else if(p.get("sub")==="cancel"){
+        addToast("Checkout canceled. You can try again any time.","info");
+        window.history.replaceState(null,"",window.location.pathname);
+      }
+    }catch(e){}
+  },[]);
+
   useEffect(function(){
     var sb=getSB(); if(!sb) return;
     sb.from("crm_settings").select("data").eq("id","public_settings").single().then(function(r){
