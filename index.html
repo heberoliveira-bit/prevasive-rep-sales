@@ -2449,6 +2449,8 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
         return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge",paymentMethodId:result.paymentMethod.id,
             amount:Math.round((totals.grand||0)*100),currency:"usd",
+            orderId:(payData&&payData.orderId)||(order&&order.id)||"",
+            payToken:payToken||"",
             description:company+" — Order "+(payData.orderId||order.id)})
         }).then(function(r){return r.json();}).then(function(d){
           if(d.ok){
@@ -5560,6 +5562,7 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
         return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge",paymentMethodId:res.paymentMethod.id,
             amount:Math.round(grand*100),currency:"usd",
+            orderId:(order&&order.id)||"",
             description:"PreVasive — Order "+order.id+" — "+(cust.name||"")})
         }).then(function(r){return r.json();}).then(function(d){
           setCharging(false);
@@ -8263,6 +8266,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     // For online Stripe charge, tokenize card first then place
     if(payMethod==="due_receipt"&&dorPath==="card"&&cardMode==="online"&&!charged) {
       if(!stripeRef.stripe||!stripeRef.card){addToast("Stripe not loaded — check API key in Settings","warning");return;}
+      var preId = isEdit?editOrder.id:("ORD-"+String(Date.now()).slice(-6));
       setPlacing(true);
       stripeRef.stripe.createPaymentMethod({type:"card",card:stripeRef.card,billing_details:{name:cardName||selCust&&selCust.name||custName}}).then(function(result){
         if(result.error){setPlacing(false);setChargeErr(result.error.message);return;}
@@ -8271,12 +8275,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         if(!stripeEdge){setPlacing(false);setChargeErr("Stripe Edge Function URL not set — check Settings → Stripe");return;}
         fetch(stripeEdge,{
           method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({action:"charge",paymentMethodId:pmId,amount:Math.round((calcTotals().grand||0)*100),currency:"usd",description:"Order — "+(selCust?selCust.name:custName)}),
+          body:JSON.stringify({action:"charge",paymentMethodId:pmId,amount:Math.round((calcTotals().grand||0)*100),currency:"usd",
+            orderId:preId, repId:repId||"", custId:custId||"",
+            description:"Order "+preId+" — "+(selCust?selCust.name:custName)}),
         }).then(function(r){return r.json();}).then(function(d){
           if(d.error){setPlacing(false);setChargeErr(d.error);return;}
           setCharged({id:d.paymentIntentId||pmId,last4:d.last4||"????",brand:d.brand||"Card"});
           setCardLast4(d.last4||"");
-          doPlace();
+          doPlace(preId);
         }).catch(function(e){setPlacing(false);setChargeErr("Could not reach payment server");});
       });
       return; // wait for async charge
@@ -8285,7 +8291,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     doPlace();
   }
 
-  function doPlace() {
+  function doPlace(preId) {
     var totals = calcTotals();
     var cid = custId; var cname = selCust?selCust.name:custName;
     if(newCust&&custName.trim()) {
@@ -8301,7 +8307,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       dbSave("crm_customers",nid,nc);
       cid=nid; cname=custName.trim();
     }
-    var id = isEdit?editOrder.id:("ORD-"+String(Date.now()).slice(-6));
+    var id = isEdit?editOrder.id:(preId||("ORD-"+String(Date.now()).slice(-6)));
     var order = {
       id:id, repId:repId, repName:repName,
       custId:cid, custName:cname,
@@ -11223,6 +11229,7 @@ function App() {
       if(d.emailFnUrl) setEmailCfg(function(prev){var p=prev||{}; return Object.assign({},p,{edgeFnUrl:p.edgeFnUrl||d.emailFnUrl||"",fromName:p.fromName||d.emailFromName||"",fromEmail:p.fromEmail||d.emailFromEmail||""});});
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
       if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
+      if(Array.isArray(d.shippingRules)) setShippingRules(d.shippingRules);
     }).catch(function(){});
   },[]);
 
@@ -11242,9 +11249,10 @@ function App() {
                   defaultWeight:shipStationCfg.defaultWeight||"1", weightUnit:shipStationCfg.weightUnit||"pounds",
                   dimL:shipStationCfg.dimL||shipStationCfg.defaultL||"12", dimW:shipStationCfg.dimW||shipStationCfg.defaultW||"10", dimH:shipStationCfg.dimH||shipStationCfg.defaultH||"6",
                   carrierFilter:shipStationCfg.carrierFilter||""
-                } : null };
+                } : null,
+                shippingRules: Array.isArray(shippingRules) ? shippingRules : [] };
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
-  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,currentUser,viewAsRep]);
 
 
   // Apply theme
