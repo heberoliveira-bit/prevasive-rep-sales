@@ -8758,6 +8758,27 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     {commRate}% = {fmtMoney(totals.commission)}
                   </span>
                 </div>
+                {(function(){
+                  var cust = custId?(customers||[]).find(function(x){return x.id===custId;}):null;
+                  var custR = (cust && cust.commissionRate!=null && cust.commissionRate!=="") ? parseFloat(cust.commissionRate) : null;
+                  var repR  = (repData && repData.defaultCommissionRate!=null && repData.defaultCommissionRate!=="") ? parseFloat(repData.defaultCommissionRate) : null;
+                  var cur   = parseFloat(commRate)||0;
+                  var src;
+                  if(custR!=null && Math.abs(cur-custR)<0.01)      src=cust.name+"'s account rate";
+                  else if(repR!=null && Math.abs(cur-repR)<0.01)   src="rep default ("+(repData?repData.name:"")+")";
+                  else                                              src="manual override";
+                  var hints=[];
+                  if(custR!=null)         hints.push("Customer on file: "+custR+"%");
+                  else if(cust)           hints.push("Customer has no override");
+                  if(repR!=null)          hints.push("Rep default: "+repR+"%");
+                  var canResetCust = custR!=null && Math.abs(cur-custR)>=0.01;
+                  return (
+                    <div style={{fontSize:10.5,color:C.dim,marginTop:6,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <span>Source: <span style={{color:C.muted,fontWeight:600}}>{src}</span>{hints.length?" · "+hints.join(" · "):""}</span>
+                      {canResetCust&&<button onClick={function(){setCommRate(custR);}} style={{background:"none",border:"1px solid "+C.accent,color:C.accent,borderRadius:6,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer"}}>Use customer rate</button>}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Shipping */}
@@ -9042,7 +9063,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 👁 Preview Invoice
               </Btn>
               <Btn onClick={place} disabled={!agreed||placing}>
-                {placing?(dorPath==="card"&&cardMode==="online"&&!charged?"Processing payment…":"Placing…"):isEdit?"Save Changes":dorPath==="link"&&sendOnPlace&&placeEmail?"Place & Send Invoice →":"Place Order"}
+                {placing?(dorPath==="card"&&cardMode==="online"&&!charged?"Processing payment…":dorPath==="link"&&sendOnPlace&&placeEmail?"Sending…":"Placing…"):isEdit?"Save Changes":dorPath==="link"&&sendOnPlace&&placeEmail?"Send Invoice →":"Place Order"}
               </Btn>
             </div>
           )}
@@ -9464,29 +9485,44 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
                   {(function(){
                     var maxRate = (repData&&repData.maxCommissionRate!=null) ? parseFloat(repData.maxCommissionRate) : 100;
                     var allowCustom = !repData || repData.allowCustomCommission!==false;
-                    var custRate = c2.commissionRate!=null && c2.commissionRate!==""
-                      ? parseFloat(c2.commissionRate)
-                      : (repData&&repData.defaultCommissionRate)||10;
+                    var repDefault = (repData&&repData.defaultCommissionRate!=null&&repData.defaultCommissionRate!=="") ? parseFloat(repData.defaultCommissionRate) : 10;
+                    var hasOverride = c2.commissionRate!=null && c2.commissionRate!=="";
+                    var custRate = hasOverride ? parseFloat(c2.commissionRate) : repDefault;
                     if(!allowCustom) return null;
+                    function saveCommission(v){
+                      setCustomers(function(prev){return prev.map(function(x){
+                        return x.id===c2.id?Object.assign({},x,{commissionRate:v}):x;
+                      });});
+                      try{var sb=getSB();if(sb){var upd=Object.assign({},c2,{commissionRate:v});sb.from("crm_customers").update({data:upd}).eq("id",c2.id).then(function(){});}}catch(e2){console.warn("customer commission save:",e2);}
+                    }
                     return (
                       <div style={{marginTop:6,padding:"8px 10px",background:C.surface2,borderRadius:7,border:"1px solid "+C.border}}>
-                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:hasOverride?6:0}}>
                           <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".05em"}}>Commission</div>
-                          <div style={{fontSize:12,fontWeight:800,color:C.gold}}>{custRate}%</div>
+                          {hasOverride
+                            ? <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:9,color:C.accent,fontWeight:700,padding:"2px 6px",border:"1px solid "+C.accent,borderRadius:4}}>CUSTOM</span>
+                                <span style={{fontSize:12,fontWeight:800,color:C.gold}}>{custRate}%</span>
+                              </div>
+                            : <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                <span style={{fontSize:10,color:C.dim}}>Inheriting rep default ({repDefault}%)</span>
+                                <button onClick={function(){saveCommission(repDefault);}}
+                                  style={{background:"none",border:"1px solid "+C.accent,color:C.accent,borderRadius:5,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer"}}>Override</button>
+                              </div>}
                         </div>
-                        <input type="range" min={0} max={maxRate} step={0.5} value={custRate}
-                          onChange={function(e){
-                            var v=parseFloat(e.target.value);
-                            setCustomers(function(prev){return prev.map(function(x){
-                              return x.id===c2.id?Object.assign({},x,{commissionRate:v}):x;
-                            });});
-                            try{var sb=getSB();if(sb){var upd=Object.assign({},c2,{commissionRate:v});sb.from("crm_customers").update({data:upd}).eq("id",c2.id).then(function(){});}}catch(e2){}
-                          }}
-                          style={{width:"100%",accentColor:C.gold,cursor:"pointer"}}/>
-                        <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:C.dim,marginTop:2}}>
-                          <span>0%</span>
-                          <span style={{color:C.muted}}>Max: {maxRate}%</span>
-                        </div>
+                        {hasOverride && (
+                          <div>
+                            <input type="range" min={0} max={maxRate} step={0.5} value={custRate}
+                              onChange={function(e){saveCommission(parseFloat(e.target.value));}}
+                              style={{width:"100%",accentColor:C.gold,cursor:"pointer"}}/>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:2}}>
+                              <span style={{fontSize:9,color:C.dim}}>0%</span>
+                              <button onClick={function(){saveCommission(null);}}
+                                style={{background:"none",border:"none",color:C.dim,fontSize:10,cursor:"pointer",padding:0,textDecoration:"underline"}}>Reset to rep default</button>
+                              <span style={{fontSize:9,color:C.muted}}>Max: {maxRate}%</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -11085,29 +11121,60 @@ function App() {
     setQuoteDone("declined");
   }
 
+  // Stable map of in-flight email sends (prevents duplicate fetches when notifications state updates)
+  const _emailInFlight = useState(function(){return {};})[0];
+
   // Admin sessions deliver queued rep-notification emails (customer device has no email creds)
   useEffect(function(){
     if(!currentUser||currentUser.role!=="admin") return;
     var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
     if(!cfg||!cfg.edgeFnUrl) return;
     notifications.forEach(function(n){
-      var dest = n && (n.to||n.repEmail);
-      if(!dest && n && n.adminNotify) dest = getAdminNotifyEmail();
-      if(n&&n.emailPending&&dest){
-        if(n.key&&!notifEnabled(n.key)){
-          var skip=Object.assign({},n,{emailPending:false,skipped:true});
-          setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?skip:x;});});
-          var sbx=getSB(); if(sbx) sbx.from("crm_notifications").upsert({id:n.id,data:skip,created_at:n.ts||new Date().toISOString()}).then(function(){});
-          return;
-        }
-        var marked=Object.assign({},n,{emailPending:false,emailSentAt:new Date().toISOString()});
-        setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?marked:x;});});
-        var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:marked,created_at:n.ts||new Date().toISOString()}).then(function(){});
-        fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({to:dest,subject:n.emailSubject||"Notification",html:n.emailHtml||"",
-            fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})
-        }).then(function(){}).catch(function(){});
+      if(!n || !n.id) return;
+      if(_emailInFlight[n.id]) return;
+      var dest = n.to||n.repEmail;
+      if(!dest && n.adminNotify) dest = getAdminNotifyEmail();
+      if(!n.emailPending || !dest) return;
+      // Notification type disabled → drop without sending
+      if(n.key && !notifEnabled(n.key)){
+        var skip=Object.assign({},n,{emailPending:false,skipped:true});
+        setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?skip:x;});});
+        var sbx=getSB(); if(sbx) sbx.from("crm_notifications").upsert({id:n.id,data:skip,created_at:n.ts||new Date().toISOString()}).then(function(){});
+        return;
       }
+      _emailInFlight[n.id] = true;
+      var nextRetry = (n.emailRetries||0) + 1;
+      fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({to:dest,subject:n.emailSubject||"Notification",html:n.emailHtml||"",
+          fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})})
+      .then(function(r){
+        return r.text().then(function(t){
+          var d=null; try{d=JSON.parse(t);}catch(_){}
+          return {ok: r.ok && (!d || d.ok!==false), err: (d&&d.error) || (!r.ok ? ("HTTP "+r.status) : null)};
+        });
+      })
+      .then(function(res){
+        delete _emailInFlight[n.id];
+        var upd;
+        if(res.ok){
+          upd = Object.assign({},n,{emailPending:false,emailSentAt:new Date().toISOString(),emailRetries:nextRetry,emailLastError:null,emailFailed:false});
+        } else {
+          var giveUp = nextRetry>=5;
+          console.warn("email send "+(giveUp?"failed permanently":"will retry")+":", n.id, res.err);
+          upd = Object.assign({},n,{emailRetries:nextRetry,emailLastError:res.err||"unknown",emailPending:!giveUp,emailFailed:giveUp});
+        }
+        setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?upd:x;});});
+        var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:upd,created_at:n.ts||new Date().toISOString()}).then(function(){});
+      })
+      .catch(function(e){
+        delete _emailInFlight[n.id];
+        var msg = String(e&&e.message||e);
+        console.warn("email send fetch error:", n.id, msg);
+        var giveUp = nextRetry>=5;
+        var upd = Object.assign({},n,{emailRetries:nextRetry,emailLastError:msg,emailPending:!giveUp,emailFailed:giveUp});
+        setNotifications(function(prev){return prev.map(function(x){return x.id===n.id?upd:x;});});
+        var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:upd,created_at:n.ts||new Date().toISOString()}).then(function(){});
+      });
     });
   },[notifications,currentUser]);
 
