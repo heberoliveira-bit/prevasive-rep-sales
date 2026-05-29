@@ -612,6 +612,17 @@ function lineLabel(p, it){ var v=prodVariant(p,it); return (p?p.name:"")+(v?(" �
 // Per-line shipping packing: variant overrides product when set.
 function lineWeight(p, it){ var v=prodVariant(p,it); if(v&&v.weight!=null&&v.weight!=="") return parseFloat(v.weight)||0; return (p&&p.weight)?(parseFloat(p.weight)||0):0; }
 function lineDim(p, it, k){ var v=prodVariant(p,it); if(v&&v[k]!=null&&v[k]!=="") return parseFloat(v[k])||0; return (p&&p[k])?(parseFloat(p[k])||0):0; }
+// Display price for a product: a range when variants are priced differently, else a single price.
+function priceRange(p){
+  if(!p) return fmtMoney(0);
+  if(!p.variants||!p.variants.length) return fmtMoney(p.price||0);
+  var prices = p.variants.map(function(v){
+    return (v.price!=null && v.price!=="") ? (parseFloat(v.price)||0) : (parseFloat(p.price)||0);
+  });
+  if(!prices.length) return fmtMoney(p.price||0);
+  var lo=Math.min.apply(null,prices), hi=Math.max.apply(null,prices);
+  return lo===hi ? fmtMoney(lo) : (fmtMoney(lo)+" – "+fmtMoney(hi));
+}
 
 function fmtTerms(code) {
   var map = {"due_receipt":"Due on Receipt","net_15":"Net 15","net_30":"Net 30","net_45":"Net 45","net_60":"Net 60","net_90":"Net 90"};
@@ -4135,7 +4146,7 @@ function PricingModule({products,discountCodes,onSaveDiscountCodes,addToast}) {
                 <tr key={p.id} style={{borderTop:"1px solid "+C.border}}>
                   <td style={{padding:"10px 14px",fontWeight:600,fontSize:13,color:C.text}}>{p.name}</td>
                   <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.muted}}>{p.sku||"—"}</td>
-                  <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{fmtMoney(p.price||0)}</td>
+                  <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{priceRange(p)}</td>
                   <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{p.category||"—"}</td>
                   <td style={{padding:"10px 14px"}}><span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:p.active!==false?C.success+"18":C.danger+"18",color:p.active!==false?C.success:C.danger}}>{p.active!==false?"Active":"Inactive"}</span></td>
                 </tr>
@@ -4415,7 +4426,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                     <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value,variantId:""}):x;});});}}
                       style={{background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
                       <option value="">Product…</option>
-                      {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}</option>;})}
+                      {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {priceRange(p)}</option>;})}
                     </select>
                     {hasVars&&(
                       <select value={it.variantId||""} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{variantId:e.target.value}):x;});});}}
@@ -4647,7 +4658,7 @@ function GlobalSearch({orders,customers,reps,quotes,products,isAdmin,onNav,onClo
     });
     products.forEach(function(p){
       if((p.name||"").toLowerCase().indexOf(s)>=0||(p.sku||"").toLowerCase().indexOf(s)>=0)
-        results.push({type:"product",icon:"📋",label:p.name,sub:(p.sku||"")+" · "+fmtMoney(p.price||0),id:p.id,nav:"products"});
+        results.push({type:"product",icon:"📋",label:p.name,sub:(p.sku||"")+" · "+priceRange(p),id:p.id,nav:"products"});
     });
     quotes.forEach(function(qt){
       if((qt.id||"").toLowerCase().indexOf(s)>=0||(qt.custName||"").toLowerCase().indexOf(s)>=0)
@@ -6140,7 +6151,7 @@ function AdminProducts({products,setProducts,addToast}) {
                   </td>
                   <td style={{padding:"10px 16px",fontSize:11,fontFamily:"monospace",color:C.muted}}>{p.sku||"—"}</td>
                   <td style={{padding:"10px 16px",fontSize:12,color:C.muted}}>{p.category||"—"}</td>
-                  <td style={{padding:"10px 16px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{fmtMoney(p.price||0)}</td>
+                  <td style={{padding:"10px 16px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{priceRange(p)}</td>
                   <td style={{padding:"10px 16px"}}>
                     <span style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:700,
                                   background:p.active!==false?C.success+"18":C.danger+"18",
@@ -8612,7 +8623,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                       <select value={it.prodId} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{prodId:e.target.value,variantId:""}):x;});});}}
                         style={{background:C.bg,border:"1px solid "+(showErrors&&!items.some(function(i){return i.prodId;})?C.danger:C.border),borderRadius:7,padding:"8px 10px",color:it.prodId?C.text:C.dim,fontSize:12,fontFamily:"inherit",outline:"none"}}>
                         <option value="">Select product… *</option>
-                        {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {fmtMoney(p.price)}{p.sku?" ("+p.sku+")":""}</option>;})}
+                        {activeProds.map(function(p){return <option key={p.id} value={p.id}>{p.name} — {priceRange(p)}{p.sku?" ("+p.sku+")":""}</option>;})}
                       </select>
                       {hasVars&&(
                         <select value={it.variantId||""} onChange={function(e){setItems(function(prev){return prev.map(function(x,j){return j===i?Object.assign({},x,{variantId:e.target.value}):x;});});}}
