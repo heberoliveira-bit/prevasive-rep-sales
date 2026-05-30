@@ -11082,9 +11082,637 @@ function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,
   );
 }
 
+/* ─── Mobile Shell ────────────────────────────────────────────────────────── */
+
+function isMobileDevice(){
+  if(typeof navigator==="undefined") return false;
+  return /Mobi|Android|iPhone|iPod|webOS|BlackBerry|Windows Phone/i.test(navigator.userAgent||"");
+}
+
+function MobileShell(props){
+  const {currentUser, repData, customers, setCustomers, orders, setOrders,
+         products, reps, commissions, addToast, preferDesktop, setPreferDesktop,
+         onLogout, shippingRules, taxCfg, invoiceCfg, stripeLinks} = props;
+
+  const [tab, setTab] = useState("home");
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+
+  var myRepId = repData ? repData.id : (currentUser && currentUser.rep_id);
+  var myOrders = (orders||[]).filter(function(o){return o.repId===myRepId;});
+  var myCustomers = (customers||[]).filter(function(c){return c.repId===myRepId;});
+
+  function go(t){
+    setTab(t);
+    if(t!=="orders") setSelectedOrderId(null);
+    if(t!=="customers") setSelectedCustomerId(null);
+  }
+
+  var screenTitle = {home:"Home", new:"New Order", orders:"Orders", customers:"Customers", profile:"My Profile"}[tab];
+  var screen = null;
+  if(tab==="home")      screen = <MobileHome currentUser={currentUser} repData={repData} myOrders={myOrders} myCustomers={myCustomers} customers={customers} setTab={go} setSelectedOrderId={setSelectedOrderId}/>;
+  if(tab==="new")       screen = <MobileNewOrder repData={repData} customers={myCustomers} setCustomers={setCustomers} setOrders={setOrders} products={products} taxCfg={taxCfg} shippingRules={shippingRules} addToast={addToast} onPlaced={function(){go("orders");}}/>;
+  if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} addToast={addToast}/>;
+  if(tab==="customers") screen = <MobileCustomers myCustomers={myCustomers} setCustomers={setCustomers} repData={repData} myOrders={myOrders} selectedCustomerId={selectedCustomerId} setSelectedCustomerId={setSelectedCustomerId} setTab={go} addToast={addToast}/>;
+  if(tab==="profile")   screen = <MobileProfile currentUser={currentUser} repData={repData} commissions={commissions} preferDesktop={preferDesktop} setPreferDesktop={setPreferDesktop} onLogout={onLogout} addToast={addToast} stripeLinks={stripeLinks}/>;
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,paddingBottom:72,fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif"}}>
+      {/* Top app bar */}
+      <div style={{position:"sticky",top:0,zIndex:50,height:52,background:C.surface,borderBottom:"1px solid "+C.border,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px"}}>
+        <div style={{fontWeight:800,fontSize:17,color:C.text}}>{screenTitle}</div>
+        <div style={{fontSize:11,color:C.muted}}>{(repData&&repData.name)||(currentUser&&currentUser.name)||""}</div>
+      </div>
+
+      <div style={{padding:"16px"}}>{screen}</div>
+
+      {/* Bottom tab bar */}
+      <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.surface,borderTop:"1px solid "+C.border,display:"flex",zIndex:100,paddingBottom:"env(safe-area-inset-bottom,0)"}}>
+        {[
+          {id:"home",     label:"Home",     icon:"🏠"},
+          {id:"new",      label:"New",      icon:"➕"},
+          {id:"orders",   label:"Orders",   icon:"📦"},
+          {id:"customers",label:"People",   icon:"👥"},
+          {id:"profile",  label:"Me",       icon:"👤"},
+        ].map(function(t){
+          var active = tab===t.id;
+          return (
+            <button key={t.id} onClick={function(){go(t.id);}}
+              style={{flex:1,background:"none",border:"none",padding:"8px 0",cursor:"pointer",color:active?C.accent:C.dim,fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:2,
+                      borderTop:"2px solid "+(active?C.accent:"transparent")}}>
+              <span style={{fontSize:18}}>{t.icon}</span>
+              <span style={{fontSize:10,fontWeight:active?700:500}}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MobileHome({currentUser, repData, myOrders, myCustomers, customers, setTab, setSelectedOrderId}){
+  var now = new Date();
+  var mtdOrders = myOrders.filter(function(o){var d=new Date(o.createdAt||0); return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();});
+  var mtdCommission = mtdOrders.reduce(function(s,o){return s + (Number(o.commissionAmount)||0);},0);
+  var mtdSales = mtdOrders.reduce(function(s,o){return s + (Number(o.total)||0);},0);
+  var recentOrders = myOrders.slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);}).slice(0,5);
+  var firstName = ((currentUser&&currentUser.name)||(repData&&repData.name)||"").split(" ")[0]||"there";
+  var greet = now.getHours()<12?"Good morning":now.getHours()<18?"Good afternoon":"Good evening";
+
+  return (
+    <div>
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:13,color:C.muted}}>{greet},</div>
+        <div style={{fontSize:24,fontWeight:800,color:C.text}}>{firstName} 👋</div>
+      </div>
+
+      <button onClick={function(){setTab("new");}}
+        style={{display:"block",width:"100%",padding:"18px 16px",borderRadius:14,background:C.accent,color:"#fff",
+                border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:17,fontWeight:800,marginBottom:20,
+                boxShadow:"0 4px 14px rgba(99,91,255,.35)"}}>
+        ➕  Place a New Order
+      </button>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:22}}>
+        {[
+          {label:"Orders this month", value:mtdOrders.length, color:C.accent},
+          {label:"Sales this month",  value:fmtMoney(mtdSales), color:C.success},
+          {label:"Commission MTD",    value:fmtMoney(mtdCommission), color:C.gold},
+          {label:"My customers",      value:myCustomers.length, color:C.text},
+        ].map(function(k,i){return (
+          <div key={i} style={{padding:"14px 12px",background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>{k.label}</div>
+            <div style={{fontSize:18,fontWeight:800,color:k.color}}>{k.value}</div>
+          </div>
+        );})}
+      </div>
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+        <div style={{fontWeight:700,fontSize:14,color:C.text}}>Recent Orders</div>
+        {myOrders.length>5&&<button onClick={function(){setTab("orders");}} style={{background:"none",border:"none",color:C.accent,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>View all →</button>}
+      </div>
+      {recentOrders.length===0?(
+        <div style={{padding:"30px 20px",textAlign:"center",color:C.dim,fontSize:13,background:C.surface,borderRadius:12,border:"1px dashed "+C.border}}>
+          No orders yet — tap "Place a New Order" above.
+        </div>
+      ):recentOrders.map(function(o){var c=(customers||[]).find(function(cc){return cc.id===o.custId;}); var sc=STATUS_COLOR[o.status]||{}; return (
+        <button key={o.id} onClick={function(){setSelectedOrderId(o.id); setTab("orders");}}
+          style={{display:"block",width:"100%",textAlign:"left",padding:"14px",background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:8,cursor:"pointer",fontFamily:"inherit",color:C.text}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <div style={{fontWeight:700,fontSize:14}}>{(c&&c.name)||o.custName||"Customer"}</div>
+            <div style={{fontWeight:800,fontSize:14,color:C.accent}}>{fmtMoney(o.total)}</div>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
+            <div>{fmtDate(o.createdAt)} · {o.id}</div>
+            <span style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:20,background:sc.bg||C.surface2,color:sc.c||C.muted}}>{o.status||"—"}</span>
+          </div>
+        </button>
+      );})}
+    </div>
+  );
+}
+
+function MobileNewOrder({repData, customers, setCustomers, setOrders, products, taxCfg, shippingRules, addToast, onPlaced}){
+  const [custId, setCustId] = useState("");
+  const [showNewCust, setShowNewCust] = useState(false);
+  const [newCust, setNewCust] = useState({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
+  const [lines, setLines] = useState([]);
+  const [productId, setProductId] = useState("");
+  const [variantId, setVariantId] = useState("");
+  const [qty, setQty] = useState(1);
+  const [commRate, setCommRate] = useState((repData&&repData.defaultCommissionRate)||10);
+  const [payMethod, setPayMethod] = useState("invoice");
+  const [placing, setPlacing] = useState(false);
+
+  useEffect(function(){
+    if(!custId){
+      if(repData&&repData.defaultCommissionRate!=null) setCommRate(repData.defaultCommissionRate);
+      return;
+    }
+    var c = (customers||[]).find(function(x){return x.id===custId;});
+    if(c && c.commissionRate!=null) setCommRate(c.commissionRate);
+    else if(repData && repData.defaultCommissionRate!=null) setCommRate(repData.defaultCommissionRate);
+  },[custId, customers, repData]);
+
+  function addLine(){
+    if(!productId){ addToast("Pick a product first","warning"); return; }
+    var p = (products||[]).find(function(x){return x.id===productId;});
+    if(!p) return;
+    var hasVars = p.variants && p.variants.length>0;
+    if(hasVars && !variantId){ addToast("Pick a variant","warning"); return; }
+    var v = hasVars ? p.variants.find(function(vv){return vv.id===variantId;}) : null;
+    var unit = v ? (Number(v.price)||0) : (Number(p.price)||0);
+    setLines(function(prev){return prev.concat([{id:genId("line"), productId, variantId:variantId||"", qty:Number(qty)||1, unitPrice:unit, customerPrice:unit}]);});
+    setProductId(""); setVariantId(""); setQty(1);
+  }
+  function removeLine(idx){ setLines(function(prev){return prev.filter(function(_,i){return i!==idx;});}); }
+
+  var subtotal = lines.reduce(function(s,it){return s + (Number(it.qty)||0)*(Number(it.unitPrice)||0);},0);
+  var taxRate = (taxCfg && Number(taxCfg.rate))||0;
+  var tax = subtotal * taxRate / 100;
+  var shipRule = (shippingRules||[]).slice().sort(function(a,b){return (a.maxOrder||0)-(b.maxOrder||0);}).find(function(r){return r.active && (r.maxOrder||0)>=subtotal;});
+  var shipping = shipRule ? (shipRule.type==="free"?0:Number(shipRule.rate)||0) : 0;
+  var total = subtotal + tax + shipping;
+  var commission = subtotal * commRate / 100;
+
+  var pickedProduct = (products||[]).find(function(p){return p.id===productId;});
+  var canPlace = lines.length>0 && (custId || (showNewCust && newCust.name.trim()));
+
+  function place(){
+    if(!canPlace) return;
+    setPlacing(true);
+    var cId = custId;
+    var cRecord = (customers||[]).find(function(c){return c.id===cId;});
+    if(showNewCust && newCust.name.trim()){
+      var newId = genId("cust");
+      cRecord = Object.assign({}, newCust, {id:newId, repId:repData.id, createdAt:new Date().toISOString()});
+      setCustomers(function(prev){return prev.concat([cRecord]);});
+      dbSave("crm_customers", newId, cRecord);
+      cId = newId;
+    }
+    if(!cId){ setPlacing(false); addToast("Pick or create a customer","warning"); return; }
+
+    var orderId = genId("ord");
+    var order = {
+      id: orderId, repId: repData.id, custId: cId, custName: cRecord&&cRecord.name||"",
+      items: lines, subtotal:subtotal, tax:tax, shipping:shipping, total:total,
+      commissionRate: commRate, commissionAmount: commission,
+      status: "Submitted", paid: false,
+      paymentMethod: payMethod==="due"?"due_on_receipt":"invoice_link",
+      createdAt: new Date().toISOString(),
+    };
+    if(payMethod==="invoice") order.payToken = genId("pay");
+    setOrders(function(prev){return [order].concat(prev);});
+    dbSave("crm_orders", orderId, order);
+    if(order.payToken) dbSave("crm_pay_tokens", order.payToken, {orderId:orderId, repId:repData.id, custId:cId, total:total, createdAt:new Date().toISOString()});
+
+    setPlacing(false);
+    addToast("Order placed!","success");
+    onPlaced();
+  }
+
+  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:15,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:8,boxSizing:"border-box"};
+  var smallInputStyle = {padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontFamily:"inherit",boxSizing:"border-box",width:"100%"};
+
+  return (
+    <div>
+      {/* Customer */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>1 · Customer</div>
+        {!showNewCust&&(
+          <select value={custId} onChange={function(e){setCustId(e.target.value);}} style={inputStyle}>
+            <option value="">— Select a customer —</option>
+            {(customers||[]).slice().sort(function(a,b){return (a.name||"").localeCompare(b.name||"");}).map(function(c){return <option key={c.id} value={c.id}>{c.name||c.email||c.id}</option>;})}
+          </select>
+        )}
+        <button onClick={function(){setShowNewCust(function(v){return !v;}); setCustId("");}}
+          style={{background:"none",border:"none",color:C.accent,fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:13,padding:0}}>
+          {showNewCust?"← Pick existing":"+ New Customer"}
+        </button>
+        {showNewCust&&(
+          <div style={{marginTop:10,padding:14,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+            <input placeholder="Name *" value={newCust.name} onChange={function(e){setNewCust(Object.assign({},newCust,{name:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
+            <input placeholder="Email" value={newCust.email} onChange={function(e){setNewCust(Object.assign({},newCust,{email:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
+            <input placeholder="Phone" value={newCust.phone} onChange={function(e){setNewCust(Object.assign({},newCust,{phone:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
+            <input placeholder="Address" value={newCust.address} onChange={function(e){setNewCust(Object.assign({},newCust,{address:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:6}}>
+              <input placeholder="City" value={newCust.city} onChange={function(e){setNewCust(Object.assign({},newCust,{city:e.target.value}));}} style={smallInputStyle}/>
+              <input placeholder="ST" value={newCust.state} onChange={function(e){setNewCust(Object.assign({},newCust,{state:e.target.value}));}} style={smallInputStyle}/>
+              <input placeholder="ZIP" value={newCust.zip} onChange={function(e){setNewCust(Object.assign({},newCust,{zip:e.target.value}));}} style={smallInputStyle}/>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Products */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>2 · Products</div>
+        <select value={productId} onChange={function(e){setProductId(e.target.value); setVariantId("");}} style={inputStyle}>
+          <option value="">— Pick a product —</option>
+          {(products||[]).map(function(p){
+            var label = p.name + (p.variants&&p.variants.length?" "+priceRange(p):" — "+fmtMoney(p.price||0));
+            return <option key={p.id} value={p.id}>{label}</option>;
+          })}
+        </select>
+        {pickedProduct && pickedProduct.variants && pickedProduct.variants.length>0 && (
+          <select value={variantId} onChange={function(e){setVariantId(e.target.value);}} style={inputStyle}>
+            <option value="">— Pick a variant —</option>
+            {pickedProduct.variants.map(function(v){return <option key={v.id} value={v.id}>{v.name} — {fmtMoney(v.price||0)}</option>;})}
+          </select>
+        )}
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <button onClick={function(){setQty(Math.max(1, qty-1));}} style={{width:44,height:44,fontSize:20,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,cursor:"pointer",fontFamily:"inherit"}}>−</button>
+          <input type="number" value={qty} onChange={function(e){setQty(Number(e.target.value)||1);}}
+            style={{flex:1,padding:"12px",fontSize:16,textAlign:"center",borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box"}}/>
+          <button onClick={function(){setQty(qty+1);}} style={{width:44,height:44,fontSize:20,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,cursor:"pointer",fontFamily:"inherit"}}>+</button>
+          <button onClick={addLine} disabled={!productId}
+            style={{padding:"12px 18px",fontSize:14,fontWeight:700,borderRadius:8,border:"none",background:productId?C.accent:C.dim,color:"#fff",cursor:productId?"pointer":"not-allowed",fontFamily:"inherit"}}>
+            Add
+          </button>
+        </div>
+        {lines.length>0&&(
+          <div style={{marginTop:14}}>
+            {lines.map(function(it, idx){
+              var p = (products||[]).find(function(pp){return pp.id===it.productId;});
+              return (
+                <div key={idx} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 12px",background:C.surface,border:"1px solid "+C.border,borderRadius:8,marginBottom:6}}>
+                  <div style={{flex:1,minWidth:0,marginRight:8}}>
+                    <div style={{fontSize:13,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lineLabel(p,it)}</div>
+                    <div style={{fontSize:11,color:C.muted}}>{it.qty} × {fmtMoney(it.unitPrice)} = {fmtMoney((it.qty||0)*(it.unitPrice||0))}</div>
+                  </div>
+                  <button onClick={function(){removeLine(idx);}} style={{width:32,height:32,fontSize:18,borderRadius:6,border:"none",background:"transparent",color:C.danger,cursor:"pointer",fontFamily:"inherit"}}>×</button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Totals + commission */}
+      {lines.length>0&&(
+        <div style={{marginBottom:20,padding:14,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Subtotal</span><span>{fmtMoney(subtotal)}</span></div>
+          {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax ({taxRate}%)</span><span>{fmtMoney(tax)}</span></div>}
+          {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:800,paddingTop:8,borderTop:"1px solid "+C.border,color:C.text}}>
+            <span>Total</span><span>{fmtMoney(total)}</span>
+          </div>
+          <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid "+C.border}}>
+            <div style={{fontSize:12,color:C.muted,marginBottom:8}}>Commission: <strong style={{color:C.text}}>{commRate}%</strong> · {fmtMoney(commission)}</div>
+            <input type="range" min="0" max="50" step="0.5" value={commRate} onChange={function(e){setCommRate(Number(e.target.value));}}
+              style={{width:"100%",accentColor:C.accent}}/>
+          </div>
+        </div>
+      )}
+
+      {/* Payment */}
+      <div style={{marginBottom:24}}>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Payment</div>
+        {[
+          {id:"invoice", icon:"✉️", label:"Send Invoice Link", desc:"Generate a payment link to share with the customer."},
+          {id:"due",     icon:"📅", label:"Due on Receipt",    desc:"No payment now — collect later."},
+        ].map(function(opt){
+          var sel = payMethod===opt.id;
+          return (
+            <button key={opt.id} onClick={function(){setPayMethod(opt.id);}}
+              style={{display:"block",width:"100%",textAlign:"left",padding:"14px",borderRadius:12,marginBottom:8,
+                      border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent+"10":C.surface,
+                      cursor:"pointer",fontFamily:"inherit",color:C.text}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:22}}>{opt.icon}</span>
+                <div>
+                  <div style={{fontWeight:700,fontSize:14,color:sel?C.accent:C.text}}>{opt.label}</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>{opt.desc}</div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <button onClick={place} disabled={!canPlace || placing}
+        style={{display:"block",width:"100%",padding:"18px",borderRadius:14,
+                background:canPlace?C.accent:C.dim,color:"#fff",
+                border:"none",cursor:canPlace?"pointer":"not-allowed",
+                fontSize:16,fontWeight:800,fontFamily:"inherit",
+                boxShadow:canPlace?"0 4px 14px rgba(99,91,255,.35)":"none"}}>
+        {placing?"Placing…":"Place Order"+(total>0?" · "+fmtMoney(total):"")}
+      </button>
+    </div>
+  );
+}
+
+function MobileOrders({myOrders, customers, products, selectedOrderId, setSelectedOrderId, addToast}){
+  const [filter, setFilter] = useState("all");
+
+  var filtered = myOrders.slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);});
+  if(filter==="open") filtered = filtered.filter(function(o){return !o.paid && o.status!=="Paid" && o.status!=="Delivered" && o.status!=="Cancelled" && o.status!=="Refunded";});
+  else if(filter==="paid") filtered = filtered.filter(function(o){return o.paid || o.status==="Paid";});
+  else if(filter==="shipped") filtered = filtered.filter(function(o){return o.status==="Shipped" || !!o.tracking;});
+
+  var selectedOrder = selectedOrderId ? myOrders.find(function(o){return o.id===selectedOrderId;}) : null;
+
+  if(selectedOrder){
+    var c = (customers||[]).find(function(x){return x.id===selectedOrder.custId;});
+    var sc = STATUS_COLOR[selectedOrder.status]||{};
+    return (
+      <div>
+        <button onClick={function(){setSelectedOrderId(null);}}
+          style={{background:"none",border:"none",color:C.accent,fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:13,marginBottom:14,padding:0}}>← Back to orders</button>
+
+        <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:12}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:2}}>Order</div>
+          <div style={{fontWeight:800,fontSize:18,color:C.text,marginBottom:6}}>{selectedOrder.id}</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:10}}>{fmtDate(selectedOrder.createdAt)}</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:20,background:sc.bg||C.surface2,color:sc.c||C.muted}}>{selectedOrder.status||"—"}</span>
+            {selectedOrder.paid && <span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:20,background:C.success+"18",color:C.success}}>✓ Paid</span>}
+          </div>
+        </div>
+
+        <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:12}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Customer</div>
+          <div style={{fontWeight:700,fontSize:15,color:C.text}}>{(c&&c.name)||selectedOrder.custName||"—"}</div>
+          {c && c.email && <div style={{fontSize:13,color:C.muted,marginTop:4}}>{c.email}</div>}
+          {c && c.phone && <div style={{fontSize:13,color:C.muted,marginTop:2}}>{c.phone}</div>}
+        </div>
+
+        <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:12}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Items</div>
+          {(selectedOrder.items||[]).map(function(it,idx){
+            var p = (products||[]).find(function(pp){return pp.id===it.productId;});
+            return (
+              <div key={idx} style={{display:"flex",justifyContent:"space-between",fontSize:13,paddingBottom:8,marginBottom:8,borderBottom:idx<(selectedOrder.items||[]).length-1?"1px solid "+C.border:"none"}}>
+                <div style={{flex:1,minWidth:0,marginRight:8}}>
+                  <div style={{color:C.text,fontWeight:600,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{lineLabel(p,it)}</div>
+                  <div style={{color:C.muted,fontSize:11,marginTop:2}}>{it.qty} × {fmtMoney(it.unitPrice)}</div>
+                </div>
+                <div style={{color:C.text,fontWeight:600}}>{fmtMoney((it.qty||0)*(it.unitPrice||0))}</div>
+              </div>
+            );
+          })}
+          {selectedOrder.tax>0 && <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginTop:6}}><span>Tax</span><span>{fmtMoney(selectedOrder.tax)}</span></div>}
+          {selectedOrder.shipping>0 && <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.muted,marginTop:4}}><span>Shipping</span><span>{fmtMoney(selectedOrder.shipping)}</span></div>}
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:15,fontWeight:800,paddingTop:10,marginTop:8,borderTop:"1px solid "+C.border,color:C.text}}>
+            <span>Total</span><span>{fmtMoney(selectedOrder.total)}</span>
+          </div>
+        </div>
+
+        {selectedOrder.tracking && (
+          <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:12}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Tracking</div>
+            <div style={{fontWeight:600,fontSize:13,color:C.text,wordBreak:"break-all"}}>{selectedOrder.tracking}</div>
+          </div>
+        )}
+
+        {!selectedOrder.paid && selectedOrder.payToken && (
+          <button onClick={function(){
+            var url = window.location.origin + window.location.pathname + "#pay=" + selectedOrder.payToken;
+            if(navigator.share){
+              navigator.share({title:"Pay invoice", text:"Please pay your invoice.", url:url}).catch(function(){});
+            } else if(navigator.clipboard && navigator.clipboard.writeText){
+              navigator.clipboard.writeText(url).then(function(){ addToast("Payment link copied","success"); });
+            } else {
+              window.prompt("Copy this payment link:", url);
+            }
+          }}
+            style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:C.accent,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14,marginBottom:8}}>
+            📤 Share Payment Link
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+        {[{id:"all",label:"All"},{id:"open",label:"Open"},{id:"paid",label:"Paid"},{id:"shipped",label:"Shipped"}].map(function(f){
+          var sel = filter===f.id;
+          return (
+            <button key={f.id} onClick={function(){setFilter(f.id);}}
+              style={{padding:"8px 14px",borderRadius:20,border:"1px solid "+(sel?C.accent:C.border),
+                      background:sel?C.accent+"15":C.surface,color:sel?C.accent:C.muted,
+                      cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700,whiteSpace:"nowrap",flexShrink:0}}>
+              {f.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {filtered.length===0?(
+        <div style={{padding:"40px 20px",textAlign:"center",color:C.dim,fontSize:13,background:C.surface,borderRadius:12,border:"1px dashed "+C.border}}>
+          {filter==="all"?"No orders yet.":"No "+filter+" orders."}
+        </div>
+      ):filtered.map(function(o){var c=(customers||[]).find(function(cc){return cc.id===o.custId;}); var sc=STATUS_COLOR[o.status]||{}; return (
+        <button key={o.id} onClick={function(){setSelectedOrderId(o.id);}}
+          style={{display:"block",width:"100%",textAlign:"left",padding:"14px",background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:8,cursor:"pointer",fontFamily:"inherit",color:C.text}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+            <div style={{fontWeight:700,fontSize:14}}>{(c&&c.name)||o.custName||"Customer"}</div>
+            <div style={{fontWeight:800,fontSize:14,color:C.accent}}>{fmtMoney(o.total)}</div>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
+            <div>{fmtDate(o.createdAt)} · {o.id}</div>
+            <span style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:20,background:sc.bg||C.surface2,color:sc.c||C.muted}}>{o.status||"—"}</span>
+          </div>
+        </button>
+      );})}
+    </div>
+  );
+}
+
+function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selectedCustomerId, setSelectedCustomerId, setTab, addToast}){
+  const [search, setSearch] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [newCust, setNewCust] = useState({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
+
+  var selectedCustomer = selectedCustomerId ? myCustomers.find(function(c){return c.id===selectedCustomerId;}) : null;
+
+  if(selectedCustomer){
+    var custOrders = myOrders.filter(function(o){return o.custId===selectedCustomer.id;}).sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);});
+    return (
+      <div>
+        <button onClick={function(){setSelectedCustomerId(null);}}
+          style={{background:"none",border:"none",color:C.accent,fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:13,marginBottom:14,padding:0}}>← Back</button>
+
+        <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:14}}>
+          <div style={{fontWeight:800,fontSize:20,color:C.text,marginBottom:8}}>{selectedCustomer.name||"Unnamed"}</div>
+          {selectedCustomer.email && <div style={{fontSize:13,color:C.muted,marginBottom:4}}>📧 {selectedCustomer.email}</div>}
+          {selectedCustomer.phone && <div style={{fontSize:13,color:C.muted,marginBottom:4}}>📞 {selectedCustomer.phone}</div>}
+          {(selectedCustomer.address||selectedCustomer.city) && <div style={{fontSize:13,color:C.muted,marginBottom:4}}>📍 {[selectedCustomer.address,selectedCustomer.city,selectedCustomer.state,selectedCustomer.zip].filter(function(x){return x;}).join(", ")}</div>}
+        </div>
+
+        <button onClick={function(){setSelectedCustomerId(null); setTab("new");}}
+          style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:C.accent,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14,marginBottom:14}}>
+          ➕ New Order for {selectedCustomer.name||"this customer"}
+        </button>
+
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>Recent Orders</div>
+        {custOrders.length===0?(
+          <div style={{padding:"30px 20px",textAlign:"center",color:C.dim,fontSize:13,background:C.surface,borderRadius:12,border:"1px dashed "+C.border}}>
+            No orders yet for this customer.
+          </div>
+        ):custOrders.slice(0,10).map(function(o){var sc=STATUS_COLOR[o.status]||{}; return (
+          <div key={o.id} style={{padding:"12px 14px",background:C.surface,border:"1px solid "+C.border,borderRadius:10,marginBottom:6}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+              <div style={{fontSize:13,fontWeight:600,color:C.text}}>{o.id}</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.accent}}>{fmtMoney(o.total)}</div>
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:11,color:C.muted}}>
+              <div>{fmtDate(o.createdAt)}</div>
+              <span style={{padding:"2px 8px",fontSize:10,fontWeight:700,borderRadius:20,background:sc.bg||C.surface2,color:sc.c||C.muted}}>{o.status||"—"}</span>
+            </div>
+          </div>
+        );})}
+      </div>
+    );
+  }
+
+  var filtered = myCustomers;
+  if(search.trim()){
+    var q = search.toLowerCase();
+    filtered = myCustomers.filter(function(c){
+      return (c.name||"").toLowerCase().indexOf(q)>=0 ||
+             (c.email||"").toLowerCase().indexOf(q)>=0 ||
+             (c.phone||"").indexOf(search.trim())>=0;
+    });
+  }
+  filtered = filtered.slice().sort(function(a,b){return (a.name||"").localeCompare(b.name||"");});
+
+  function saveNewCust(){
+    if(!newCust.name.trim()){ addToast("Name required","warning"); return; }
+    var newId = genId("cust");
+    var rec = Object.assign({}, newCust, {id:newId, repId:repData.id, createdAt:new Date().toISOString()});
+    setCustomers(function(prev){return prev.concat([rec]);});
+    dbSave("crm_customers", newId, rec);
+    setShowAdd(false);
+    setNewCust({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
+    addToast("Customer added","success");
+  }
+
+  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:15,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:12,boxSizing:"border-box"};
+
+  return (
+    <div>
+      <input type="search" placeholder="🔍  Search customers" value={search} onChange={function(e){setSearch(e.target.value);}} style={inputStyle}/>
+
+      <button onClick={function(){setShowAdd(true);}}
+        style={{display:"block",width:"100%",padding:"12px",borderRadius:10,background:C.surface,color:C.accent,border:"1px dashed "+C.accent,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:13,marginBottom:14}}>
+        + Add Customer
+      </button>
+
+      {filtered.length===0?(
+        <div style={{padding:"40px 20px",textAlign:"center",color:C.dim,fontSize:13,background:C.surface,borderRadius:12,border:"1px dashed "+C.border}}>
+          {search?"No customers match.":"No customers yet."}
+        </div>
+      ):filtered.map(function(c){return (
+        <button key={c.id} onClick={function(){setSelectedCustomerId(c.id);}}
+          style={{display:"block",width:"100%",textAlign:"left",padding:"14px",background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:8,cursor:"pointer",fontFamily:"inherit",color:C.text}}>
+          <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:2}}>{c.name||"Unnamed"}</div>
+          <div style={{fontSize:11,color:C.muted}}>{c.email||c.phone||"—"}</div>
+        </button>
+      );})}
+
+      {showAdd && (
+        <Modal title="Add Customer" onClose={function(){setShowAdd(false);}}
+          footer={<div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+            <Btn variant="ghost" small onClick={function(){setShowAdd(false);}}>Cancel</Btn>
+            <Btn small onClick={saveNewCust}>Add</Btn>
+          </div>}>
+          <Field label="Name *" value={newCust.name} onChange={function(v){setNewCust(Object.assign({},newCust,{name:v}));}}/>
+          <Field label="Email" value={newCust.email} onChange={function(v){setNewCust(Object.assign({},newCust,{email:v}));}}/>
+          <Field label="Phone" value={newCust.phone} onChange={function(v){setNewCust(Object.assign({},newCust,{phone:v}));}}/>
+          <Field label="Address" value={newCust.address} onChange={function(v){setNewCust(Object.assign({},newCust,{address:v}));}}/>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
+            <Field label="City" value={newCust.city} onChange={function(v){setNewCust(Object.assign({},newCust,{city:v}));}}/>
+            <Field label="State" value={newCust.state} onChange={function(v){setNewCust(Object.assign({},newCust,{state:v}));}}/>
+            <Field label="ZIP" value={newCust.zip} onChange={function(v){setNewCust(Object.assign({},newCust,{zip:v}));}}/>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function MobileProfile({currentUser, repData, commissions, preferDesktop, setPreferDesktop, onLogout, addToast, stripeLinks}){
+  var myRepId = repData ? repData.id : (currentUser && currentUser.rep_id);
+  var myComms = (commissions||[]).filter(function(cp){return cp.repId===myRepId;});
+  var nowY = new Date().getFullYear();
+  var ytdComm = myComms.filter(function(cp){var d=new Date(cp.paidAt||cp.createdAt||0); return d.getFullYear()===nowY;}).reduce(function(s,cp){return s+(Number(cp.amount)||0);},0);
+  var mtdComm = myComms.filter(function(cp){var d=new Date(cp.paidAt||cp.createdAt||0); return d.getFullYear()===nowY && d.getMonth()===new Date().getMonth();}).reduce(function(s,cp){return s+(Number(cp.amount)||0);},0);
+  var plan = REP_PLANS.find(function(p){return p.id===(repData&&repData.planId);});
+  var subStatus = (repData&&repData.subscriptionStatus)||"trial";
+  var w9St = repData && repData.w9ReviewStatus==="approved" ? "Approved" : (repData&&repData.w9SubmittedAt?"Pending review":"Not submitted");
+
+  return (
+    <div>
+      <div style={{padding:20,background:"linear-gradient(135deg,"+C.accent+","+C.accent+"AA)",borderRadius:16,marginBottom:16,color:"#fff"}}>
+        <div style={{fontSize:22,fontWeight:800,marginBottom:2}}>{(repData&&repData.name)||(currentUser&&currentUser.name)||"My Profile"}</div>
+        <div style={{fontSize:13,opacity:0.85}}>{(repData&&repData.email)||(currentUser&&currentUser.email)||""}</div>
+        {plan&&(
+          <div style={{marginTop:14,padding:"6px 12px",background:"rgba(255,255,255,.18)",borderRadius:20,display:"inline-block",fontSize:11,fontWeight:700,textTransform:"capitalize"}}>
+            {plan.name} · ${plan.price}/mo · {subStatus}
+          </div>
+        )}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+        <div style={{padding:"14px 12px",background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Commission YTD</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.gold,fontFamily:"monospace"}}>{fmtMoney(ytdComm)}</div>
+        </div>
+        <div style={{padding:"14px 12px",background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+          <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Commission MTD</div>
+          <div style={{fontSize:20,fontWeight:900,color:C.gold,fontFamily:"monospace"}}>{fmtMoney(mtdComm)}</div>
+        </div>
+      </div>
+
+      <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:C.text}}>W-9 Tax Form</div>
+          <div style={{fontSize:11,color:C.muted,marginTop:2}}>{w9St}</div>
+        </div>
+        {repData&&repData.w9ReviewStatus==="approved"&&<span style={{padding:"4px 10px",fontSize:10,fontWeight:700,borderRadius:20,background:C.success+"18",color:C.success}}>✓</span>}
+      </div>
+
+      <button onClick={function(){setPreferDesktop(true);}}
+        style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:C.surface,color:C.text,border:"1px solid "+C.border,cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13,marginBottom:8,textAlign:"left"}}>
+        🖥️&nbsp;&nbsp;Use full desktop version
+      </button>
+
+      <button onClick={onLogout}
+        style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:"transparent",color:C.danger,border:"1px solid "+C.danger+"40",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14,marginTop:10}}>
+        Sign out
+      </button>
+    </div>
+  );
+}
+
 function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
+  const isMobileUA = useState(function(){return isMobileDevice();})[0];
+  const [preferDesktopOnMobile, setPreferDesktopOnMobile] = useLS("preferDesktopOnMobile", false);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading,     setLoading]     = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
@@ -11700,6 +12328,28 @@ function App() {
     },
     onLogout: handleLogout,
   });
+
+  // ── Mobile shell — reps on phones get a thumb-driven UI; admins always desktop;
+  //    onboarding flows through desktop tree first since they're one-time only.
+  if(isMobileUA && !preferDesktopOnMobile && !isAdmin && repSetupComplete && myRepData){
+    return React.createElement(MobileShell, {
+      currentUser: effectiveUser,
+      repData: myRepData,
+      customers: customers, setCustomers: setCustomers,
+      orders: orders, setOrders: setOrders,
+      products: products,
+      reps: reps,
+      commissions: commissions,
+      addToast: addToast,
+      preferDesktop: preferDesktopOnMobile,
+      setPreferDesktop: setPreferDesktopOnMobile,
+      onLogout: handleLogout,
+      shippingRules: shippingRules,
+      taxCfg: taxCfg,
+      invoiceCfg: invoiceCfg,
+      stripeLinks: stripeLinks,
+    });
+  }
 
   var adminModules = [
     {label:"General"},
