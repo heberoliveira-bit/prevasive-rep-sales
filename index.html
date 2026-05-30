@@ -11171,14 +11171,14 @@ function TwoFAGate({email, onVerified, onLogout}){
     background:C.surface,color:C.text,marginBottom:12,boxSizing:"border-box",fontWeight:700};
 
   return (
-    <div style={{minHeight:"100vh",background:C.bg,color:C.text,display:"flex",flexDirection:"column",fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif"}}>
-      <div style={{padding:"60px 24px 30px",textAlign:"center"}}>
-        <div style={{width:64,height:64,borderRadius:16,background:"#635bff",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:30,marginBottom:16,boxShadow:"0 4px 16px rgba(99,91,255,.4)"}}>🔐</div>
-        <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Check your email</div>
-        <div style={{fontSize:13,color:C.muted}}>We sent a 6-digit code to<br/><strong style={{color:C.text}}>{maskEmail(email)}</strong></div>
-      </div>
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px",fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif"}}>
+      <div style={{width:"100%",maxWidth:440,background:C.surface,borderRadius:16,padding:"40px 28px 32px",border:"1px solid "+C.border,boxShadow:"0 8px 32px rgba(0,0,0,.3)",boxSizing:"border-box"}}>
+        <div style={{textAlign:"center",marginBottom:28}}>
+          <div style={{width:64,height:64,borderRadius:16,background:"#635bff",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:30,marginBottom:16,boxShadow:"0 4px 16px rgba(99,91,255,.4)"}}>🔐</div>
+          <div style={{fontSize:22,fontWeight:800,marginBottom:6}}>Check your email</div>
+          <div style={{fontSize:13,color:C.muted,lineHeight:1.5}}>We sent a 6-digit code to<br/><strong style={{color:C.text}}>{maskEmail(email)}</strong></div>
+        </div>
 
-      <div style={{flex:1,padding:"0 24px",maxWidth:420,width:"100%",alignSelf:"center",boxSizing:"border-box"}}>
         {status==="sending" && (
           <div style={{textAlign:"center",color:C.muted,fontSize:13,padding:20}}>Sending code…</div>
         )}
@@ -11210,13 +11210,13 @@ function TwoFAGate({email, onVerified, onLogout}){
             </div>
           </div>
         )}
-      </div>
 
-      <div style={{padding:"24px",textAlign:"center"}}>
-        <button onClick={onLogout}
-          style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:13,padding:"8px 12px"}}>
-          Wrong account? Sign out
-        </button>
+        <div style={{marginTop:24,paddingTop:18,borderTop:"1px solid "+C.border,textAlign:"center"}}>
+          <button onClick={onLogout}
+            style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:12,padding:"4px 8px"}}>
+            Wrong account? Sign out
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -11369,7 +11369,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v7-2fa</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v8-2fa-cross</div>
       </div>
     </div>
   );
@@ -12339,7 +12339,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-mobile-v7-2fa
+        BUILD: 2026-05-30-mobile-v8-2fa-cross
       </div>
     </div>
   );
@@ -12649,6 +12649,7 @@ function App() {
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
       if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
       if(Array.isArray(d.shippingRules)) setShippingRules(d.shippingRules);
+      if(typeof d.twoFAEnabled === "boolean") setTwoFAEnabled(d.twoFAEnabled);
     }).catch(function(){});
   },[]);
 
@@ -12669,9 +12670,10 @@ function App() {
                   dimL:shipStationCfg.dimL||shipStationCfg.defaultL||"12", dimW:shipStationCfg.dimW||shipStationCfg.defaultW||"10", dimH:shipStationCfg.dimH||shipStationCfg.defaultH||"6",
                   carrierFilter:shipStationCfg.carrierFilter||""
                 } : null,
-                shippingRules: Array.isArray(shippingRules) ? shippingRules : [] };
+                shippingRules: Array.isArray(shippingRules) ? shippingRules : [],
+                twoFAEnabled: !!twoFAEnabled };
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
-  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
 
   // Apply theme
