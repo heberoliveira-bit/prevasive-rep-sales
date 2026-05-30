@@ -22,6 +22,20 @@ button,a{-webkit-tap-highlight-color:rgba(99,91,255,.2);touch-action:manipulatio
 /* ─── Constants ──────────────────────────────────────────────────────────── */
 var RETURN_WINDOW_DAYS = 15;
 var TRIAL_DAYS         = 15;
+
+/* Commission release hold (from shippedAt):
+ *   due_receipt / card / invoice_link → 15 days
+ *   net_15 → 16 days
+ *   net_30 → 31 days
+ *   net_45 → 46 days
+ */
+function commissionHoldDays(order){
+  var pm = (order && order.paymentMethod) || "";
+  if(pm==="net_15") return 16;
+  if(pm==="net_30") return 31;
+  if(pm==="net_45") return 46;
+  return RETURN_WINDOW_DAYS;
+}
 var REP_PLANS = [
   {id:"starter", name:"Starter", price:100, ceiling:1000,  desc:"Up to $1,000/mo"},
   {id:"pro",     name:"Pro",     price:200, ceiling:10000, desc:"Up to $10,000/mo"},
@@ -860,14 +874,15 @@ function ResultModal({data,onClose}) {
 }
 
 /* ─── AppLanding ─────────────────────────────────────────────────────────── */
-var REP_AGREEMENT_VERSION = "1.0";
+var REP_AGREEMENT_VERSION = "2.0";
 var REP_AGREEMENT_CLAUSES = [
-  {id:"contractor",title:"1. Independent Contractor",text:"I understand I am an independent contractor, not an employee of PreVasive. I am responsible for my own taxes and expenses."},
-  {id:"commission",title:"2. Commission Structure",text:"I earn commission on net invoice value of orders placed and paid. Commission is subject to a 15-day return window from confirmed delivery. Returns or refunds forfeit commission for that order."},
-  {id:"subscription",title:"3. Subscription Plan & Access",text:"Platform access requires an active subscription plan after the 15-day free trial. My selected plan determines the maximum monthly commission I may earn. PreVasive may modify plan pricing with 30 days notice."},
-  {id:"confidential",title:"4. Confidentiality",text:"I agree to keep all customer, pricing, and proprietary business information strictly confidential during and after my engagement with PreVasive."},
-  {id:"conduct",title:"5. Professional Conduct",text:"I agree to represent PreVasive professionally and in accordance with all applicable laws and regulations in my sales territory."},
-  {id:"termination",title:"6. Termination",text:"Either party may terminate this agreement with 30 days written notice. Earned commissions for completed orders will be paid per normal schedule after termination."},
+  {id:"contractor",title:"1. Independent Contractor Status",text:"I understand I am an independent contractor, not an employee of PreVasive USA. I am solely responsible for all taxes, insurance, and business expenses associated with my work. PreVasive will issue an IRS Form 1099 if my annual earnings meet the reporting threshold. A current W-9 must remain on file."},
+  {id:"commission",title:"2. Commission Structure & Release",text:"I earn commission as a markup percentage applied to PreVasive's base product prices on orders I place. Commission accrues at order placement but is held until each order's shipping-based release period elapses: 15 days after shipping for card, invoice-link, and Due-on-Receipt payments; 16 days for Net 15; 31 days for Net 30; 46 days for Net 45 terms. Orders that are Cancelled, Refunded, or Returned at any point during the hold period forfeit commission entirely. Released commissions are transferred to my Stripe Connect account."},
+  {id:"subscription",title:"3. Subscription Plan & Platform Access",text:"Platform access requires an active subscription plan after the 15-day free trial. My selected plan (Starter or Pro) sets my maximum monthly commission ceiling. Commission earned beyond my plan's ceiling is deferred until I upgrade or the next billing cycle. PreVasive may modify plan pricing with 30 days written notice."},
+  {id:"confidential",title:"4. Confidentiality & Non-Solicitation",text:"I agree to keep all customer information, pricing data, internal communications, and proprietary business information strictly confidential during and after my engagement with PreVasive. I will not, during the term of this agreement or for 12 months following its termination, solicit PreVasive customers on behalf of competing products."},
+  {id:"conduct",title:"5. Professional & Legal Conduct",text:"I agree to represent PreVasive products honestly and professionally, in full compliance with FDA regulations, state and federal healthcare laws, anti-kickback statutes, and all applicable sales and tax laws in the territories I serve. I will not make claims beyond those in PreVasive's approved marketing materials."},
+  {id:"orders",title:"6. Order & Customer Responsibility",text:"I am responsible for verifying customer information, shipping addresses, and payment method selection before placing each order. For credit-terms customers (Net 15/30/45), I confirm a credit agreement has been signed and PreVasive has approved their terms before placing orders on those terms. I understand uncollectible accounts may affect future commission eligibility."},
+  {id:"termination",title:"7. Termination",text:"Either party may terminate this agreement with 30 days written notice. Earned commissions for completed orders continue to release according to the standard hold schedule after termination. PreVasive may terminate immediately for cause, including breach of confidentiality, fraud, regulatory violations, or material misrepresentation."},
 ];
 
 function ImpersonationBanner({rep, onExit}) {
@@ -906,17 +921,17 @@ function TermsModal({onAccept,onDecline}) {
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"18px 24px",fontSize:12,color:C.muted,lineHeight:1.8}}>
           <strong style={{color:C.text,display:"block",marginBottom:8}}>1. Platform Use</strong>
-          <p style={{marginBottom:14}}>This platform ("PreVasive Rep Sales") is provided exclusively for authorized PreVasive sales representatives. Unauthorized access is prohibited.</p>
-          <strong style={{color:C.text,display:"block",marginBottom:8}}>2. Data Privacy</strong>
-          <p style={{marginBottom:14}}>All customer data, order information, and commission records entered into this platform are the property of PreVasive. You agree to keep all data confidential and not share it with unauthorized parties.</p>
+          <p style={{marginBottom:14}}>This platform ("PreVasive Rep Sales") is provided exclusively for authorized PreVasive USA sales representatives and their administrators. Unauthorized access, scraping, or automated use is prohibited.</p>
+          <strong style={{color:C.text,display:"block",marginBottom:8}}>2. Data Privacy & Confidentiality</strong>
+          <p style={{marginBottom:14}}>All customer data, order information, commission records, and pricing data entered into this platform are the property of PreVasive USA. You agree to keep all such data confidential and not share it with unauthorized parties. PreVasive complies with applicable U.S. data-protection laws and uses industry-standard encryption for data in transit and at rest.</p>
           <strong style={{color:C.text,display:"block",marginBottom:8}}>3. Acceptable Use</strong>
-          <p style={{marginBottom:14}}>You agree to use this platform only for legitimate sales activities on behalf of PreVasive. Misuse, fraud, or unauthorized modifications are grounds for immediate account termination.</p>
+          <p style={{marginBottom:14}}>You agree to use this platform only for legitimate sales activities on behalf of PreVasive USA. Misuse, fraud, falsification of orders or customer information, attempts to bypass security, or unauthorized modifications are grounds for immediate account termination and may be reported to law enforcement.</p>
           <strong style={{color:C.text,display:"block",marginBottom:8}}>4. Commission Terms</strong>
-          <p style={{marginBottom:14}}>Commissions are subject to a 15-day return window from confirmed delivery. Returns or refunds will result in commission reversal. PreVasive reserves the right to adjust commission rates with 30 days notice.</p>
+          <p style={{marginBottom:14}}>Commissions are earned at order placement and held from the order's shipping date until the applicable release period elapses: 15 days for card payments, invoice links, and Due-on-Receipt; 16 days for Net 15; 31 days for Net 30; 46 days for Net 45. Returns, refunds, or cancellations during the hold window forfeit commission for that order. PreVasive reserves the right to adjust commission rates and release schedules with 30 days written notice.</p>
           <strong style={{color:C.text,display:"block",marginBottom:8}}>5. Account Security</strong>
-          <p style={{marginBottom:14}}>You are responsible for maintaining the security of your account credentials. Report any unauthorized access immediately to your admin.</p>
+          <p style={{marginBottom:14}}>You are responsible for maintaining the security of your account credentials. If two-factor authentication is enabled organization-wide, you will be required to enter a code emailed to you on each sign-in. Report any unauthorized access immediately to your admin.</p>
           <strong style={{color:C.text,display:"block",marginBottom:8}}>6. Modifications</strong>
-          <p>PreVasive reserves the right to modify these terms at any time. Continued use of the platform constitutes acceptance of updated terms.</p>
+          <p>PreVasive reserves the right to modify these terms at any time. Material changes will be announced with 30 days notice. Continued use of the platform after notice constitutes acceptance of updated terms.</p>
         </div>
         <div style={{padding:"16px 24px",borderTop:"1px solid "+C.border,flexShrink:0}}>
           <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer",marginBottom:14}}>
@@ -3099,8 +3114,8 @@ function ReturnModal({order,currentUser,onProcess,onClose,mode}) {
   const [notes,    setNotes]    = useState("");
   const [err,      setErr]      = useState("");
   var now = Date.now();
-  var delMs = order.deliveredAt ? new Date(order.deliveredAt).getTime() : null;
-  var inWindow = delMs && (now-delMs) < RETURN_WINDOW_DAYS*24*60*60*1000;
+  var delMs = order.deliveredAt ? new Date(order.shippedAt).getTime() : null;
+  var inWindow = delMs && (now-delMs) < commissionHoldDays(order)*24*60*60*1000;
   var daysUsed = delMs ? Math.floor((now-delMs)/(24*60*60*1000)) : 0;
 
   function process() {
@@ -3120,8 +3135,8 @@ function ReturnModal({order,currentUser,onProcess,onClose,mode}) {
                    border:"1px solid "+(inWindow?C.success:C.danger)+"30"}}>
         <div style={{fontSize:12,fontWeight:700,color:inWindow?C.success:C.danger}}>
           {inWindow
-            ? "✓ Within return window (Day "+daysUsed+" of "+RETURN_WINDOW_DAYS+") — commission still held"
-            : "⚠ Outside return window ("+daysUsed+" days since delivery) — commission may have been released"}
+            ? "✓ Within return window (Day "+daysUsed+" of "+commissionHoldDays(order)+") — commission still held"
+            : "⚠ Outside return window ("+daysUsed+" days since shipment) — commission may have been released"}
         </div>
       </div>
       {err&&<div style={{padding:"8px 12px",background:C.danger+"12",borderRadius:6,color:C.danger,fontSize:12,marginBottom:12}}>{err}</div>}
@@ -3837,7 +3852,7 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
   const [viewDoc,  setViewDoc]  = useState(null);
 
   var SAMPLE_TEMPLATES = {
-    contractor: "INDEPENDENT CONTRACTOR AGREEMENT\n\nThis Independent Contractor Agreement is entered into between PreVasive USA (Company) and the Sales Representative (Contractor).\n\n1. SERVICES\nContractor agrees to sell Company products to medical and healthcare customers within their designated territory.\n\n2. COMPENSATION\nContractor will receive commission as specified in their subscription plan. Commission is subject to a 15-day return window from confirmed delivery.\n\n3. INDEPENDENT CONTRACTOR STATUS\nContractor is an independent contractor. Contractor is responsible for all taxes, insurance, and business expenses.\n\n4. CONFIDENTIALITY\nContractor agrees to keep all Company information, pricing, and customer data strictly confidential.\n\n5. TERM\nThis agreement continues until terminated by either party with 30 days written notice.",
+    contractor: "INDEPENDENT CONTRACTOR AGREEMENT\n\nThis Independent Contractor Agreement is entered into between PreVasive USA (\"Company\") and the Sales Representative (\"Contractor\").\n\n1. SERVICES\nContractor agrees to sell Company products to medical and healthcare customers within their designated territory in compliance with all applicable federal and state laws, including FDA regulations, anti-kickback statutes, and any state-specific medical sales requirements.\n\n2. COMPENSATION\nContractor earns commission as a markup percentage applied to Company's base product prices. Commission accrues at order placement and is held from each order's shipping date until the applicable release period elapses:\n  • 15 days for card, invoice-link, and Due-on-Receipt payments\n  • 16 days for Net 15 terms\n  • 31 days for Net 30 terms\n  • 46 days for Net 45 terms\nCommission for orders that are Cancelled, Refunded, or Returned during the hold period is forfeited. Released commissions are paid via Stripe Connect to Contractor's registered account.\n\n3. INDEPENDENT CONTRACTOR STATUS\nContractor is an independent contractor, not an employee. Contractor is solely responsible for all federal, state, and local taxes; self-employment tax; insurance; and business expenses. A current IRS Form W-9 must remain on file with Company.\n\n4. CONFIDENTIALITY & NON-SOLICITATION\nContractor agrees to keep all Company information, pricing, customer data, and proprietary materials strictly confidential during and after this engagement. Contractor will not solicit Company customers on behalf of competing products during the term of this agreement or for 12 months following its termination.\n\n5. TERM & TERMINATION\nThis agreement continues until terminated by either party with 30 days written notice. Earned commissions for completed orders will continue to release per the standard hold schedule after termination. Company may terminate immediately for cause, including breach of confidentiality, fraud, regulatory violations, or material misrepresentation.\n\n6. GOVERNING LAW\nThis agreement is governed by the laws of the State of Georgia, USA. Any disputes will be resolved through binding arbitration in Atlanta, GA.",
     nda: "NON-DISCLOSURE AGREEMENT\n\nThis Agreement is entered into between PreVasive USA and the Sales Representative.\n\n1. CONFIDENTIAL INFORMATION\nConfidential information includes: product pricing, customer lists, business strategies, technical specifications, and any proprietary information disclosed during the course of the business relationship.\n\n2. OBLIGATIONS\nRecipient agrees to: (a) keep all confidential information strictly secret; (b) not disclose to third parties without written consent; (c) use only for authorized sales activities.\n\n3. TERM\nThis obligation survives termination of the business relationship for a period of 3 years.",
     conduct: "CODE OF CONDUCT\n\nAs a PreVasive Sales Representative, you agree to:\n\n1. PROFESSIONAL STANDARDS\nRepresent PreVasive with integrity and professionalism at all times.\n\n2. COMPLIANCE\nComply with all applicable laws, including FDA regulations, HIPAA, and anti-kickback statutes when applicable.\n\n3. ACCURATE REPRESENTATION\nMake only truthful claims about PreVasive products. Do not make claims not supported by product documentation.\n\n4. CONFLICT OF INTEREST\nDisclose any potential conflicts of interest to your admin immediately.",
   };
@@ -4781,68 +4796,6 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
 
 </script>
 <script id="c8" type="text/plain">
-function HelpModal({isAdmin,onClose}) {
-  const [tab, setTab] = useState(isAdmin?"admin":"rep");
-  var ADMIN_FAQ = [
-    ["How do I add a new rep?","Go to Sales Reps → Add Rep. Enter name and email, then send them an invite link to set up their login."],
-    ["How do I approve a W-9?","Go to Tasks — pending W-9 reviews appear there. Or go to Sales Reps and click ✓ W-9 next to the rep."],
-    ["How do commissions work?","Commission holds for 15 days from delivery. After that, it appears in Commissions → Ready to Release."],
-    ["How do I publish a legal document?","Go to Legal & Compliance → New Doc. Set a version number. Reps will be required to sign on next login."],
-    ["How do I export data?","Settings → Export Data. Download CSV for orders, customers, commissions, or reps."],
-    ["How do I set up Stripe?","Settings → Stripe. A Supabase Edge Function is required for live charging."],
-  ];
-  var REP_FAQ = [
-    ["How do I place an order?","Go to New Order in the sidebar. Select a customer, add products, choose payment method, and confirm."],
-    ["When do I get paid my commission?","Commission is held for 15 days after delivery (return window). After that, your admin releases payment."],
-    ["How do I add a customer?","Go to Customers → Add Customer. Fill in their contact and address info."],
-    ["What is a quote?","A quote is a price proposal you can send to a customer. They can be converted to an order when accepted."],
-    ["How do I download my 1099?","Go to My Profile → Documents tab. Your prior year 1099-NEC downloads as an HTML file."],
-    ["How do I change my password?","Go to My Profile → Password tab. Enter your new password and confirm."],
-  ];
-  var faq = tab==="admin" ? ADMIN_FAQ : REP_FAQ;
-  return (
-    <div style={{position:"fixed",inset:0,background:C.bg+"e0",backdropFilter:"blur(6px)",
-                 zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}
-         onClick={function(e){if(e.target===e.currentTarget)onClose();}}>
-      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,
-                   maxWidth:560,width:"100%",maxHeight:"85vh",display:"flex",flexDirection:"column",
-                   boxShadow:"0 16px 48px rgba(0,0,0,.2)"}}>
-        <div style={{padding:"20px 24px 14px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{fontWeight:800,fontSize:18,color:C.text}}>Help & FAQ</div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:20}}>×</button>
-        </div>
-        {isAdmin&&(
-          <div style={{padding:"12px 24px 0",display:"flex",gap:8,borderBottom:"1px solid "+C.border}}>
-            {[["admin","Admin"],["rep","Rep"]].map(function(t){var act=tab===t[0];return (
-              <button key={t[0]} onClick={function(){setTab(t[0]);}}
-                style={{padding:"6px 14px",background:"none",border:"none",fontFamily:"inherit",cursor:"pointer",
-                        fontSize:12,fontWeight:act?600:400,color:act?C.accent:C.dim,
-                        borderBottom:"2px solid "+(act?C.accent:"transparent"),marginBottom:-1}}>
-                {t[1]} FAQ
-              </button>
-            );})}
-          </div>
-        )}
-        <div style={{flex:1,overflowY:"auto",padding:"16px 24px"}}>
-          {faq.map(function(item,i){return (
-            <details key={i} style={{marginBottom:10,borderRadius:8,overflow:"hidden",border:"1px solid "+C.border}}>
-              <summary style={{padding:"12px 16px",cursor:"pointer",fontWeight:600,fontSize:13,color:C.text,
-                               listStyle:"none",display:"flex",justifyContent:"space-between",alignItems:"center",
-                               background:C.surface2}}>
-                {item[0]} <span style={{color:C.dim,fontSize:14}}>+</span>
-              </summary>
-              <div style={{padding:"12px 16px",fontSize:13,color:C.muted,lineHeight:1.7,background:C.surface}}>{item[1]}</div>
-            </details>
-          );})}
-        </div>
-        <div style={{padding:"14px 24px",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:11,color:C.dim}}>Need more help? Contact your PreVasive admin.</span>
-          <Btn small variant="ghost" onClick={onClose}>Close</Btn>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 
 function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
@@ -4864,12 +4817,12 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
   var paidComm  = repComms.reduce(function(s,cp){return s+(cp.amount||0);},0);
   var heldComm  = repOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Returned") return false;
-    return (now2-new Date(o.deliveredAt).getTime())<RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (now2-new Date(o.shippedAt).getTime())<commissionHoldDays(o)*24*60*60*1000;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var readyComm = repOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Returned") return false;
     var paid=repComms.map(function(cp){return cp.orderId;});
-    return (now2-new Date(o.deliveredAt).getTime())>=RETURN_WINDOW_DAYS*24*60*60*1000&&paid.indexOf(o.id)<0;
+    return (now2-new Date(o.shippedAt).getTime())>=commissionHoldDays(o)*24*60*60*1000&&paid.indexOf(o.id)<0;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
 
   var trialDays = rep.trialStartedAt
@@ -5381,14 +5334,14 @@ function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
   var totalRevenue = filtOrders.filter(function(o){return o.status==="Paid";})
     .reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
   var pendingComm = filtOrders.filter(function(o){
-    if(!o.deliveredAt) return false;
+    if(!o.shippedAt) return false;
     if(o.status==="Cancelled"||o.status==="Refunded") return false;
-    return (now-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (now-new Date(o.shippedAt).getTime()) < commissionHoldDays(o)*24*60*60*1000;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var releasedComm = filtOrders.filter(function(o){
-    if(!o.deliveredAt) return false;
+    if(!o.shippedAt) return false;
     if(o.status==="Cancelled"||o.status==="Refunded") return false;
-    return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (now-new Date(o.shippedAt).getTime()) >= commissionHoldDays(o)*24*60*60*1000;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var activeReps = reps.filter(function(r){return r.status==="active";}).length;
   var taskCount2 = reps.filter(function(r){return (r.w9Status==="received"&&r.w9ReviewStatus!=="approved")||r.status==="pending";}).length
@@ -5961,15 +5914,16 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               {/* Commission hold */}
               {viewOrder.repId&&(function(){
                 var now2 = Date.now();
-                var delMs = viewOrder.deliveredAt ? new Date(viewOrder.deliveredAt).getTime() : null;
-                var expired = delMs ? (now2-delMs) >= RETURN_WINDOW_DAYS*24*60*60*1000 : false;
-                var held = delMs && !expired && viewOrder.status!=="Cancelled" && viewOrder.status!=="Refunded";
+                var shipMs = viewOrder.shippedAt ? new Date(viewOrder.shippedAt).getTime() : null;
+                var holdMs = commissionHoldDays(viewOrder)*24*60*60*1000;
+                var expired = shipMs ? (now2-shipMs) >= holdMs : false;
+                var held = shipMs && !expired && viewOrder.status!=="Cancelled" && viewOrder.status!=="Refunded";
                 var blocked = viewOrder.status==="Cancelled"||viewOrder.status==="Refunded";
-                if(!delMs) return null;
-                var col2 = blocked?C.danger:held?C.warning:C.success;
+                var col2 = blocked?C.danger:!shipMs?C.dim:held?C.warning:C.success;
                 var msg = blocked?"🚫 Commission blocked — order cancelled/refunded"
-                        : held?"🔒 Held — return window expires "+fmtDate(new Date(delMs+RETURN_WINDOW_DAYS*24*60*60*1000).toISOString())
-                        : "✅ Commission released — return window closed";
+                        : !shipMs?"⏳ Awaiting shipment — commission release starts once order ships"
+                        : held?"🔒 Held — releases on "+fmtDate(new Date(shipMs+holdMs).toISOString())+" ("+commissionHoldDays(viewOrder)+"-day hold)"
+                        : "✅ Hold period closed — commission released";
                 return (
                   <div style={{padding:"10px 14px",background:col2+"10",border:"1px solid "+col2+"30",
                                borderRadius:10,marginBottom:14,fontSize:12,color:col2,fontWeight:600}}>
@@ -6001,17 +5955,18 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               {/* Return window indicator */}
               {(function(){
                 var now3=Date.now();
-                var delMs2=viewOrder.deliveredAt?new Date(viewOrder.deliveredAt).getTime():null;
-                if(!delMs2) return null;
-                var daysLeft2=Math.max(0,Math.ceil((RETURN_WINDOW_DAYS*24*60*60*1000-(now3-delMs2))/(24*60*60*1000)));
+                var shipMs2=viewOrder.shippedAt?new Date(viewOrder.shippedAt).getTime():null;
+                if(!shipMs2) return null;
+                var holdMs3=commissionHoldDays(viewOrder)*24*60*60*1000;
+                var daysLeft2=Math.max(0,Math.ceil((holdMs3-(now3-shipMs2))/(24*60*60*1000)));
                 var inWin=daysLeft2>0;
                 return (
                   <div style={{padding:"9px 14px",borderRadius:8,marginBottom:14,fontSize:12,fontWeight:600,
                                background:inWin?C.warning+"10":C.success+"10",
                                border:"1px solid "+(inWin?C.warning:C.success)+"30",
                                color:inWin?C.warning:C.success}}>
-                    {inWin?"🔒 Return window: "+daysLeft2+" day"+(daysLeft2!==1?"s":"")+" remaining"
-                          :"✅ Return window closed — commission released"}
+                    {inWin?"🔒 Hold period: "+daysLeft2+" day"+(daysLeft2!==1?"s":"")+" until release"
+                          :"✅ Hold period closed — commission released"}
                   </div>
                 );
               })()}
@@ -6710,10 +6665,10 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
 
   function getReadyOrders() {
     return orders.filter(function(o){
-      if(!o.deliveredAt) return false;
+      if(!o.shippedAt) return false;
       if(o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
       if(paidOrderIds.indexOf(o.id)>=0) return false;
-      return (now2-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
+      return (now2-new Date(o.shippedAt).getTime()) >= commissionHoldDays(o)*24*60*60*1000;
     });
   }
 
@@ -6725,7 +6680,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
       var rep2 = reps.find(function(r){return r.id===o.repId;})||{name:"Rep"};
       return {id:genId("pay"),repId:o.repId,repName:rep2.name||o.repName,
               orderId:o.id,amount:o.totals&&o.totals.commission||0,
-              method:"auto_release",note:"Auto-released after "+RETURN_WINDOW_DAYS+"-day return window",
+              method:"auto_release",note:"Auto-released after "+commissionHoldDays(o)+"-day hold",
               paidAt:new Date().toISOString()};
     });
     newPayouts.forEach(function(p){dbSave("crm_commission_payouts",p.id,p);});
@@ -6764,7 +6719,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
   var releasedOrds = orders.filter(function(o){
     if(!o.deliveredAt||!o.repId) return false;
     if(o.status==="Cancelled"||o.status==="Refunded") return false;
-    return (now-new Date(o.deliveredAt).getTime()) >= RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (now-new Date(o.shippedAt).getTime()) >= commissionHoldDays(o)*24*60*60*1000;
   });
   var paidIds = (commissions||[]).map(function(c){return c.orderId;});
   var unpaid = releasedOrds.filter(function(o){return paidIds.indexOf(o.id)<0;});
@@ -6890,7 +6845,7 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
         <KpiCard label="Total Paid Out" value={fmtMoney(totalPaid)} sub={(commissions||[]).length+" payments"} color={C.success}/>
         <KpiCard label="In Return Window" value={fmtMoney(orders.filter(function(o){
           if(!o.deliveredAt||!o.repId) return false;
-          return (now-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+          return (now-new Date(o.shippedAt).getTime()) < commissionHoldDays(o)*24*60*60*1000;
         }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0))} sub="Held — 15-day window" color={C.warning}/>
       </div>
 
@@ -7793,7 +7748,7 @@ function CommissionStatement({repId,orders,commissions,repName}) {
   var paidTotal  = paidComms.reduce(function(s,cp){return s+(cp.amount||0);},0);
   var heldComm   = monthOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
-    return (Date.now()-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (Date.now()-new Date(o.shippedAt).getTime()) < commissionHoldDays(o)*24*60*60*1000;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
 
   function download() {
@@ -9146,12 +9101,12 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
   var totalEarned = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
   var heldComm = myOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
-    return (now4-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (now4-new Date(o.shippedAt).getTime()) < commissionHoldDays(o)*24*60*60*1000;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var releasedComm = myOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
     var paidIds=myComm.map(function(cp){return cp.orderId;});
-    return (now4-new Date(o.deliveredAt).getTime())>=RETURN_WINDOW_DAYS*24*60*60*1000&&paidIds.indexOf(o.id)<0;
+    return (now4-new Date(o.shippedAt).getTime())>=commissionHoldDays(o)*24*60*60*1000&&paidIds.indexOf(o.id)<0;
   }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var myCusts = customers.filter(function(c2){return c2.repId===repId;});
 
@@ -9196,7 +9151,7 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
         <div style={{padding:"12px 16px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:10,marginBottom:20,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <div>
             <div style={{fontWeight:700,fontSize:13,color:C.warning}}>🔒 {fmtMoney(heldComm)} held — return window open</div>
-            <div style={{fontSize:11,color:C.muted,marginTop:2}}>Commission releases {RETURN_WINDOW_DAYS} days after delivery</div>
+            <div style={{fontSize:11,color:C.muted,marginTop:2}}>Commission releases 15–46 days after shipment, depending on each order's payment terms</div>
           </div>
         </div>
       )}
@@ -9277,8 +9232,8 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
             </tr></thead>
             <tbody>
               {filtered.map(function(o){
-                var now5=Date.now(); var delMs=o.deliveredAt?new Date(o.deliveredAt).getTime():null;
-                var held=delMs&&(now5-delMs)<RETURN_WINDOW_DAYS*24*60*60*1000;
+                var now5=Date.now(); var delMs=o.deliveredAt?new Date(o.shippedAt).getTime():null;
+                var held=delMs&&(now5-delMs)<commissionHoldDays(o)*24*60*60*1000;
                 return (
                   <tr key={o.id} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}} onClick={function(){setViewOrd(o);}}>
                     <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
@@ -9678,11 +9633,11 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
   var paidIds = myComm.map(function(cp){return cp.orderId;});
   var held = myOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
-    return (now6-new Date(o.deliveredAt).getTime()) < RETURN_WINDOW_DAYS*24*60*60*1000;
+    return (now6-new Date(o.shippedAt).getTime()) < commissionHoldDays(o)*24*60*60*1000;
   });
   var released = myOrds.filter(function(o){
     if(!o.deliveredAt||o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
-    return (now6-new Date(o.deliveredAt).getTime())>=RETURN_WINDOW_DAYS*24*60*60*1000&&paidIds.indexOf(o.id)<0;
+    return (now6-new Date(o.shippedAt).getTime())>=commissionHoldDays(o)*24*60*60*1000&&paidIds.indexOf(o.id)<0;
   });
   var totalPaid  = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
   var totalHeld  = held.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
@@ -9695,7 +9650,7 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
         <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub="Paid out" color={C.success}/>
         <KpiCard label="Ready to Collect" value={fmtMoney(totalReady)} sub={released.length+" orders"} color={C.gold}/>
-        <KpiCard label="In Return Window" value={fmtMoney(totalHeld)} sub={"Held · "+RETURN_WINDOW_DAYS+"-day window"} color={C.warning}/>
+        <KpiCard label="In Return Window" value={fmtMoney(totalHeld)} sub={"Held · 15–46 day window"} color={C.warning}/>
       </div>
       {released.length>0&&(
         <div style={{marginBottom:20}}>
@@ -9721,14 +9676,14 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
           <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>In Return Window</div>
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{background:C.surface2}}>{["Order","Customer","Delivered","Releases","Commission"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
+              <thead><tr style={{background:C.surface2}}>{["Order","Customer","Shipped","Releases","Commission"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
               <tbody>{held.map(function(o){
-                var rel=new Date(new Date(o.deliveredAt).getTime()+RETURN_WINDOW_DAYS*24*60*60*1000);
+                var rel=new Date(new Date(o.shippedAt).getTime()+commissionHoldDays(o)*24*60*60*1000);
                 return (
                   <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
                     <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{o.id}</td>
                     <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
-                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.deliveredAt)}</td>
+                    <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.shippedAt)}</td>
                     <td style={{padding:"10px 14px",fontSize:11,color:C.warning,fontWeight:600}}>{fmtDate(rel.toISOString())}</td>
                     <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.warning}}>🔒 {fmtMoney(o.totals&&o.totals.commission||0)}</td>
                   </tr>
@@ -11117,6 +11072,294 @@ function isMobileDevice(){
   return /Mobi|Android|iPhone|iPod|webOS|BlackBerry|Windows Phone/i.test(navigator.userAgent||"");
 }
 
+/* ─── Help / FAQ / Terms content ─────────────────────────────────────────── */
+var HELP_SECTIONS = [
+  {id:"start", title:"Getting Started", body:[
+    "Sign in with the email and password set up by your admin. On first sign-in, you'll be prompted to (1) accept the Terms of Service, (2) sign the Rep Agreement, and (3) upload your W-9 tax form.",
+    "After that, you have a 15-day free trial. To keep access beyond the trial, pick a subscription plan from Profile → Billing (Starter $100/mo up to $1,000 monthly commission, or Pro $200/mo up to $10,000).",
+    "Connect your Stripe Connect account to receive commission payouts. Profile → Billing → Connect Stripe. Stripe holds your bank info securely; PreVasive never sees it."
+  ]},
+  {id:"orders", title:"Placing Orders", body:[
+    "From the dashboard, tap '+ New Order' (mobile) or the New Order button (desktop). Then follow five steps:",
+    "1. Pick the customer — choose an existing customer or add a new one inline. New customers need name, email, phone, shipping address, and (optionally) billing address.",
+    "2. Add products — search by name, tap to add, choose variant if applicable, set quantity.",
+    "3. Pick a shipping rate — live carrier rates appear based on the customer's ZIP and your cart weight. Tap a rate to select it.",
+    "4. Set commission markup — use the preset chips (0% / 5% / 10% / 15% / 20% / 25% / 30%) or the slider for custom values. Your dollar earnings update live.",
+    "5. Choose payment method — Charge Card Now (Stripe inline), Send Invoice Link (Stripe-hosted page emailed to customer), or one of the terms options (only shows if the customer has an active credit agreement).",
+    "Review the totals and tap the action button at the bottom. The label adapts to your choice: 'Charge & Place Order', 'Send Invoice Link', or 'Place Order'."
+  ]},
+  {id:"customers", title:"Customers & Credit Terms", body:[
+    "Add customers from the Customers tab or inline while placing an order. Each customer can have multiple shipping and billing addresses; set one as primary.",
+    "For customers who need credit terms (Net 15 / Net 30 / Net 45), set Payment Terms when adding them, then send a credit agreement: open the customer profile → 'Send Credit Agreement'. They'll get an email with a secure link to review and sign electronically.",
+    "Once signed, the customer shows '✓ NET 30 APPROVED' (or whichever terms they signed for) and terms-based payment options unlock in the New Order screen.",
+    "If their credit terms change, re-send a new agreement with the updated terms type."
+  ]},
+  {id:"commissions", title:"Commissions & Hold Period", body:[
+    "Commission is earned at order placement but held in escrow until the order's hold period elapses. The hold period depends on the customer's payment method:",
+    "  • Card / Invoice Link / Due-on-Receipt → 15 days after the order ships",
+    "  • Net 15 → 16 days after shipping",
+    "  • Net 30 → 31 days after shipping",
+    "  • Net 45 → 46 days after shipping",
+    "The hold clock starts when the order is marked Shipped (admin or ShipStation marks it). Until then, commission shows 'Awaiting shipment'.",
+    "If an order is Cancelled, Refunded, or Returned during the hold window, commission is forfeited.",
+    "After the hold period passes, the commission moves to 'Ready to Collect'. Admin then clicks 'Release All' in the Commissions panel to trigger Stripe Connect transfers to all eligible reps. Funds typically land 2–5 business days later."
+  ]},
+  {id:"payouts", title:"Stripe Connect Payouts", body:[
+    "To receive money, you need a Stripe Connect account. One-time setup:",
+    "1. Profile → Billing → 'Connect Stripe' button.",
+    "2. Stripe's onboarding flow opens — fill in your legal name, address, date of birth, SSN (last 4 for individuals), bank account info.",
+    "3. Return to PreVasive when done. Your account is now connected.",
+    "From then on, when admin releases your commissions, money transfers automatically to your bank within 2–5 business days.",
+    "To update your bank account or business info, go to Profile → Billing → 'Manage Stripe Connect' — Stripe's portal opens directly.",
+    "Tax form 1099: PreVasive issues 1099-NEC at year-end if your annual commission earnings meet the IRS threshold. Make sure your W-9 is current on file."
+  ]},
+  {id:"refunds", title:"Refunds & Returns", body:[
+    "Customers can return products within their hold window (same 15–46 day window based on terms type). To process: open the order → Actions → 'Process Return'.",
+    "Choose return type (Full or Partial), enter reason, refund amount. Stripe processes the refund and the commission is automatically reversed for the affected portion.",
+    "Returns/refunds AFTER the commission has been released require manual reconciliation. Admin will deduct from your next payout batch.",
+    "Customers can also request returns themselves via their order link. Admin reviews and approves before processing."
+  ]},
+  {id:"trial", title:"Free Trial & Subscriptions", body:[
+    "Every new rep gets a 15-day free trial with full platform access. After day 15, you must select a subscription plan to continue earning commissions and placing new orders.",
+    "Plans:",
+    "  • Starter — $100/month, up to $1,000 in monthly commission earnings",
+    "  • Pro — $200/month, up to $10,000 in monthly commission earnings",
+    "If you exceed your plan's monthly commission ceiling, additional commission is deferred until the next billing cycle resets (or you upgrade).",
+    "Subscriptions are billed via Stripe. To upgrade, downgrade, or cancel, go to Profile → Billing → 'Manage Subscription'."
+  ]},
+  {id:"security", title:"Account Security & 2FA", body:[
+    "Use a strong, unique password. Don't share your credentials.",
+    "If your admin has enabled two-factor authentication org-wide, you'll receive a 6-digit code by email on every sign-in. Enter it on the verification screen — codes expire after 10 minutes.",
+    "Forgot password? Use 'Forgot Password' on the sign-in screen — you'll get a reset link by email.",
+    "If you suspect unauthorized access to your account, change your password immediately and notify your admin."
+  ]},
+  {id:"mobile", title:"Mobile App", body:[
+    "When you visit PreVasive on a phone, you'll see a streamlined mobile interface with five tabs at the bottom: Home, New Order, Orders, Customers, Profile.",
+    "The mobile version is optimized for placing orders on the go — Google Address autocomplete, live shipping rates, inline Stripe card entry, all work natively.",
+    "If you need a feature that's not in mobile (advanced reports, complex admin tasks), tap 'Use full desktop version' on the Profile screen to switch to the full UI for that session.",
+    "Admins always see the desktop UI, even on mobile, because admin tasks require larger screens."
+  ]},
+];
+
+var FAQ_ITEMS = [
+  {q:"When do I earn my commission?", a:"You earn commission the moment you place an order. It's held in escrow from the order's shipping date until the per-order hold period elapses, then transferred to your Stripe Connect account."},
+  {q:"Why does my Net 30 order's commission release later than card orders?", a:"The hold period depends on the customer's payment method. Card / Invoice Link / Due-on-Receipt: 15 days from shipping. Net 15: 16 days. Net 30: 31 days. Net 45: 46 days. The +1 day on terms orders gives your customer their full grace period before commission auto-releases."},
+  {q:"What if my customer doesn't pay their Net 30 invoice on time?", a:"The commission still releases on day 31 after shipping, regardless of whether the customer has paid. However, if the order is marked Refunded or Cancelled before then, commission is forfeited. For chronic non-payment, admin may flag accounts and place future orders on hold."},
+  {q:"What happens if a customer refunds AFTER I've been paid out?", a:"Refunds inside the hold window auto-reverse the commission before any payout. Refunds after release require manual reconciliation — admin will deduct from your next payout batch."},
+  {q:"How do I get paid the released commission?", a:"You need a Stripe Connect account (one-time setup in Profile → Billing). Once connected, released commissions transfer automatically when admin clicks 'Release All'. Funds land in your bank in 2–5 business days."},
+  {q:"Why does my commission show 'Awaiting shipment'?", a:"The hold clock only starts once the order ships. Until your warehouse marks the order Shipped (or ShipStation auto-marks it), commission shows 'Awaiting shipment' with no countdown."},
+  {q:"How do I add a Net 30 customer?", a:"In the New Customer form, set Payment Terms to Net 30. Then on the customer's profile, click 'Send Credit Agreement' — they'll receive an email with a digital sign link. Once signed, their terms unlock for use on orders."},
+  {q:"What's the difference between 'Due on Receipt' and 'Net 15'?", a:"Due on Receipt means the customer should pay immediately upon receiving the invoice. Net 15 gives them a formal 15-day grace period. From a commission standpoint, Due on Receipt has a 15-day commission hold (same as card), while Net 15 has a 16-day hold."},
+  {q:"Can I edit an order after placing it?", a:"Within 24 hours and before the order ships: yes — open the order → Edit. After shipping, you can only add notes or process returns; for other changes, contact admin."},
+  {q:"How do I update my bank account info for payouts?", a:"Profile → Billing → 'Manage Stripe Connect'. You'll be sent to Stripe's portal where you can update bank, business info, or tax details. Changes apply to your next payout."},
+  {q:"What if I forgot my password?", a:"On the sign-in screen, click 'Forgot Password'. You'll get a reset email within a minute or two. Check spam if you don't see it."},
+  {q:"Is 2FA available?", a:"Yes — admin enables 2FA organization-wide. Once on, every sign-in requires a 6-digit code emailed to you. Codes expire in 10 minutes."},
+  {q:"My live shipping rates aren't loading. What do I do?", a:"Make sure the customer has a valid ZIP code. Verify the order has at least one product. If rates still don't load, admin should check Settings → ShipStation to confirm credentials and warehouse address are set."},
+  {q:"A card was declined. What now?", a:"Common reasons: insufficient funds, card declined by issuer, wrong CVC, expired card, fraud-prevention block. Ask the customer to use a different card, or send them an Invoice Link instead so they can complete payment from their bank's mobile app."},
+  {q:"Can I track my commission ceiling progress?", a:"Yes — Profile → Commissions shows your YTD/MTD earnings vs your plan's ceiling. When you're approaching your limit, you'll see a warning. Upgrade your plan from Profile → Billing if you need a higher ceiling."},
+  {q:"What products are available to sell?", a:"All current PreVasive products are listed under the Products tab. The catalog and pricing are managed by admin. If a product is missing, ask admin to add it."},
+  {q:"Can I sell to customers outside the US?", a:"Currently the platform is configured for US-only sales (shipping rates, tax, currency in USD). International orders require admin intervention. Contact admin for inquiries."},
+  {q:"How do I report a problem or request a feature?", a:"Email your admin directly. They can escalate to the development team. Include screenshots, the URL you were on, and what you expected to happen."},
+];
+
+var TERMS_SECTIONS = [
+  {title:"1. Definitions", body:[
+    '"Platform" means the PreVasive Rep Sales web application and any associated mobile or hosted interfaces.',
+    '"Company" or "PreVasive" means PreVasive USA, the operator of the Platform.',
+    '"Rep" or "Sales Representative" means an authorized independent contractor using the Platform to sell PreVasive products.',
+    '"Customer" means any end-buyer placing orders through a Rep.',
+    '"Commission" means the markup amount a Rep earns on each order, payable per Section 6.',
+  ]},
+  {title:"2. Eligibility & Account Access", body:[
+    "The Platform is open only to: (a) authorized PreVasive sales representatives, (b) their designated admin staff, and (c) PreVasive end customers transacting through Rep-generated invoice or sign links.",
+    "Account credentials are personal and non-transferable. You are responsible for all activity under your account. Multiple users sharing one account is prohibited.",
+    "Two-factor authentication may be required by admin policy. When enabled, you must complete email-code verification on every sign-in.",
+  ]},
+  {title:"3. Acceptable Use", body:[
+    "You agree to use the Platform only for legitimate sales activities on behalf of PreVasive USA. Prohibited uses include: falsifying orders or customer data, attempting to bypass platform security or rate limits, scraping or automating access without written permission, reverse-engineering the platform's APIs or front-end code, and any use that violates U.S. or state law (including HIPAA, FDA regulations, anti-kickback statutes, and tax laws applicable to medical-product sales).",
+    "Violations may result in immediate account termination, forfeit of unreleased commissions, and where applicable, civil or criminal referral.",
+  ]},
+  {title:"4. Subscription Plans & Trial", body:[
+    "New Reps receive a 15-day free trial with full Platform access. After trial expiration, Reps must select an active subscription plan to continue placing orders and earning commissions.",
+    "Plans:",
+    "  • Starter — $100/month, up to $1,000 in monthly commission earnings.",
+    "  • Pro — $200/month, up to $10,000 in monthly commission earnings.",
+    "Subscriptions are billed via Stripe on a recurring monthly basis. Plan changes (upgrade/downgrade/cancel) can be made through Profile → Billing → Manage Subscription. Cancellations take effect at the end of the current billing period.",
+    "Commission earned beyond the monthly ceiling is deferred to the following calendar month, at which point it counts toward that month's ceiling. PreVasive may modify plan pricing or ceilings with 30 days written notice.",
+  ]},
+  {title:"5. Order Processing & Payment", body:[
+    "Reps may place orders on behalf of Customers using card payment (charged immediately via Stripe Account 1), invoice link (Stripe-hosted checkout emailed to Customer), or, for Customers with an active signed credit agreement, on credit terms (Net 15, Net 30, Net 45, or Due on Receipt).",
+    "All card payments are processed by Stripe and are subject to Stripe's terms. PreVasive does not store full card numbers or CVCs on its servers.",
+    "Sales tax is calculated automatically by destination and added to the Customer's invoice where applicable. Reps are not responsible for collecting or remitting sales tax — PreVasive handles tax reporting and remittance.",
+    "Shipping rates are calculated live from ShipStation based on warehouse origin, destination ZIP, and the cart's weight and dimensions.",
+  ]},
+  {title:"6. Commission Structure & Release", body:[
+    "Commission is the markup percentage a Rep adds to PreVasive's base product prices on each order. Commission accrues at order placement.",
+    "Commission is held in escrow from the order's shipping date until the order's release period elapses, based on the Customer's payment method:",
+    "  • Card payment, Invoice Link, or Due-on-Receipt → 15 days after shipping",
+    "  • Net 15 → 16 days after shipping",
+    "  • Net 30 → 31 days after shipping",
+    "  • Net 45 → 46 days after shipping",
+    "Orders Cancelled, Refunded, or Returned at any time during the hold period forfeit commission for that order in full.",
+    "Released commissions are transferred via Stripe Connect to the Rep's connected payout account. Reps without a connected Stripe Connect account accrue commission in the Platform's ledger but receive no funds until connection is completed.",
+    "PreVasive reserves the right to adjust commission rates, hold periods, and release schedules with 30 days written notice. Existing accrued commissions are honored under the prior schedule.",
+  ]},
+  {title:"7. Returns, Refunds & Disputes", body:[
+    "Customers may return products within the hold window applicable to their order. Returns are initiated through the Customer's order link or by the Rep on the Customer's behalf.",
+    "Approved returns: PreVasive refunds the Customer via Stripe, reverses related commission accruals, and adjusts the Rep's commission ledger.",
+    "Refunds occurring after commission release require manual reconciliation. Admin may deduct reversed amounts from the Rep's next payout batch.",
+    "Disputes regarding chargebacks, fraud, or non-payment are handled in coordination with Stripe's dispute resolution process. Reps are responsible for assisting with documentation when their orders are disputed.",
+  ]},
+  {title:"8. Data Privacy & Confidentiality", body:[
+    "All Customer data, order records, pricing, commission information, and other Platform data are the property of PreVasive USA.",
+    "PreVasive uses Supabase (PostgreSQL hosted on AWS) for primary data storage with TLS in transit and AES-256 encryption at rest. Authentication credentials are hashed and never stored in plaintext.",
+    "Reps and admins must keep all Platform data confidential and must not share it with parties outside their authorized scope. Customer contact information may not be used for any purpose outside PreVasive sales activities.",
+    "PreVasive complies with applicable U.S. data-protection laws. Customers may request a copy of their personal data or its deletion by contacting PreVasive directly.",
+    "Stripe processes all payment transactions and handles cardholder data in compliance with PCI-DSS. PreVasive never stores full card numbers, CVCs, or banking credentials.",
+  ]},
+  {title:"9. Confidentiality, Non-Solicitation & IP", body:[
+    "Reps acknowledge that all Customer relationships, pricing structures, business processes, and proprietary materials are PreVasive trade secrets.",
+    "During the term of engagement and for 12 months following termination, Reps may not solicit PreVasive Customers on behalf of competing products or businesses.",
+    "All Platform code, UI designs, documentation, and brand assets are the intellectual property of PreVasive USA and may not be reproduced, distributed, or used outside the scope of authorized Platform use.",
+  ]},
+  {title:"10. Termination", body:[
+    "Either party may terminate the engagement with 30 days written notice. Notice should be sent to the email address on file for the other party.",
+    "Upon termination: (a) Platform access is suspended, (b) earned commissions for completed orders continue to release per the standard hold schedule, (c) the Rep's subscription is cancelled effective end-of-billing-period, (d) the Rep's confidentiality and non-solicitation obligations remain in effect for the periods specified above.",
+    "PreVasive may terminate immediately for cause, including breach of confidentiality, fraud, regulatory violations, or material misrepresentation. In such cases, unreleased commissions may be forfeited at PreVasive's discretion.",
+  ]},
+  {title:"11. Limitation of Liability", body:[
+    "The Platform is provided \"as-is\" without warranty of any kind. PreVasive does not warrant uninterrupted availability or freedom from defects.",
+    "PreVasive's total liability for any claim arising from Platform use is limited to the amount of commissions released to the affected Rep in the 12 months preceding the claim.",
+    "PreVasive is not liable for indirect, consequential, incidental, or punitive damages, including lost profits or loss of business opportunities.",
+    "Reps are not employees and are not entitled to employee benefits, workers' compensation, unemployment insurance, or other employment-related protections.",
+  ]},
+  {title:"12. Modifications & Governing Law", body:[
+    "PreVasive may modify these terms with 30 days written notice. Continued use of the Platform after the notice period constitutes acceptance.",
+    "These terms are governed by the laws of the State of Georgia, USA, without regard to conflict-of-law principles.",
+    "Any disputes arising from these terms or Platform use will be resolved through binding arbitration administered by the American Arbitration Association in Atlanta, Georgia. The arbitrator's decision is final.",
+    "Should any provision be found unenforceable, the remaining provisions remain in full effect.",
+  ]},
+];
+
+function HelpModal({isAdmin,onClose}){
+  const [tab, setTab] = useState("help");
+  const [openHelp, setOpenHelp] = useState({});
+  const [openFaq, setOpenFaq] = useState({});
+
+  function toggle(map,setMap,key){ var n=Object.assign({},map); n[key]=!n[key]; setMap(n); }
+
+  var tabs = [
+    {id:"help",  label:"📘 Help"},
+    {id:"faq",   label:"❓ FAQ"},
+    {id:"terms", label:"📄 Terms"},
+  ];
+
+  return (
+    <div style={{position:"fixed",inset:0,background:C.bg+"f0",backdropFilter:"blur(8px)",zIndex:5500,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,maxWidth:760,width:"100%",maxHeight:"92vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,.35)"}}>
+        {/* Header */}
+        <div style={{padding:"18px 22px 0",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+            <div style={{fontWeight:800,fontSize:19,color:C.text,letterSpacing:"-.02em"}}>Help & Documentation</div>
+            <button onClick={onClose}
+              style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontSize:22,fontFamily:"inherit",padding:"4px 8px",lineHeight:1}}>×</button>
+          </div>
+          <div style={{display:"flex",gap:4,marginBottom:-1}}>
+            {tabs.map(function(t){
+              var on = tab===t.id;
+              return (
+                <button key={t.id} onClick={function(){setTab(t.id);}}
+                  style={{padding:"10px 16px",border:"none",borderBottom:"2px solid "+(on?C.accent:"transparent"),
+                          background:"transparent",color:on?C.accent:C.muted,cursor:"pointer",fontFamily:"inherit",
+                          fontWeight:on?700:500,fontSize:13}}>{t.label}</button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{flex:1,overflowY:"auto",padding:"20px 22px"}}>
+          {tab==="help" && (
+            <div>
+              <div style={{fontSize:12,color:C.muted,marginBottom:16,lineHeight:1.6}}>
+                Tap a section to expand. If you can't find what you're looking for, check the FAQ tab or contact your admin.
+              </div>
+              {HELP_SECTIONS.map(function(s){
+                var open = !!openHelp[s.id];
+                return (
+                  <div key={s.id} style={{marginBottom:8,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
+                    <button onClick={function(){toggle(openHelp,setOpenHelp,s.id);}}
+                      style={{width:"100%",padding:"13px 16px",background:open?C.surface2:"transparent",border:"none",
+                              cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",
+                              fontFamily:"inherit",color:C.text,fontWeight:700,fontSize:13,textAlign:"left"}}>
+                      <span>{s.title}</span>
+                      <span style={{color:C.muted,fontSize:12,transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}>▾</span>
+                    </button>
+                    {open && (
+                      <div style={{padding:"4px 18px 16px",fontSize:13,color:C.muted,lineHeight:1.7}}>
+                        {s.body.map(function(p,i){return <p key={i} style={{marginBottom:10,whiteSpace:"pre-wrap"}}>{p}</p>;})}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {tab==="faq" && (
+            <div>
+              <div style={{fontSize:12,color:C.muted,marginBottom:16,lineHeight:1.6}}>
+                Common questions and answers. Tap to expand.
+              </div>
+              {FAQ_ITEMS.map(function(item,i){
+                var open = !!openFaq[i];
+                return (
+                  <div key={i} style={{marginBottom:8,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
+                    <button onClick={function(){toggle(openFaq,setOpenFaq,i);}}
+                      style={{width:"100%",padding:"12px 16px",background:open?C.surface2:"transparent",border:"none",
+                              cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,
+                              fontFamily:"inherit",color:C.text,fontWeight:600,fontSize:13,textAlign:"left",lineHeight:1.5}}>
+                      <span>{item.q}</span>
+                      <span style={{color:C.muted,fontSize:12,flexShrink:0,marginTop:3,transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}>▾</span>
+                    </button>
+                    {open && (
+                      <div style={{padding:"4px 18px 14px",fontSize:13,color:C.muted,lineHeight:1.7,whiteSpace:"pre-wrap"}}>
+                        {item.a}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {tab==="terms" && (
+            <div style={{fontSize:12.5,color:C.muted,lineHeight:1.8}}>
+              <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:18,fontSize:11,color:C.accent}}>
+                <strong>Terms & Conditions</strong> · Last updated May 30, 2026 · Version 2.0
+              </div>
+              <p style={{marginBottom:18,fontSize:12,color:C.text,lineHeight:1.7}}>
+                These Terms govern your access to and use of the PreVasive Rep Sales platform ("Platform"). By signing in, you agree to be bound by these Terms. If you disagree with any provision, do not use the Platform.
+              </p>
+              {TERMS_SECTIONS.map(function(s,i){
+                return (
+                  <div key={i} style={{marginBottom:20}}>
+                    <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:8}}>{s.title}</div>
+                    {s.body.map(function(p,j){return <p key={j} style={{marginBottom:8,whiteSpace:"pre-wrap"}}>{p}</p>;})}
+                  </div>
+                );
+              })}
+              <div style={{marginTop:24,paddingTop:16,borderTop:"1px solid "+C.border,fontSize:11,color:C.dim,textAlign:"center"}}>
+                © 2026 PreVasive USA · All rights reserved · Contact: sales@prevasive.com
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TwoFAGate({email, onVerified, onLogout}){
   const [status, setStatus] = useState("sending");
   const [code, setCode]     = useState("");
@@ -11369,7 +11612,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v8-2fa-cross</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v11-help-docs</div>
       </div>
     </div>
   );
@@ -11378,7 +11621,7 @@ function MobileLanding({onLogin}){
 function MobileShell(props){
   const {currentUser, repData, customers, setCustomers, orders, setOrders,
          products, reps, commissions, addToast, preferDesktop, setPreferDesktop,
-         onLogout, shippingRules, taxCfg, invoiceCfg, stripeLinks} = props;
+         onLogout, shippingRules, taxCfg, invoiceCfg, stripeLinks, onHelp} = props;
 
   const [tab, setTab] = useState("home");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
@@ -11407,7 +11650,7 @@ function MobileShell(props){
   if(tab==="new")       screen = <MobileNewOrder key={"no-"+preselectCustId} initialCustId={preselectCustId} repData={repData} customers={myCustomers} setCustomers={setCustomers} setOrders={setOrders} products={products} taxCfg={taxCfg} shippingRules={shippingRules} addToast={addToast} onPlaced={function(){setPreselectCustId(""); go("orders");}}/>;
   if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} addToast={addToast}/>;
   if(tab==="customers") screen = <MobileCustomers myCustomers={myCustomers} setCustomers={setCustomers} repData={repData} myOrders={myOrders} selectedCustomerId={selectedCustomerId} setSelectedCustomerId={setSelectedCustomerId} onStartOrderFor={startNewOrderFor} addToast={addToast}/>;
-  if(tab==="profile")   screen = <MobileProfile currentUser={currentUser} repData={repData} commissions={commissions} preferDesktop={preferDesktop} setPreferDesktop={setPreferDesktop} onLogout={onLogout} addToast={addToast} stripeLinks={stripeLinks}/>;
+  if(tab==="profile")   screen = <MobileProfile currentUser={currentUser} repData={repData} commissions={commissions} preferDesktop={preferDesktop} setPreferDesktop={setPreferDesktop} onLogout={onLogout} addToast={addToast} stripeLinks={stripeLinks} onHelp={onHelp}/>;
 
   return (
     <div style={{minHeight:"100vh",background:C.bg,color:C.text,paddingBottom:72,fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif"}}>
@@ -12287,7 +12530,7 @@ function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selected
   );
 }
 
-function MobileProfile({currentUser, repData, commissions, preferDesktop, setPreferDesktop, onLogout, addToast, stripeLinks}){
+function MobileProfile({currentUser, repData, commissions, preferDesktop, setPreferDesktop, onLogout, addToast, stripeLinks, onHelp}){
   var myRepId = repData ? repData.id : (currentUser && currentUser.rep_id);
   var myComms = (commissions||[]).filter(function(cp){return cp.repId===myRepId;});
   var nowY = new Date().getFullYear();
@@ -12333,13 +12576,18 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
         🖥️&nbsp;&nbsp;Use full desktop version
       </button>
 
+      <button onClick={function(){if(typeof onHelp==="function") onHelp();}}
+        style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:C.surface,color:C.text,border:"1px solid "+C.border,cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13,marginBottom:8,textAlign:"left"}}>
+        📘&nbsp;&nbsp;Help, FAQ & Terms
+      </button>
+
       <button onClick={onLogout}
         style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:"transparent",color:C.danger,border:"1px solid "+C.danger+"40",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14,marginTop:10}}>
         Sign out
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-mobile-v8-2fa-cross
+        BUILD: 2026-05-30-v11-help-docs
       </div>
     </div>
   );
@@ -13006,6 +13254,7 @@ function App() {
       taxCfg: taxCfg,
       invoiceCfg: invoiceCfg,
       stripeLinks: stripeLinks,
+      onHelp: function(){setShowHelp(true);},
     });
   }
 
