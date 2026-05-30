@@ -11249,6 +11249,7 @@ function MobileShell(props){
   const [tab, setTab] = useState("home");
   const [selectedOrderId, setSelectedOrderId] = useState(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [preselectCustId, setPreselectCustId] = useState("");
 
   var myRepId = repData ? repData.id : (currentUser && currentUser.rep_id);
   var myOrders = (orders||[]).filter(function(o){return o.repId===myRepId;});
@@ -11258,14 +11259,20 @@ function MobileShell(props){
     setTab(t);
     if(t!=="orders") setSelectedOrderId(null);
     if(t!=="customers") setSelectedCustomerId(null);
+    if(t!=="new") setPreselectCustId("");
+  }
+  function startNewOrderFor(cid){
+    setPreselectCustId(cid||"");
+    setSelectedCustomerId(null);
+    setTab("new");
   }
 
   var screenTitle = {home:"Home", new:"New Order", orders:"Orders", customers:"Customers", profile:"My Profile"}[tab];
   var screen = null;
   if(tab==="home")      screen = <MobileHome currentUser={currentUser} repData={repData} myOrders={myOrders} myCustomers={myCustomers} customers={customers} setTab={go} setSelectedOrderId={setSelectedOrderId}/>;
-  if(tab==="new")       screen = <MobileNewOrder repData={repData} customers={myCustomers} setCustomers={setCustomers} setOrders={setOrders} products={products} taxCfg={taxCfg} shippingRules={shippingRules} addToast={addToast} onPlaced={function(){go("orders");}}/>;
+  if(tab==="new")       screen = <MobileNewOrder key={"no-"+preselectCustId} initialCustId={preselectCustId} repData={repData} customers={myCustomers} setCustomers={setCustomers} setOrders={setOrders} products={products} taxCfg={taxCfg} shippingRules={shippingRules} addToast={addToast} onPlaced={function(){setPreselectCustId(""); go("orders");}}/>;
   if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} addToast={addToast}/>;
-  if(tab==="customers") screen = <MobileCustomers myCustomers={myCustomers} setCustomers={setCustomers} repData={repData} myOrders={myOrders} selectedCustomerId={selectedCustomerId} setSelectedCustomerId={setSelectedCustomerId} setTab={go} addToast={addToast}/>;
+  if(tab==="customers") screen = <MobileCustomers myCustomers={myCustomers} setCustomers={setCustomers} repData={repData} myOrders={myOrders} selectedCustomerId={selectedCustomerId} setSelectedCustomerId={setSelectedCustomerId} onStartOrderFor={startNewOrderFor} addToast={addToast}/>;
   if(tab==="profile")   screen = <MobileProfile currentUser={currentUser} repData={repData} commissions={commissions} preferDesktop={preferDesktop} setPreferDesktop={setPreferDesktop} onLogout={onLogout} addToast={addToast} stripeLinks={stripeLinks}/>;
 
   return (
@@ -11364,8 +11371,8 @@ function MobileHome({currentUser, repData, myOrders, myCustomers, customers, set
   );
 }
 
-function MobileNewOrder({repData, customers, setCustomers, setOrders, products, taxCfg, shippingRules, addToast, onPlaced}){
-  const [custId, setCustId] = useState("");
+function MobileNewOrder({repData, customers, setCustomers, setOrders, products, taxCfg, shippingRules, addToast, onPlaced, initialCustId}){
+  const [custId, setCustId] = useState(initialCustId||"");
   const [shipAddrId, setShipAddrId] = useState("");
   const [showNewCust, setShowNewCust] = useState(false);
   const [newCust, setNewCust] = useState({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
@@ -11507,8 +11514,6 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var hasShipAddr = !!(shipAddr && shipAddr.address && shipAddr.zip);
   var hasLines = lines.length>0;
   var cardOk = payMethod!=="card" || (cardComplete && !cardError);
-  var rateOk = !hasLines || !hasShipAddr || !!selectedRate || shipping===0; // require a rate pick once both exist; only "free" rate is auto
-  // Allow place without rate if subtotal is 0 weight (digital/services) — skip for now, require rate.
   var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && !!selectedRate;
 
   function place(){
@@ -11753,6 +11758,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
           <div style={{padding:12,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
             <ShippingRatePicker
+              key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
               toZip={shipAddr.zip} toState={shipAddr.state}
               totalWeight={totalWeight}
               pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
@@ -11998,7 +12004,7 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
   );
 }
 
-function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selectedCustomerId, setSelectedCustomerId, setTab, addToast}){
+function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selectedCustomerId, setSelectedCustomerId, onStartOrderFor, addToast}){
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [newCust, setNewCust] = useState({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
@@ -12019,7 +12025,7 @@ function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selected
           {(selectedCustomer.address||selectedCustomer.city) && <div style={{fontSize:13,color:C.muted,marginBottom:4}}>📍 {[selectedCustomer.address,selectedCustomer.city,selectedCustomer.state,selectedCustomer.zip].filter(function(x){return x;}).join(", ")}</div>}
         </div>
 
-        <button onClick={function(){setSelectedCustomerId(null); setTab("new");}}
+        <button onClick={function(){onStartOrderFor(selectedCustomer.id);}}
           style={{display:"block",width:"100%",padding:"14px",borderRadius:12,background:C.accent,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14,marginBottom:14}}>
           ➕ New Order for {selectedCustomer.name||"this customer"}
         </button>
@@ -12169,7 +12175,7 @@ function App() {
   const [theme,       setTheme]       = useLS("theme","dark");
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
   const isMobileUA = useState(function(){return isMobileDevice();})[0];
-  const [preferDesktopOnMobile, setPreferDesktopOnMobile] = useLS("preferDesktopOnMobile", false);
+  const [preferDesktopOnMobile, setPreferDesktopOnMobile] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [loading,     setLoading]     = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
@@ -13018,6 +13024,16 @@ function App() {
       </div>
       {React.createElement(ToastStack,{toasts:toasts,setToasts:setToasts})}
       {resultModal&&React.createElement(ResultModal,{data:resultModal,onClose:function(){setResultModal(null);}})}
+      {isMobileUA && preferDesktopOnMobile && !isAdmin && (
+        <button onClick={function(){setPreferDesktopOnMobile(false);}}
+          style={{position:"fixed",bottom:16,right:16,zIndex:1000,
+                  padding:"10px 16px",borderRadius:24,border:"none",
+                  background:C.accent,color:"#fff",cursor:"pointer",fontFamily:"inherit",
+                  fontWeight:700,fontSize:12,letterSpacing:".02em",
+                  boxShadow:"0 4px 14px rgba(0,0,0,.25)"}}>
+          📱 Switch to mobile view
+        </button>
+      )}
     </div>
   );
 }
