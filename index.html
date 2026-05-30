@@ -11236,7 +11236,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v2</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v3</div>
       </div>
     </div>
   );
@@ -11517,6 +11517,14 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var cardOk = payMethod!=="card" || (cardComplete && !cardError);
   var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && !!selectedRate;
 
+  // Dynamic step numbering — only count steps that are actually visible
+  var step = 0;
+  var stepCustomer   = ++step;
+  var stepProducts   = ++step;
+  var stepShipping   = (hasLines && hasShipAddr) ? ++step : null;
+  var stepCommission = hasLines ? ++step : null;
+  var stepPayment    = ++step;
+
   function place(){
     if(!canPlace || placing) return;
     setPlacing(true); setChargeErr("");
@@ -11629,7 +11637,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     <div>
       {/* Customer */}
       <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>1 · Customer</div>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepCustomer} · Customer</div>
         {!showNewCust&&(
           <select value={custId} onChange={function(e){setCustId(e.target.value);}} style={inputStyle}>
             <option value="">— Select a customer —</option>
@@ -11711,7 +11719,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
 
       {/* Products */}
       <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>2 · Products</div>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepProducts} · Products</div>
         <select value={productId} onChange={function(e){setProductId(e.target.value); setVariantId("");}} style={inputStyle}>
           <option value="">— Pick a product —</option>
           {(products||[]).map(function(p){
@@ -11756,7 +11764,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
       {/* Live Shipping rates (when we have lines + ship address) */}
       {hasLines && hasShipAddr && (
         <div style={{marginBottom:20}}>
-          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
+          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepShipping} · Shipping</div>
           <div style={{padding:12,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
             <ShippingRatePicker
               key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
@@ -11772,7 +11780,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
       {/* Commission — rep's markup on the base price */}
       {lines.length>0 && (
         <div style={{marginBottom:20}}>
-          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>4 · Commission</div>
+          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepCommission} · Commission</div>
           <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
               <div style={{fontSize:13,color:C.text,fontWeight:700}}>{commRate}% markup</div>
@@ -11818,7 +11826,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
 
       {/* Payment */}
       <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>5 · Payment</div>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>{stepPayment} · Payment</div>
         {(function(){
           var hasTerms = !!(selCust && selCust.termsStatus==="active");
           var termsType = (selCust && selCust.termsType) || "due_receipt";
@@ -12170,7 +12178,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-mobile-v2
+        BUILD: 2026-05-30-mobile-v3
       </div>
     </div>
   );
