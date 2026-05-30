@@ -11243,7 +11243,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v5</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v6</div>
       </div>
     </div>
   );
@@ -11917,7 +11917,13 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                 border:"none",cursor:canPlace?"pointer":"not-allowed",
                 fontSize:16,fontWeight:800,fontFamily:"inherit",
                 boxShadow:canPlace?"0 4px 14px rgba(99,91,255,.35)":"none"}}>
-        {placing?(payMethod==="card"?"Charging…":"Placing…"):(payMethod==="card"?"Charge & Place Order":"Place Order")+(total>0?" · "+fmtMoney(total):"")}
+        {(function(){
+          if(placing) return payMethod==="card"?"Charging…":(payMethod==="invoice"?"Sending…":"Placing…");
+          var label = payMethod==="card" ? "Charge & Place Order"
+                    : payMethod==="invoice" ? "Send Invoice Link"
+                    : "Place Order";
+          return label + (total>0?" · "+fmtMoney(total):"");
+        })()}
       </button>
     </div>
   );
@@ -12207,7 +12213,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-mobile-v5
+        BUILD: 2026-05-30-mobile-v6
       </div>
     </div>
   );
