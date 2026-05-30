@@ -11369,6 +11369,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [shipAddrId, setShipAddrId] = useState("");
   const [showNewCust, setShowNewCust] = useState(false);
   const [newCust, setNewCust] = useState({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
+  const [billSameAsShip, setBillSameAsShip] = useState(true);
+  const [newCustBill, setNewCustBill] = useState({address:"",city:"",state:"",zip:""});
   const [lines, setLines] = useState([]);
   const [productId, setProductId] = useState("");
   const [variantId, setVariantId] = useState("");
@@ -11398,6 +11400,10 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     } else { setShipAddrId(""); }
     // Reset shipping rate since destination may change
     setSelectedRate(null);
+    // Sync payment method to terms: if customer has active terms and current payMethod is "due", keep it;
+    // if customer doesn't have active terms but "due" is selected, fall back to card.
+    var hasTerms = c.termsStatus==="active";
+    if(!hasTerms && payMethod==="due") setPayMethod("card");
   },[custId, customers, repData]);
 
   // Mount Stripe card when payMethod==="card"
@@ -11517,6 +11523,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
       cRecord = Object.assign({}, newCust, {
         id:newId, repId:repData.id, createdAt:new Date().toISOString(),
         addresses: newCust.address ? [{id:genId("adr"),label:"Primary",address:newCust.address,city:newCust.city,state:newCust.state,zip:newCust.zip,isPrimary:true}] : [],
+        billSameAsShip: billSameAsShip,
+        billingAddress: billSameAsShip ? null : {address:newCustBill.address, city:newCustBill.city, state:newCustBill.state, zip:newCustBill.zip},
       });
       setCustomers(function(prev){return prev.concat([cRecord]);});
       dbSave("crm_customers", newId, cRecord);
@@ -11540,7 +11548,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         subtotal:subtotal, tax:tax, shipping:shipping, total:total,
         shippingRate: selectedRate ? {amount:selectedRate.amount, label:selectedRate.label||selectedRate.serviceName||"Shipping", id:selectedRate.id||""} : null,
         commissionRate: commRate, commissionAmount: commission,
-        paymentMethod: payMethod==="card" ? "card" : (payMethod==="invoice" ? "invoice_link" : "due_on_receipt"),
+        paymentMethod: payMethod==="card" ? "card" : (payMethod==="invoice" ? "invoice_link" : ((selCust&&selCust.termsType)||"due_receipt")),
+        terms: payMethod==="due" && selCust && selCust.termsStatus==="active",
         createdAt: new Date().toISOString(),
       }, extra||{});
     }
@@ -11634,6 +11643,28 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
               <input placeholder="ST" value={newCust.state} onChange={function(e){setNewCust(Object.assign({},newCust,{state:e.target.value})); setSelectedRate(null);}} style={smallInputStyle}/>
               <input placeholder="ZIP" inputMode="numeric" value={newCust.zip} onChange={function(e){setNewCust(Object.assign({},newCust,{zip:e.target.value})); setSelectedRate(null);}} style={smallInputStyle}/>
             </div>
+
+            {/* Billing address */}
+            <label style={{display:"flex",alignItems:"center",gap:8,marginTop:14,cursor:"pointer",fontSize:13,color:C.text,fontFamily:"inherit"}}>
+              <input type="checkbox" checked={billSameAsShip} onChange={function(e){setBillSameAsShip(e.target.checked);}}
+                style={{width:18,height:18,accentColor:C.accent,cursor:"pointer"}}/>
+              Billing address same as shipping
+            </label>
+            {!billSameAsShip && (
+              <div style={{marginTop:10,padding:12,background:C.bg,border:"1px dashed "+C.border,borderRadius:8}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Billing address</div>
+                <PlacesAutocomplete
+                  value={newCustBill.address}
+                  onChange={function(v){setNewCustBill(Object.assign({},newCustBill,{address:v}));}}
+                  onSelect={function(p){setNewCustBill(Object.assign({},newCustBill,{address:p.street||newCustBill.address, city:p.city||"", state:p.state||"", zip:p.zip||""}));}}
+                  placeholder="Start typing billing address…"/>
+                <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:6,marginTop:4}}>
+                  <input placeholder="City" value={newCustBill.city} onChange={function(e){setNewCustBill(Object.assign({},newCustBill,{city:e.target.value}));}} style={smallInputStyle}/>
+                  <input placeholder="ST" value={newCustBill.state} onChange={function(e){setNewCustBill(Object.assign({},newCustBill,{state:e.target.value}));}} style={smallInputStyle}/>
+                  <input placeholder="ZIP" inputMode="numeric" value={newCustBill.zip} onChange={function(e){setNewCustBill(Object.assign({},newCustBill,{zip:e.target.value}));}} style={smallInputStyle}/>
+                </div>
+              </div>
+            )}
           </div>
         )}
         {/* Existing customer: multiple addresses → ship-to picker */}
@@ -11646,8 +11677,18 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           </div>
         )}
         {selCust && shipAddr && (
-          <div style={{marginTop:8,fontSize:11,color:C.muted,padding:"8px 10px",background:C.surface2,borderRadius:6}}>
-            📍 {shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}
+          <div style={{marginTop:8,fontSize:11,color:C.muted,padding:"8px 10px",background:C.surface2,borderRadius:6,lineHeight:1.5}}>
+            <div><strong style={{color:C.text}}>📍 Ship to:</strong> {shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}</div>
+            {selCust.billingAddress && (selCust.billingAddress.address||selCust.billingAddress.zip) ? (
+              <div style={{marginTop:4}}><strong style={{color:C.text}}>💳 Bill to:</strong> {selCust.billingAddress.address}, {selCust.billingAddress.city}, {selCust.billingAddress.state} {selCust.billingAddress.zip}</div>
+            ) : (
+              <div style={{marginTop:4,fontStyle:"italic"}}>💳 Billing same as shipping</div>
+            )}
+            {selCust.termsStatus==="active" && (
+              <div style={{marginTop:6,padding:"4px 8px",background:C.success+"18",color:C.success,borderRadius:4,display:"inline-block",fontWeight:700,fontSize:10}}>
+                ✓ {fmtTerms(selCust.termsType||"due_receipt")} APPROVED
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -11731,27 +11772,35 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
       {/* Payment */}
       <div style={{marginBottom:20}}>
         <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>4 · Payment</div>
-        {[
-          {id:"card",    icon:"💳", label:"Charge Card Now",   desc:"Customer's card is charged immediately."},
-          {id:"invoice", icon:"✉️", label:"Send Invoice Link", desc:"Generate a payment link to share."},
-          {id:"due",     icon:"📅", label:"Due on Receipt",    desc:"No payment now — collect later."},
-        ].map(function(opt){
-          var sel = payMethod===opt.id;
-          return (
-            <button key={opt.id} onClick={function(){setPayMethod(opt.id);}}
-              style={{display:"block",width:"100%",textAlign:"left",padding:"14px",borderRadius:12,marginBottom:8,
-                      border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent+"10":C.surface,
-                      cursor:"pointer",fontFamily:"inherit",color:C.text}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:22}}>{opt.icon}</span>
-                <div>
-                  <div style={{fontWeight:700,fontSize:14,color:sel?C.accent:C.text}}>{opt.label}</div>
-                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>{opt.desc}</div>
+        {(function(){
+          var hasTerms = !!(selCust && selCust.termsStatus==="active");
+          var termsType = (selCust && selCust.termsType) || "due_receipt";
+          var termsLabel = hasTerms ? fmtTerms(termsType) : "";
+          var opts = [
+            {id:"card",    icon:"💳", label:"Charge Card Now",   desc:"Customer's card is charged immediately."},
+            {id:"invoice", icon:"✉️", label:"Send Invoice Link", desc:"Generate a payment link to share."},
+          ];
+          if(hasTerms){
+            opts.push({id:"due", icon:"📅", label:termsLabel, desc:"Customer approved for "+termsLabel.toLowerCase()+" — billed under their terms."});
+          }
+          return opts.map(function(opt){
+            var sel = payMethod===opt.id;
+            return (
+              <button key={opt.id} onClick={function(){setPayMethod(opt.id);}}
+                style={{display:"block",width:"100%",textAlign:"left",padding:"14px",borderRadius:12,marginBottom:8,
+                        border:"2px solid "+(sel?C.accent:C.border),background:sel?C.accent+"10":C.surface,
+                        cursor:"pointer",fontFamily:"inherit",color:C.text}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:22}}>{opt.icon}</span>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14,color:sel?C.accent:C.text}}>{opt.label}</div>
+                    <div style={{fontSize:11,color:C.muted,marginTop:2}}>{opt.desc}</div>
+                  </div>
                 </div>
-              </div>
-            </button>
-          );
-        })}
+              </button>
+            );
+          });
+        })()}
 
         {/* Card mount */}
         {payMethod==="card" && (
