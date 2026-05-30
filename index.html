@@ -11366,6 +11366,7 @@ function MobileHome({currentUser, repData, myOrders, myCustomers, customers, set
 
 function MobileNewOrder({repData, customers, setCustomers, setOrders, products, taxCfg, shippingRules, addToast, onPlaced}){
   const [custId, setCustId] = useState("");
+  const [shipAddrId, setShipAddrId] = useState("");
   const [showNewCust, setShowNewCust] = useState(false);
   const [newCust, setNewCust] = useState({name:"",email:"",phone:"",address:"",city:"",state:"",zip:""});
   const [lines, setLines] = useState([]);
@@ -11373,8 +11374,13 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [variantId, setVariantId] = useState("");
   const [qty, setQty] = useState(1);
   const [commRate, setCommRate] = useState((repData&&repData.defaultCommissionRate)||10);
-  const [payMethod, setPayMethod] = useState("invoice");
+  const [payMethod, setPayMethod] = useState("card");
+  const [selectedRate, setSelectedRate] = useState(null);
   const [placing, setPlacing] = useState(false);
+  const [cardComplete, setCardComplete] = useState(false);
+  const [cardError, setCardError] = useState("");
+  const [chargeErr, setChargeErr] = useState("");
+  const stripeRef = useState({stripe:null, card:null, el:null})[0];
 
   useEffect(function(){
     if(!custId){
@@ -11382,9 +11388,54 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
       return;
     }
     var c = (customers||[]).find(function(x){return x.id===custId;});
-    if(c && c.commissionRate!=null) setCommRate(c.commissionRate);
+    if(!c) return;
+    if(c.commissionRate!=null) setCommRate(c.commissionRate);
     else if(repData && repData.defaultCommissionRate!=null) setCommRate(repData.defaultCommissionRate);
+    // Pick first/primary address by default
+    if(c.addresses && c.addresses.length){
+      var prim = c.addresses.find(function(a){return a.isPrimary;}) || c.addresses[0];
+      setShipAddrId(prim.id||"");
+    } else { setShipAddrId(""); }
+    // Reset shipping rate since destination may change
+    setSelectedRate(null);
   },[custId, customers, repData]);
+
+  // Mount Stripe card when payMethod==="card"
+  useEffect(function(){
+    if(payMethod !== "card") {
+      if(stripeRef.card){ try{stripeRef.card.unmount();}catch(e){} stripeRef.card=null; }
+      return;
+    }
+    var key = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").publishableKey||"";}catch(e){return "";}})();
+    if(!key){ setCardError("Card form unavailable — admin must set Stripe Publishable Key."); return; }
+    if(!window.Stripe){ setCardError("Stripe failed to load — check your connection."); return; }
+    var cancelled=false, tries=0;
+    function tryMount(){
+      if(cancelled) return;
+      var el = document.getElementById("mobile-stripe-card-element");
+      if(!el){ if(tries++<25) setTimeout(tryMount,80); return; }
+      if(stripeRef.card) return;
+      try{
+        if(!stripeRef.stripe) stripeRef.stripe = window.Stripe(key);
+        var elements = stripeRef.stripe.elements();
+        var card = elements.create("card",{
+          style:{base:{fontFamily:"-apple-system,BlinkMacSystemFont,Inter,system-ui,sans-serif",fontSize:"16px",color:C.text,"::placeholder":{color:C.muted}}},
+          hidePostalCode:false,
+        });
+        card.mount("#mobile-stripe-card-element");
+        card.on("change",function(e){
+          setCardComplete(!!e.complete);
+          setCardError(e.error?e.error.message:"");
+        });
+        stripeRef.card = card; stripeRef.el = el;
+      }catch(e){ setCardError("Could not load card form: "+((e&&e.message)||"")); }
+    }
+    tryMount();
+    return function(){
+      cancelled=true;
+      if(stripeRef.card){ try{stripeRef.card.unmount();}catch(e){} stripeRef.card=null; }
+    };
+  }, [payMethod]);
 
   function addLine(){
     if(!productId){ addToast("Pick a product first","warning"); return; }
@@ -11394,56 +11445,159 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     if(hasVars && !variantId){ addToast("Pick a variant","warning"); return; }
     var v = hasVars ? p.variants.find(function(vv){return vv.id===variantId;}) : null;
     var unit = v ? (Number(v.price)||0) : (Number(p.price)||0);
-    setLines(function(prev){return prev.concat([{id:genId("line"), productId, variantId:variantId||"", qty:Number(qty)||1, unitPrice:unit, customerPrice:unit}]);});
+    setLines(function(prev){return prev.concat([{id:genId("line"), productId, prodId:productId, variantId:variantId||"", qty:Number(qty)||1, unitPrice:unit, customerPrice:unit}]);});
     setProductId(""); setVariantId(""); setQty(1);
+    setSelectedRate(null); // weight changed
   }
-  function removeLine(idx){ setLines(function(prev){return prev.filter(function(_,i){return i!==idx;});}); }
+  function removeLine(idx){
+    setLines(function(prev){return prev.filter(function(_,i){return i!==idx;});});
+    setSelectedRate(null);
+  }
 
+  // Resolve shipping address
+  var selCust = (customers||[]).find(function(c){return c.id===custId;});
+  var shipAddr = null;
+  if(selCust){
+    if(shipAddrId && selCust.addresses){
+      shipAddr = selCust.addresses.find(function(a){return a.id===shipAddrId;}) || null;
+    }
+    if(!shipAddr && selCust.addresses && selCust.addresses.length){
+      shipAddr = selCust.addresses.find(function(a){return a.isPrimary;}) || selCust.addresses[0];
+    }
+    if(!shipAddr && selCust.address){
+      shipAddr = {address:selCust.address, city:selCust.city||"", state:selCust.state||"", zip:selCust.zip||"", label:"Primary"};
+    }
+  } else if(showNewCust && newCust.address && newCust.zip){
+    shipAddr = {address:newCust.address, city:newCust.city, state:newCust.state, zip:newCust.zip, label:"Primary"};
+  }
+
+  // Total weight + dominant dims from heaviest line
+  var ssCfg = (function(){try{return JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"{}");}catch(e){return {};}})();
+  var totalWeight = 0, heaviestLine=null, heaviestWeight=0;
+  lines.forEach(function(it){
+    var p = (products||[]).find(function(pp){return pp.id===it.productId;});
+    if(!p) return;
+    var w = lineWeight(p,it)*(Number(it.qty)||1);
+    totalWeight += w;
+    if(w>heaviestWeight){heaviestWeight=w; heaviestLine={p:p, it:it};}
+  });
+  var pkgDimL = heaviestLine ? (lineDim(heaviestLine.p,heaviestLine.it,"dimL")||Number(ssCfg.dimL)||12) : (Number(ssCfg.dimL)||12);
+  var pkgDimW = heaviestLine ? (lineDim(heaviestLine.p,heaviestLine.it,"dimW")||Number(ssCfg.dimW)||10) : (Number(ssCfg.dimW)||10);
+  var pkgDimH = heaviestLine ? (lineDim(heaviestLine.p,heaviestLine.it,"dimH")||Number(ssCfg.dimH)||6)  : (Number(ssCfg.dimH)||6);
+
+  // Totals
   var subtotal = lines.reduce(function(s,it){return s + (Number(it.qty)||0)*(Number(it.unitPrice)||0);},0);
   var taxRate = (taxCfg && Number(taxCfg.rate))||0;
   var tax = subtotal * taxRate / 100;
-  var shipRule = (shippingRules||[]).slice().sort(function(a,b){return (a.maxOrder||0)-(b.maxOrder||0);}).find(function(r){return r.active && (r.maxOrder||0)>=subtotal;});
-  var shipping = shipRule ? (shipRule.type==="free"?0:Number(shipRule.rate)||0) : 0;
+  var shipping = selectedRate ? (Number(selectedRate.amount)||0) : 0;
   var total = subtotal + tax + shipping;
   var commission = subtotal * commRate / 100;
 
   var pickedProduct = (products||[]).find(function(p){return p.id===productId;});
-  var canPlace = lines.length>0 && (custId || (showNewCust && newCust.name.trim()));
+
+  // Validation
+  var hasCustomer = !!custId || (showNewCust && newCust.name.trim());
+  var hasShipAddr = !!(shipAddr && shipAddr.address && shipAddr.zip);
+  var hasLines = lines.length>0;
+  var cardOk = payMethod!=="card" || (cardComplete && !cardError);
+  var rateOk = !hasLines || !hasShipAddr || !!selectedRate || shipping===0; // require a rate pick once both exist; only "free" rate is auto
+  // Allow place without rate if subtotal is 0 weight (digital/services) — skip for now, require rate.
+  var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && !!selectedRate;
 
   function place(){
-    if(!canPlace) return;
-    setPlacing(true);
+    if(!canPlace || placing) return;
+    setPlacing(true); setChargeErr("");
     var cId = custId;
-    var cRecord = (customers||[]).find(function(c){return c.id===cId;});
+    var cRecord = selCust;
+    var promise = Promise.resolve();
+
+    // Create new customer if needed
     if(showNewCust && newCust.name.trim()){
       var newId = genId("cust");
-      cRecord = Object.assign({}, newCust, {id:newId, repId:repData.id, createdAt:new Date().toISOString()});
+      cRecord = Object.assign({}, newCust, {
+        id:newId, repId:repData.id, createdAt:new Date().toISOString(),
+        addresses: newCust.address ? [{id:genId("adr"),label:"Primary",address:newCust.address,city:newCust.city,state:newCust.state,zip:newCust.zip,isPrimary:true}] : [],
+      });
       setCustomers(function(prev){return prev.concat([cRecord]);});
       dbSave("crm_customers", newId, cRecord);
       cId = newId;
     }
     if(!cId){ setPlacing(false); addToast("Pick or create a customer","warning"); return; }
 
-    var orderId = genId("ord");
-    var order = {
-      id: orderId, repId: repData.id, custId: cId, custName: cRecord&&cRecord.name||"",
-      items: lines, subtotal:subtotal, tax:tax, shipping:shipping, total:total,
-      commissionRate: commRate, commissionAmount: commission,
-      status: "Submitted", paid: false,
-      paymentMethod: payMethod==="due"?"due_on_receipt":"invoice_link",
-      createdAt: new Date().toISOString(),
-    };
-    if(payMethod==="invoice") order.payToken = genId("pay");
-    setOrders(function(prev){return [order].concat(prev);});
-    dbSave("crm_orders", orderId, order);
-    if(order.payToken) dbSave("crm_pay_tokens", order.payToken, {orderId:orderId, repId:repData.id, custId:cId, total:total, createdAt:new Date().toISOString()});
+    var orderId = "ORD-" + String(Date.now()).slice(-6);
+    function buildOrder(extra){
+      return Object.assign({
+        id: orderId, repId: repData.id, custId: cId, custName: cRecord&&cRecord.name||"",
+        shipAddress: shipAddr,
+        items: lines.map(function(it){
+          var p = (products||[]).find(function(pp){return pp.id===it.productId;});
+          var v = p && p.variants ? p.variants.find(function(vv){return vv.id===it.variantId;}) : null;
+          return Object.assign({}, it, {
+            prodId: it.productId,
+            variantId: v?v.id:"", variantName: v?v.name:"", variantSku: v?(v.sku||""):"",
+          });
+        }),
+        subtotal:subtotal, tax:tax, shipping:shipping, total:total,
+        shippingRate: selectedRate ? {amount:selectedRate.amount, label:selectedRate.label||selectedRate.serviceName||"Shipping", id:selectedRate.id||""} : null,
+        commissionRate: commRate, commissionAmount: commission,
+        paymentMethod: payMethod==="card" ? "card" : (payMethod==="invoice" ? "invoice_link" : "due_on_receipt"),
+        createdAt: new Date().toISOString(),
+      }, extra||{});
+    }
 
-    setPlacing(false);
-    addToast("Order placed!","success");
-    onPlaced();
+    if(payMethod==="card"){
+      if(!stripeRef.stripe || !stripeRef.card){
+        setPlacing(false); setChargeErr("Card form not ready."); return;
+      }
+      promise.then(function(){
+        return stripeRef.stripe.createPaymentMethod({type:"card",card:stripeRef.card,billing_details:{name:cRecord&&cRecord.name||""}});
+      }).then(function(result){
+        if(result.error){ setPlacing(false); setChargeErr(result.error.message); return; }
+        var pmId = result.paymentMethod.id;
+        var stripeEdge = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}})();
+        if(!stripeEdge){ setPlacing(false); setChargeErr("Stripe Edge Function URL not set in Settings."); return; }
+        return fetch(stripeEdge,{
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"charge", paymentMethodId:pmId,
+            amount:Math.round(total*100), currency:"usd",
+            orderId:orderId, repId:repData.id, custId:cId,
+            description:"Order "+orderId+" — "+((cRecord&&cRecord.name)||"")
+          }),
+        }).then(function(r){return r.json();}).then(function(d){
+          if(d.error){ setPlacing(false); setChargeErr(d.error); return; }
+          var order = buildOrder({
+            status:"Paid", paid:true,
+            paidAt: new Date().toISOString(),
+            paymentIntentId: d.paymentIntentId||"",
+            cardLast4: d.last4||"", cardBrand: d.brand||"Card",
+          });
+          setOrders(function(prev){return [order].concat(prev);});
+          dbSave("crm_orders", orderId, order);
+          setPlacing(false);
+          addToast("Order placed and charged!","success");
+          onPlaced();
+        });
+      }).catch(function(e){ setPlacing(false); setChargeErr("Could not reach payment server: "+((e&&e.message)||e)); });
+    } else if(payMethod==="invoice"){
+      var payToken = genId("pay");
+      var order = buildOrder({status:"Submitted", paid:false, payToken:payToken});
+      setOrders(function(prev){return [order].concat(prev);});
+      dbSave("crm_orders", orderId, order);
+      dbSave("crm_pay_tokens", payToken, {orderId:orderId, repId:repData.id, custId:cId, total:total, createdAt:new Date().toISOString()});
+      setPlacing(false);
+      addToast("Order placed — share the payment link from Orders","success");
+      onPlaced();
+    } else {
+      var order2 = buildOrder({status:"Submitted", paid:false});
+      setOrders(function(prev){return [order2].concat(prev);});
+      dbSave("crm_orders", orderId, order2);
+      setPlacing(false);
+      addToast("Order placed!","success");
+      onPlaced();
+    }
   }
 
-  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:15,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:8,boxSizing:"border-box"};
+  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:15,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:8,boxSizing:"border-box",WebkitAppearance:"none"};
   var smallInputStyle = {padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontFamily:"inherit",boxSizing:"border-box",width:"100%"};
 
   return (
@@ -11464,14 +11618,36 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         {showNewCust&&(
           <div style={{marginTop:10,padding:14,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
             <input placeholder="Name *" value={newCust.name} onChange={function(e){setNewCust(Object.assign({},newCust,{name:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
-            <input placeholder="Email" value={newCust.email} onChange={function(e){setNewCust(Object.assign({},newCust,{email:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
-            <input placeholder="Phone" value={newCust.phone} onChange={function(e){setNewCust(Object.assign({},newCust,{phone:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
-            <input placeholder="Address" value={newCust.address} onChange={function(e){setNewCust(Object.assign({},newCust,{address:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:6}}>
-              <input placeholder="City" value={newCust.city} onChange={function(e){setNewCust(Object.assign({},newCust,{city:e.target.value}));}} style={smallInputStyle}/>
-              <input placeholder="ST" value={newCust.state} onChange={function(e){setNewCust(Object.assign({},newCust,{state:e.target.value}));}} style={smallInputStyle}/>
-              <input placeholder="ZIP" value={newCust.zip} onChange={function(e){setNewCust(Object.assign({},newCust,{zip:e.target.value}));}} style={smallInputStyle}/>
+            <input placeholder="Email" type="email" inputMode="email" autoCapitalize="none" value={newCust.email} onChange={function(e){setNewCust(Object.assign({},newCust,{email:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
+            <input placeholder="Phone" type="tel" inputMode="tel" value={newCust.phone} onChange={function(e){setNewCust(Object.assign({},newCust,{phone:e.target.value}));}} style={Object.assign({},smallInputStyle,{marginBottom:8})}/>
+            <PlacesAutocomplete
+              value={newCust.address}
+              onChange={function(v){setNewCust(Object.assign({},newCust,{address:v})); setSelectedRate(null);}}
+              onSelect={function(p){
+                setNewCust(Object.assign({},newCust,{address:p.street||newCust.address, city:p.city||"", state:p.state||"", zip:p.zip||""}));
+                setSelectedRate(null);
+              }}
+              placeholder="Start typing shipping address…"
+              label="Shipping address"/>
+            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:6,marginTop:4}}>
+              <input placeholder="City" value={newCust.city} onChange={function(e){setNewCust(Object.assign({},newCust,{city:e.target.value})); setSelectedRate(null);}} style={smallInputStyle}/>
+              <input placeholder="ST" value={newCust.state} onChange={function(e){setNewCust(Object.assign({},newCust,{state:e.target.value})); setSelectedRate(null);}} style={smallInputStyle}/>
+              <input placeholder="ZIP" inputMode="numeric" value={newCust.zip} onChange={function(e){setNewCust(Object.assign({},newCust,{zip:e.target.value})); setSelectedRate(null);}} style={smallInputStyle}/>
             </div>
+          </div>
+        )}
+        {/* Existing customer: multiple addresses → ship-to picker */}
+        {selCust && selCust.addresses && selCust.addresses.length>1 && (
+          <div style={{marginTop:10}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:6,fontWeight:600}}>Ship to:</div>
+            <select value={shipAddrId} onChange={function(e){setShipAddrId(e.target.value); setSelectedRate(null);}} style={inputStyle}>
+              {selCust.addresses.map(function(a){return <option key={a.id} value={a.id}>{(a.label?a.label+" — ":"")+a.address+", "+a.city+", "+a.state+" "+a.zip}</option>;})}
+            </select>
+          </div>
+        )}
+        {selCust && shipAddr && (
+          <div style={{marginTop:8,fontSize:11,color:C.muted,padding:"8px 10px",background:C.surface2,borderRadius:6}}>
+            📍 {shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}
           </div>
         )}
       </div>
@@ -11520,6 +11696,21 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         )}
       </div>
 
+      {/* Live Shipping rates (when we have lines + ship address) */}
+      {hasLines && hasShipAddr && (
+        <div style={{marginBottom:20}}>
+          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
+          <div style={{padding:12,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+            <ShippingRatePicker
+              toZip={shipAddr.zip} toState={shipAddr.state}
+              totalWeight={totalWeight}
+              pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
+              onSelect={setSelectedRate}
+              selected={selectedRate&&selectedRate.id}/>
+          </div>
+        </div>
+      )}
+
       {/* Totals + commission */}
       {lines.length>0&&(
         <div style={{marginBottom:20,padding:14,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
@@ -11538,10 +11729,11 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
       )}
 
       {/* Payment */}
-      <div style={{marginBottom:24}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Payment</div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>4 · Payment</div>
         {[
-          {id:"invoice", icon:"✉️", label:"Send Invoice Link", desc:"Generate a payment link to share with the customer."},
+          {id:"card",    icon:"💳", label:"Charge Card Now",   desc:"Customer's card is charged immediately."},
+          {id:"invoice", icon:"✉️", label:"Send Invoice Link", desc:"Generate a payment link to share."},
           {id:"due",     icon:"📅", label:"Due on Receipt",    desc:"No payment now — collect later."},
         ].map(function(opt){
           var sel = payMethod===opt.id;
@@ -11560,7 +11752,31 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
             </button>
           );
         })}
+
+        {/* Card mount */}
+        {payMethod==="card" && (
+          <div style={{marginTop:10,padding:14,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+            <div style={{fontSize:11,color:C.muted,marginBottom:8,fontWeight:600}}>Card details</div>
+            <div id="mobile-stripe-card-element" style={{padding:"14px 12px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,minHeight:46}}></div>
+            {cardError && <div style={{color:C.danger,fontSize:12,marginTop:8}}>{cardError}</div>}
+            {!cardError && cardComplete && <div style={{color:C.success,fontSize:12,marginTop:8,fontWeight:600}}>✓ Card looks good</div>}
+            <div style={{fontSize:10,color:C.dim,marginTop:8}}>🔒 Secured by Stripe — card never touches our servers.</div>
+          </div>
+        )}
       </div>
+
+      {chargeErr && <div style={{padding:"10px 12px",background:C.danger+"15",borderRadius:8,color:C.danger,fontSize:13,marginBottom:14,fontWeight:600}}>⚠ {chargeErr}</div>}
+
+      {/* Validation hint */}
+      {!canPlace && lines.length>0 && (
+        <div style={{padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"25",borderRadius:8,fontSize:11,color:C.warning,marginBottom:14,lineHeight:1.6}}>
+          To place this order:
+          {!hasCustomer && <div>• Pick or create a customer</div>}
+          {hasCustomer && !hasShipAddr && <div>• Add a shipping address</div>}
+          {hasCustomer && hasShipAddr && !selectedRate && <div>• Pick a shipping rate</div>}
+          {payMethod==="card" && !cardComplete && <div>• Complete the card details</div>}
+        </div>
+      )}
 
       <button onClick={place} disabled={!canPlace || placing}
         style={{display:"block",width:"100%",padding:"18px",borderRadius:14,
@@ -11568,7 +11784,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                 border:"none",cursor:canPlace?"pointer":"not-allowed",
                 fontSize:16,fontWeight:800,fontFamily:"inherit",
                 boxShadow:canPlace?"0 4px 14px rgba(99,91,255,.35)":"none"}}>
-        {placing?"Placing…":"Place Order"+(total>0?" · "+fmtMoney(total):"")}
+        {placing?(payMethod==="card"?"Charging…":"Placing…"):(payMethod==="card"?"Charge & Place Order":"Place Order")+(total>0?" · "+fmtMoney(total):"")}
       </button>
     </div>
   );
