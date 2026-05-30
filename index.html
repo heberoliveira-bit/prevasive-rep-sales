@@ -11497,7 +11497,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var subtotal = Math.round((baseSubtotal + commission)*100)/100;
   var taxRate = (taxCfg && Number(taxCfg.rate))||0;
   var tax = Math.round(subtotal * taxRate) / 100;
-  var shipping = selectedRate ? (Number(selectedRate.amount)||0) : 0;
+  var shipping = selectedRate ? (Number(selectedRate.shipmentCost)||0) : 0;
   var total = Math.round((subtotal + tax + shipping)*100)/100;
 
   var pickedProduct = (products||[]).find(function(p){return p.id===productId;});
@@ -11550,7 +11550,13 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           });
         }),
         subtotal:subtotal, tax:tax, shipping:shipping, total:total,
-        shippingRate: selectedRate ? {amount:selectedRate.amount, label:selectedRate.label||selectedRate.serviceName||"Shipping", id:selectedRate.id||""} : null,
+        shippingRate: selectedRate ? {
+          amount: Number(selectedRate.shipmentCost)||0,
+          label: (selectedRate.carrierName||selectedRate.carrierCode||"")+" — "+(selectedRate.serviceName||""),
+          carrierCode: selectedRate.carrierCode||"",
+          serviceCode: selectedRate.serviceCode||"",
+          transitDays: selectedRate.transitDays||null,
+        } : null,
         commissionRate: commRate, commissionAmount: commission,
         paymentMethod: payMethod==="card" ? "card" : (payMethod==="invoice" ? "invoice_link" : ((selCust&&selCust.termsType)||"due_receipt")),
         terms: payMethod==="due" && selCust && selCust.termsStatus==="active",
@@ -11751,7 +11757,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
               totalWeight={totalWeight}
               pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
               onSelect={setSelectedRate}
-              selected={selectedRate&&selectedRate.id}/>
+              selected={selectedRate}/>
           </div>
         </div>
       )}
