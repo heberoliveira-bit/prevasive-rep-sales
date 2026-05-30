@@ -11236,7 +11236,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v3</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-mobile-v4</div>
       </div>
     </div>
   );
@@ -11517,14 +11517,6 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var cardOk = payMethod!=="card" || (cardComplete && !cardError);
   var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && !!selectedRate;
 
-  // Dynamic step numbering — only count steps that are actually visible
-  var step = 0;
-  var stepCustomer   = ++step;
-  var stepProducts   = ++step;
-  var stepShipping   = (hasLines && hasShipAddr) ? ++step : null;
-  var stepCommission = hasLines ? ++step : null;
-  var stepPayment    = ++step;
-
   function place(){
     if(!canPlace || placing) return;
     setPlacing(true); setChargeErr("");
@@ -11637,7 +11629,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     <div>
       {/* Customer */}
       <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepCustomer} · Customer</div>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>1 · Customer</div>
         {!showNewCust&&(
           <select value={custId} onChange={function(e){setCustId(e.target.value);}} style={inputStyle}>
             <option value="">— Select a customer —</option>
@@ -11719,7 +11711,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
 
       {/* Products */}
       <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepProducts} · Products</div>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>2 · Products</div>
         <select value={productId} onChange={function(e){setProductId(e.target.value); setVariantId("");}} style={inputStyle}>
           <option value="">— Pick a product —</option>
           {(products||[]).map(function(p){
@@ -11761,11 +11753,11 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         )}
       </div>
 
-      {/* Live Shipping rates (when we have lines + ship address) */}
-      {hasLines && hasShipAddr && (
-        <div style={{marginBottom:20}}>
-          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepShipping} · Shipping</div>
-          <div style={{padding:12,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+      {/* Live Shipping rates */}
+      <div style={{marginBottom:20}}>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
+        <div style={{padding:hasLines&&hasShipAddr?12:18,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+          {hasLines && hasShipAddr ? (
             <ShippingRatePicker
               key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
               toZip={shipAddr.zip} toState={shipAddr.state}
@@ -11773,60 +11765,76 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
               pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
               onSelect={setSelectedRate}
               selected={selectedRate}/>
-          </div>
+          ) : (
+            <div style={{textAlign:"center",color:C.dim,fontSize:13,lineHeight:1.6}}>
+              {!hasLines ? "📦 Add products to see live shipping rates." : "📍 Set a shipping address to see rates."}
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Commission — rep's markup on the base price */}
-      {lines.length>0 && (
-        <div style={{marginBottom:20}}>
-          <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>{stepCommission} · Commission</div>
-          <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
-              <div style={{fontSize:13,color:C.text,fontWeight:700}}>{commRate}% markup</div>
-              <div style={{fontSize:18,fontWeight:900,color:C.gold,fontFamily:"monospace"}}>+{fmtMoney(commission)}</div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>4 · Commission</div>
+        <div style={{padding:hasLines?16:18,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+          {hasLines ? (
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+                <div style={{fontSize:13,color:C.text,fontWeight:700}}>{commRate}% markup</div>
+                <div style={{fontSize:18,fontWeight:900,color:C.gold,fontFamily:"monospace"}}>+{fmtMoney(commission)}</div>
+              </div>
+              <input type="range" min="0" max="50" step="0.5" value={commRate} onChange={function(e){setCommRate(Number(e.target.value));}}
+                style={{width:"100%",accentColor:C.accent,marginBottom:8}}/>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.dim}}>
+                <span>0%</span><span>25%</span><span>50%</span>
+              </div>
+              <div style={{fontSize:11,color:C.muted,marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,lineHeight:1.5}}>
+                {(function(){
+                  if(selCust && selCust.commissionRate!=null && commRate===selCust.commissionRate) return <span>From {selCust.name||"customer"}'s account rate.</span>;
+                  if(repData && commRate===repData.defaultCommissionRate) return <span>Your default rate.</span>;
+                  return <span>
+                    Manual override.
+                    {repData && repData.defaultCommissionRate!=null && (
+                      <button onClick={function(){setCommRate(repData.defaultCommissionRate);}}
+                        style={{marginLeft:6,background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,padding:0,textDecoration:"underline"}}>
+                        Reset to default ({repData.defaultCommissionRate}%)
+                      </button>
+                    )}
+                  </span>;
+                })()}
+              </div>
             </div>
-            <input type="range" min="0" max="50" step="0.5" value={commRate} onChange={function(e){setCommRate(Number(e.target.value));}}
-              style={{width:"100%",accentColor:C.accent,marginBottom:8}}/>
-            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.dim}}>
-              <span>0%</span><span>25%</span><span>50%</span>
+          ) : (
+            <div style={{textAlign:"center",color:C.dim,fontSize:13,lineHeight:1.6}}>
+              💰 Your markup percentage shows up here once you add a product.
             </div>
-            <div style={{fontSize:11,color:C.muted,marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,lineHeight:1.5}}>
-              {(function(){
-                if(selCust && selCust.commissionRate!=null && commRate===selCust.commissionRate) return <span>From {selCust.name||"customer"}'s account rate.</span>;
-                if(repData && commRate===repData.defaultCommissionRate) return <span>Your default rate.</span>;
-                return <span>
-                  Manual override.
-                  {repData && repData.defaultCommissionRate!=null && (
-                    <button onClick={function(){setCommRate(repData.defaultCommissionRate);}}
-                      style={{marginLeft:6,background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,padding:0,textDecoration:"underline"}}>
-                      Reset to default ({repData.defaultCommissionRate}%)
-                    </button>
-                  )}
-                </span>;
-              })()}
-            </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Totals */}
-      {lines.length>0&&(
-        <div style={{marginBottom:20,padding:14,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Base subtotal</span><span>{fmtMoney(baseSubtotal)}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.gold}}><span>+ Commission ({commRate}%)</span><span>{fmtMoney(commission)}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.text,fontWeight:600,paddingTop:6,borderTop:"1px dashed "+C.border}}><span>Customer subtotal</span><span>{fmtMoney(subtotal)}</span></div>
-          {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax ({taxRate}%)</span><span>{fmtMoney(tax)}</span></div>}
-          {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:800,paddingTop:8,marginTop:4,borderTop:"1px solid "+C.border,color:C.text}}>
-            <span>Customer pays</span><span>{fmtMoney(total)}</span>
+      <div style={{marginBottom:20,padding:hasLines?14:18,background:C.surface,border:"1px solid "+C.border,borderRadius:12}}>
+        {hasLines ? (
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Base subtotal</span><span>{fmtMoney(baseSubtotal)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.gold}}><span>+ Commission ({commRate}%)</span><span>{fmtMoney(commission)}</span></div>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.text,fontWeight:600,paddingTop:6,borderTop:"1px dashed "+C.border}}><span>Customer subtotal</span><span>{fmtMoney(subtotal)}</span></div>
+            {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax ({taxRate}%)</span><span>{fmtMoney(tax)}</span></div>}
+            {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:800,paddingTop:8,marginTop:4,borderTop:"1px solid "+C.border,color:C.text}}>
+              <span>Customer pays</span><span>{fmtMoney(total)}</span>
+            </div>
           </div>
-        </div>
-      )}
+        ) : (
+          <div style={{textAlign:"center",color:C.dim,fontSize:13,lineHeight:1.6}}>
+            🧾 Totals appear once you add a product.
+          </div>
+        )}
+      </div>
 
       {/* Payment */}
       <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>{stepPayment} · Payment</div>
+        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:10,letterSpacing:".07em",textTransform:"uppercase"}}>5 · Payment</div>
         {(function(){
           var hasTerms = !!(selCust && selCust.termsStatus==="active");
           var termsType = (selCust && selCust.termsType) || "due_receipt";
@@ -12178,7 +12186,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-mobile-v3
+        BUILD: 2026-05-30-mobile-v4
       </div>
     </div>
   );
