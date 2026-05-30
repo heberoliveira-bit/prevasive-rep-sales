@@ -11089,6 +11089,158 @@ function isMobileDevice(){
   return /Mobi|Android|iPhone|iPod|webOS|BlackBerry|Windows Phone/i.test(navigator.userAgent||"");
 }
 
+function MobileLanding({onLogin}){
+  const [mode, setMode] = useState("signin");
+  const [email, setEmail] = useState("");
+  const [pass, setPass]   = useState("");
+  const [err, setErr]     = useState("");
+  const [busy, setBusy]   = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [newPass, setNewPass]   = useState("");
+  const [newPass2, setNewPass2] = useState("");
+
+  useEffect(function(){
+    var hash = window.location.hash||"";
+    if(hash.indexOf("type=recovery")>=0 && hash.indexOf("access_token")>=0){
+      var sb = getSB();
+      if(sb){
+        sb.auth.getSession().then(function(r){
+          if(r.data&&r.data.session) setMode("newPass");
+        });
+      }
+    }
+  },[]);
+
+  function doSignIn(){
+    if(!email||!pass){setErr("Email and password are required.");return;}
+    var sb = getSB(); if(!sb){setErr("Connection error.");return;}
+    setBusy(true); setErr("");
+    sb.auth.signInWithPassword({email:email,password:pass}).then(function(r){
+      if(r.error){setBusy(false); setErr(r.error.message);return;}
+      var uid = r.data&&r.data.user&&r.data.user.id;
+      if(!uid){setBusy(false); setErr("Login failed.");return;}
+      return sb.from("crm_users").select("*").eq("id",uid).single().then(function(ur){
+        setBusy(false);
+        if(!ur.data){setErr("Account not set up. Ask your admin.");return;}
+        onLogin(Object.assign({},ur.data,{email:r.data.user.email}));
+      });
+    }).catch(function(e){setBusy(false); setErr((e&&e.message)||String(e));});
+  }
+
+  function doResetRequest(){
+    if(!email){setErr("Enter your email first.");return;}
+    var sb = getSB(); if(!sb){setErr("Connection error.");return;}
+    setBusy(true); setErr("");
+    sb.auth.resetPasswordForEmail(email, {redirectTo: window.location.origin + window.location.pathname})
+      .then(function(){setBusy(false); setResetSent(true);})
+      .catch(function(e){setBusy(false); setErr((e&&e.message)||String(e));});
+  }
+
+  function doSetNewPass(){
+    if(newPass.length<8){setErr("Password must be at least 8 characters.");return;}
+    if(newPass!==newPass2){setErr("Passwords don't match.");return;}
+    var sb = getSB(); if(!sb){setErr("Connection error.");return;}
+    setBusy(true); setErr("");
+    sb.auth.updateUser({password:newPass}).then(function(r){
+      setBusy(false);
+      if(r.error){setErr(r.error.message);return;}
+      window.location.hash = "";
+      window.location.reload();
+    }).catch(function(e){setBusy(false); setErr((e&&e.message)||String(e));});
+  }
+
+  var inputStyle = {width:"100%",padding:"14px 14px",fontSize:16,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:10,boxSizing:"border-box",WebkitAppearance:"none"};
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,color:C.text,display:"flex",flexDirection:"column",fontFamily:"-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,sans-serif"}}>
+      <div style={{padding:"60px 24px 30px",textAlign:"center"}}>
+        <div style={{width:64,height:64,borderRadius:16,background:"#635bff",display:"inline-flex",alignItems:"center",justifyContent:"center",fontSize:30,fontWeight:900,color:"#fff",marginBottom:16,boxShadow:"0 4px 16px rgba(99,91,255,.4)"}}>P</div>
+        <div style={{fontSize:24,fontWeight:800,marginBottom:4,letterSpacing:"-.02em"}}>PreVasive</div>
+        <div style={{fontSize:11,fontWeight:600,color:C.accent,letterSpacing:".15em"}}>REP SALES</div>
+      </div>
+
+      <div style={{flex:1,padding:"0 24px"}}>
+        {mode==="signin" && !resetSent && (
+          <div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Welcome back</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Sign in to your rep account.</div>
+            <input type="email" inputMode="email" autoCapitalize="none" autoComplete="email"
+              placeholder="Email" value={email} onChange={function(e){setEmail(e.target.value);}} style={inputStyle}/>
+            <input type="password" placeholder="Password" autoComplete="current-password"
+              value={pass} onChange={function(e){setPass(e.target.value);}}
+              onKeyDown={function(e){if(e.key==="Enter") doSignIn();}} style={inputStyle}/>
+            {err && <div style={{padding:"10px 12px",background:C.danger+"15",borderRadius:8,color:C.danger,fontSize:12,marginBottom:10}}>{err}</div>}
+            <button onClick={doSignIn} disabled={busy}
+              style={{width:"100%",padding:"16px",borderRadius:12,border:"none",
+                      background:busy?C.dim:C.accent,color:"#fff",cursor:busy?"wait":"pointer",
+                      fontFamily:"inherit",fontWeight:800,fontSize:16,marginBottom:16,
+                      boxShadow:busy?"none":"0 4px 14px rgba(99,91,255,.35)"}}>
+              {busy?"Signing in…":"Sign In"}
+            </button>
+            <button onClick={function(){setErr(""); setMode("reset");}}
+              style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,display:"block",margin:"0 auto",padding:"8px 12px"}}>
+              Forgot password?
+            </button>
+          </div>
+        )}
+
+        {mode==="reset" && !resetSent && (
+          <div>
+            <button onClick={function(){setErr(""); setMode("signin");}}
+              style={{background:"none",border:"none",color:C.accent,fontWeight:700,cursor:"pointer",fontFamily:"inherit",fontSize:13,marginBottom:14,padding:0}}>← Back</button>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Reset password</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:20,lineHeight:1.5}}>Enter your email and we'll send you a link to reset your password.</div>
+            <input type="email" inputMode="email" autoCapitalize="none"
+              placeholder="Email" value={email} onChange={function(e){setEmail(e.target.value);}} style={inputStyle}/>
+            {err && <div style={{padding:"10px 12px",background:C.danger+"15",borderRadius:8,color:C.danger,fontSize:12,marginBottom:10}}>{err}</div>}
+            <button onClick={doResetRequest} disabled={busy}
+              style={{width:"100%",padding:"16px",borderRadius:12,border:"none",
+                      background:busy?C.dim:C.accent,color:"#fff",cursor:busy?"wait":"pointer",
+                      fontFamily:"inherit",fontWeight:800,fontSize:16}}>
+              {busy?"Sending…":"Send Reset Link"}
+            </button>
+          </div>
+        )}
+
+        {resetSent && (
+          <div style={{textAlign:"center",padding:"20px"}}>
+            <div style={{fontSize:48,marginBottom:14}}>📧</div>
+            <div style={{fontSize:18,fontWeight:700,marginBottom:8}}>Check your email</div>
+            <div style={{fontSize:13,color:C.muted,lineHeight:1.6,marginBottom:24}}>If an account exists for {email}, you'll get a reset link shortly.</div>
+            <button onClick={function(){setResetSent(false); setMode("signin");}}
+              style={{padding:"12px 24px",borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:13}}>
+              Back to sign in
+            </button>
+          </div>
+        )}
+
+        {mode==="newPass" && (
+          <div>
+            <div style={{fontSize:20,fontWeight:700,marginBottom:8}}>Set a new password</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:20}}>Choose a new password to access your account.</div>
+            <input type="password" placeholder="New password" value={newPass} onChange={function(e){setNewPass(e.target.value);}} style={inputStyle}/>
+            <input type="password" placeholder="Confirm password" value={newPass2}
+              onChange={function(e){setNewPass2(e.target.value);}}
+              onKeyDown={function(e){if(e.key==="Enter") doSetNewPass();}} style={inputStyle}/>
+            {err && <div style={{padding:"10px 12px",background:C.danger+"15",borderRadius:8,color:C.danger,fontSize:12,marginBottom:10}}>{err}</div>}
+            <button onClick={doSetNewPass} disabled={busy}
+              style={{width:"100%",padding:"16px",borderRadius:12,border:"none",
+                      background:busy?C.dim:C.accent,color:"#fff",cursor:busy?"wait":"pointer",
+                      fontFamily:"inherit",fontWeight:800,fontSize:16}}>
+              {busy?"Updating…":"Update Password"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
+        Need a rep account? Apply on a computer at<br/>
+        <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
+      </div>
+    </div>
+  );
+}
+
 function MobileShell(props){
   const {currentUser, repData, customers, setCustomers, orders, setOrders,
          products, reps, commissions, addToast, preferDesktop, setPreferDesktop,
@@ -12285,7 +12437,12 @@ function App() {
     </div>
   );
 
-  if(!currentUser) return React.createElement(AppLanding, {onLogin:handleLogin});
+  if(!currentUser){
+    if(isMobileUA && !preferDesktopOnMobile){
+      return React.createElement(MobileLanding, {onLogin:handleLogin});
+    }
+    return React.createElement(AppLanding, {onLogin:handleLogin});
+  }
 
   // Impersonation override
   var _imRep = viewAsRep ? (reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData||{}) : null;
