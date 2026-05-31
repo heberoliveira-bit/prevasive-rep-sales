@@ -10738,7 +10738,21 @@ function AdminHelpDesk({tickets,setTickets,faqs,setFaqs,reps,orders,currentUser,
             );
           })}
         </div>
-      ):<div style={{padding:"40px 0",textAlign:"center",color:C.dim,fontSize:13}}>No FAQ articles yet. Add one to help reps self-serve.</div>)}
+      ):(
+        <div style={{padding:"40px 20px",textAlign:"center"}}>
+          <div style={{color:C.dim,fontSize:13,marginBottom:18}}>No FAQ articles yet. Add one to help reps self-serve.</div>
+          <Btn small onClick={function(){
+            if(!window.confirm("Load 18 default FAQ articles? You can edit or delete them after.")) return;
+            var now = new Date().toISOString();
+            var seed = FAQ_ITEMS.map(function(item,i){
+              return {id:genId("faq"), question:item.q, answer:item.a, category:item.cat||"Other", order:i+1, createdAt:now, updatedAt:now};
+            });
+            seed.forEach(function(f){ dbSave("crm_faq", f.id, f); });
+            setFaqs(function(prev){return seed.concat(prev||[]);});
+            if(addToast) addToast("Loaded "+seed.length+" default FAQ articles","success");
+          }}>📚 Load 18 Default Articles</Btn>
+        </div>
+      ))}
       {active&&<TicketThread ticket={active} role="admin" onReply={reply} onStatus={setStatus} onClose={function(){setActive(null);}}/>}
       {showNew&&<NewTicketModal role="admin" reps={reps} orders={orders} onCreate={createToRep} onClose={function(){setShowNew(false);}}/>}
       {editFaq&&<FaqEditorModal faq={editFaq.id?editFaq:null} onSave={saveFaq} onClose={function(){setEditFaq(null);}}/>}
@@ -11142,24 +11156,24 @@ var HELP_SECTIONS = [
 ];
 
 var FAQ_ITEMS = [
-  {q:"When do I earn my commission?", a:"You earn commission the moment you place an order. It's held in escrow from the order's shipping date until the per-order hold period elapses, then transferred to your Stripe Connect account."},
-  {q:"Why does my Net 30 order's commission release later than card orders?", a:"The hold period depends on the customer's payment method. Card / Invoice Link / Due-on-Receipt: 15 days from shipping. Net 15: 16 days. Net 30: 31 days. Net 45: 46 days. The +1 day on terms orders gives your customer their full grace period before commission auto-releases."},
-  {q:"What if my customer doesn't pay their Net 30 invoice on time?", a:"The commission still releases on day 31 after shipping, regardless of whether the customer has paid. However, if the order is marked Refunded or Cancelled before then, commission is forfeited. For chronic non-payment, admin may flag accounts and place future orders on hold."},
-  {q:"What happens if a customer refunds AFTER I've been paid out?", a:"Refunds inside the hold window auto-reverse the commission before any payout. Refunds after release require manual reconciliation — admin will deduct from your next payout batch."},
-  {q:"How do I get paid the released commission?", a:"You need a Stripe Connect account (one-time setup in Profile → Billing). Once connected, released commissions transfer automatically when admin clicks 'Release All'. Funds land in your bank in 2–5 business days."},
-  {q:"Why does my commission show 'Awaiting shipment'?", a:"The hold clock only starts once the order ships. Until your warehouse marks the order Shipped (or ShipStation auto-marks it), commission shows 'Awaiting shipment' with no countdown."},
-  {q:"How do I add a Net 30 customer?", a:"In the New Customer form, set Payment Terms to Net 30. Then on the customer's profile, click 'Send Credit Agreement' — they'll receive an email with a digital sign link. Once signed, their terms unlock for use on orders."},
-  {q:"What's the difference between 'Due on Receipt' and 'Net 15'?", a:"Due on Receipt means the customer should pay immediately upon receiving the invoice. Net 15 gives them a formal 15-day grace period. From a commission standpoint, Due on Receipt has a 15-day commission hold (same as card), while Net 15 has a 16-day hold."},
-  {q:"Can I edit an order after placing it?", a:"Within 24 hours and before the order ships: yes — open the order → Edit. After shipping, you can only add notes or process returns; for other changes, contact admin."},
-  {q:"How do I update my bank account info for payouts?", a:"Profile → Billing → 'Manage Stripe Connect'. You'll be sent to Stripe's portal where you can update bank, business info, or tax details. Changes apply to your next payout."},
-  {q:"What if I forgot my password?", a:"On the sign-in screen, click 'Forgot Password'. You'll get a reset email within a minute or two. Check spam if you don't see it."},
-  {q:"Is 2FA available?", a:"Yes — admin enables 2FA organization-wide. Once on, every sign-in requires a 6-digit code emailed to you. Codes expire in 10 minutes."},
-  {q:"My live shipping rates aren't loading. What do I do?", a:"Make sure the customer has a valid ZIP code. Verify the order has at least one product. If rates still don't load, admin should check Settings → ShipStation to confirm credentials and warehouse address are set."},
-  {q:"A card was declined. What now?", a:"Common reasons: insufficient funds, card declined by issuer, wrong CVC, expired card, fraud-prevention block. Ask the customer to use a different card, or send them an Invoice Link instead so they can complete payment from their bank's mobile app."},
-  {q:"Can I track my commission ceiling progress?", a:"Yes — Profile → Commissions shows your YTD/MTD earnings vs your plan's ceiling. When you're approaching your limit, you'll see a warning. Upgrade your plan from Profile → Billing if you need a higher ceiling."},
-  {q:"What products are available to sell?", a:"All current PreVasive products are listed under the Products tab. The catalog and pricing are managed by admin. If a product is missing, ask admin to add it."},
-  {q:"Can I sell to customers outside the US?", a:"Currently the platform is configured for US-only sales (shipping rates, tax, currency in USD). International orders require admin intervention. Contact admin for inquiries."},
-  {q:"How do I report a problem or request a feature?", a:"Email your admin directly. They can escalate to the development team. Include screenshots, the URL you were on, and what you expected to happen."},
+  {q:"When do I earn my commission?", a:"You earn commission the moment you place an order. It's held in escrow from the order's shipping date until the per-order hold period elapses, then transferred to your Stripe Connect account.", cat:"Commissions/Billing"},
+  {q:"Why does my Net 30 order's commission release later than card orders?", a:"The hold period depends on the customer's payment method. Card / Invoice Link / Due-on-Receipt: 15 days from shipping. Net 15: 16 days. Net 30: 31 days. Net 45: 46 days. The +1 day on terms orders gives your customer their full grace period before commission auto-releases.", cat:"Commissions/Billing"},
+  {q:"What if my customer doesn't pay their Net 30 invoice on time?", a:"The commission still releases on day 31 after shipping, regardless of whether the customer has paid. However, if the order is marked Refunded or Cancelled before then, commission is forfeited. For chronic non-payment, admin may flag accounts and place future orders on hold.", cat:"Commissions/Billing"},
+  {q:"What happens if a customer refunds AFTER I've been paid out?", a:"Refunds inside the hold window auto-reverse the commission before any payout. Refunds after release require manual reconciliation — admin will deduct from your next payout batch.", cat:"Commissions/Billing"},
+  {q:"How do I get paid the released commission?", a:"You need a Stripe Connect account (one-time setup in Profile → Billing). Once connected, released commissions transfer automatically when admin clicks 'Release All'. Funds land in your bank in 2–5 business days.", cat:"Commissions/Billing"},
+  {q:"Why does my commission show 'Awaiting shipment'?", a:"The hold clock only starts once the order ships. Until your warehouse marks the order Shipped (or ShipStation auto-marks it), commission shows 'Awaiting shipment' with no countdown.", cat:"Commissions/Billing"},
+  {q:"How do I add a Net 30 customer?", a:"In the New Customer form, set Payment Terms to Net 30. Then on the customer's profile, click 'Send Credit Agreement' — they'll receive an email with a digital sign link. Once signed, their terms unlock for use on orders.", cat:"Orders"},
+  {q:"What's the difference between 'Due on Receipt' and 'Net 15'?", a:"Due on Receipt means the customer should pay immediately upon receiving the invoice. Net 15 gives them a formal 15-day grace period. From a commission standpoint, Due on Receipt has a 15-day commission hold (same as card), while Net 15 has a 16-day hold.", cat:"Commissions/Billing"},
+  {q:"Can I edit an order after placing it?", a:"Within 24 hours and before the order ships: yes — open the order → Edit. After shipping, you can only add notes or process returns; for other changes, contact admin.", cat:"Orders"},
+  {q:"How do I update my bank account info for payouts?", a:"Profile → Billing → 'Manage Stripe Connect'. You'll be sent to Stripe's portal where you can update bank, business info, or tax details. Changes apply to your next payout.", cat:"Account"},
+  {q:"What if I forgot my password?", a:"On the sign-in screen, click 'Forgot Password'. You'll get a reset email within a minute or two. Check spam if you don't see it.", cat:"Account"},
+  {q:"Is 2FA available?", a:"Yes — admin enables 2FA organization-wide. Once on, every sign-in requires a 6-digit code emailed to you. Codes expire in 10 minutes.", cat:"Account"},
+  {q:"My live shipping rates aren't loading. What do I do?", a:"Make sure the customer has a valid ZIP code. Verify the order has at least one product. If rates still don't load, admin should check Settings → ShipStation to confirm credentials and warehouse address are set.", cat:"Technical"},
+  {q:"A card was declined. What now?", a:"Common reasons: insufficient funds, card declined by issuer, wrong CVC, expired card, fraud-prevention block. Ask the customer to use a different card, or send them an Invoice Link instead so they can complete payment from their bank's mobile app.", cat:"Technical"},
+  {q:"Can I track my commission ceiling progress?", a:"Yes — Profile → Commissions shows your YTD/MTD earnings vs your plan's ceiling. When you're approaching your limit, you'll see a warning. Upgrade your plan from Profile → Billing if you need a higher ceiling.", cat:"Commissions/Billing"},
+  {q:"What products are available to sell?", a:"All current PreVasive products are listed under the Products tab. The catalog and pricing are managed by admin. If a product is missing, ask admin to add it.", cat:"Orders"},
+  {q:"Can I sell to customers outside the US?", a:"Currently the platform is configured for US-only sales (shipping rates, tax, currency in USD). International orders require admin intervention. Contact admin for inquiries.", cat:"Other"},
+  {q:"How do I report a problem or request a feature?", a:"Email your admin directly. They can escalate to the development team. Include screenshots, the URL you were on, and what you expected to happen.", cat:"Other"},
 ];
 
 var TERMS_SECTIONS = [
@@ -11241,7 +11255,7 @@ var TERMS_SECTIONS = [
   ]},
 ];
 
-function HelpModal({isAdmin,onClose}){
+function HelpModal({isAdmin,faqs,onClose}){
   const [tab, setTab] = useState("help");
   const [openHelp, setOpenHelp] = useState({});
   const [openFaq, setOpenFaq] = useState({});
@@ -11310,26 +11324,32 @@ function HelpModal({isAdmin,onClose}){
             <div>
               <div style={{fontSize:12,color:C.muted,marginBottom:16,lineHeight:1.6}}>
                 Common questions and answers. Tap to expand.
+                {isAdmin && (!faqs || faqs.length===0) && <span style={{display:"block",marginTop:6,fontSize:11,color:C.warning}}>⚠ Showing built-in defaults. Load them into Help Desk → FAQ tab so reps and admins see the same editable list.</span>}
               </div>
-              {FAQ_ITEMS.map(function(item,i){
-                var open = !!openFaq[i];
-                return (
-                  <div key={i} style={{marginBottom:8,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
-                    <button onClick={function(){toggle(openFaq,setOpenFaq,i);}}
-                      style={{width:"100%",padding:"12px 16px",background:open?C.surface2:"transparent",border:"none",
-                              cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,
-                              fontFamily:"inherit",color:C.text,fontWeight:600,fontSize:13,textAlign:"left",lineHeight:1.5}}>
-                      <span>{item.q}</span>
-                      <span style={{color:C.muted,fontSize:12,flexShrink:0,marginTop:3,transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}>▾</span>
-                    </button>
-                    {open && (
-                      <div style={{padding:"4px 18px 14px",fontSize:13,color:C.muted,lineHeight:1.7,whiteSpace:"pre-wrap"}}>
-                        {item.a}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {(function(){
+                var src = (faqs && faqs.length>0)
+                  ? faqs.slice().sort(function(a,b){return (a.order||0)-(b.order||0);}).map(function(f){return {q:f.question,a:f.answer};})
+                  : FAQ_ITEMS;
+                return src.map(function(item,i){
+                  var open = !!openFaq[i];
+                  return (
+                    <div key={i} style={{marginBottom:8,border:"1px solid "+C.border,borderRadius:10,overflow:"hidden"}}>
+                      <button onClick={function(){toggle(openFaq,setOpenFaq,i);}}
+                        style={{width:"100%",padding:"12px 16px",background:open?C.surface2:"transparent",border:"none",
+                                cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,
+                                fontFamily:"inherit",color:C.text,fontWeight:600,fontSize:13,textAlign:"left",lineHeight:1.5}}>
+                        <span>{item.q}</span>
+                        <span style={{color:C.muted,fontSize:12,flexShrink:0,marginTop:3,transform:open?"rotate(180deg)":"none",transition:"transform .2s"}}>▾</span>
+                      </button>
+                      {open && (
+                        <div style={{padding:"4px 18px 14px",fontSize:13,color:C.muted,lineHeight:1.7,whiteSpace:"pre-wrap"}}>
+                          {item.a}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           )}
 
@@ -11612,7 +11632,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v11-help-docs</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v12-faq-store</div>
       </div>
     </div>
   );
@@ -12587,7 +12607,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v11-help-docs
+        BUILD: 2026-05-30-v12-faq-store
       </div>
     </div>
   );
@@ -13458,7 +13478,7 @@ function App() {
         )}
         {!isAdmin&&activeTab==="new_order"&&null}
       </main>
-      {showHelp&&<HelpModal isAdmin={isAdmin} onClose={function(){setShowHelp(false);}}/>}
+      {showHelp&&<HelpModal isAdmin={isAdmin} faqs={faqs} onClose={function(){setShowHelp(false);}}/>}
       {showSearch&&<GlobalSearch orders={orders} customers={customers} reps={reps} quotes={quotes} products={products} isAdmin={isAdmin} onNav={setActiveTab} onClose={function(){setShowSearch(false);}}/>}
       {viewAsRep&&React.createElement(ImpersonationBanner,{rep:viewAsRep,onExit:function(){setViewAsRep(null);setActiveTab("dashboard");}})}
       </div>
