@@ -11632,7 +11632,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v12-faq-store</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v13-mobile-readable</div>
       </div>
     </div>
   );
@@ -12018,7 +12018,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     }
   }
 
-  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:15,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:8,boxSizing:"border-box",WebkitAppearance:"none"};
+  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:16,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:8,boxSizing:"border-box",WebkitAppearance:"none"};
   var smallInputStyle = {padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontFamily:"inherit",boxSizing:"border-box",width:"100%"};
 
   return (
@@ -12089,15 +12089,15 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           </div>
         )}
         {selCust && shipAddr && (
-          <div style={{marginTop:8,fontSize:11,color:C.muted,padding:"8px 10px",background:C.surface2,borderRadius:6,lineHeight:1.5}}>
-            <div><strong style={{color:C.text}}>📍 Ship to:</strong> {shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}</div>
+          <div style={{marginTop:8,fontSize:14,color:C.text,padding:"12px 14px",background:C.surface2,borderRadius:8,lineHeight:1.55}}>
+            <div><strong style={{color:C.text}}>📍 Ship to:</strong> <span style={{color:C.muted}}>{shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}</span></div>
             {selCust.billingAddress && (selCust.billingAddress.address||selCust.billingAddress.zip) ? (
-              <div style={{marginTop:4}}><strong style={{color:C.text}}>💳 Bill to:</strong> {selCust.billingAddress.address}, {selCust.billingAddress.city}, {selCust.billingAddress.state} {selCust.billingAddress.zip}</div>
+              <div style={{marginTop:6}}><strong style={{color:C.text}}>💳 Bill to:</strong> <span style={{color:C.muted}}>{selCust.billingAddress.address}, {selCust.billingAddress.city}, {selCust.billingAddress.state} {selCust.billingAddress.zip}</span></div>
             ) : (
-              <div style={{marginTop:4,fontStyle:"italic"}}>💳 Billing same as shipping</div>
+              <div style={{marginTop:6,fontStyle:"italic",color:C.muted}}>💳 Billing same as shipping</div>
             )}
             {selCust.termsStatus==="active" && (
-              <div style={{marginTop:6,padding:"4px 8px",background:C.success+"18",color:C.success,borderRadius:4,display:"inline-block",fontWeight:700,fontSize:10}}>
+              <div style={{marginTop:10,padding:"5px 10px",background:C.success+"18",color:C.success,borderRadius:6,display:"inline-block",fontWeight:700,fontSize:11,letterSpacing:".03em"}}>
                 ✓ {fmtTerms(selCust.termsType||"due_receipt")} APPROVED
               </div>
             )}
@@ -12506,7 +12506,7 @@ function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selected
     addToast("Customer added","success");
   }
 
-  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:15,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:12,boxSizing:"border-box"};
+  var inputStyle = {width:"100%",padding:"14px 12px",fontSize:16,borderRadius:10,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",marginBottom:12,boxSizing:"border-box"};
 
   return (
     <div>
@@ -12607,7 +12607,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v12-faq-store
+        BUILD: 2026-05-30-v13-mobile-readable
       </div>
     </div>
   );
