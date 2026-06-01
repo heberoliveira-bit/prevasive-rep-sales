@@ -1236,15 +1236,18 @@ function ApplyForm({onSubmit,onCancel}) {
   const [heardAbout,setHeardAbout]= useState("");
   const [message,   setMessage]   = useState("");
   const [err,       setErr]       = useState("");
+  const [submitting, setSubmitting] = useState(false);
   var inp = {width:"100%",background:C.surface2,border:"1px solid "+C.border,
              borderRadius:6,padding:"9px 12px",color:C.text,fontSize:13,
              fontFamily:"inherit",boxSizing:"border-box",outline:"none"};
   var lbl = {fontSize:11,fontWeight:500,color:C.muted,marginBottom:4};
   var sec = {fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",margin:"4px 0 8px"};
   function submit() {
+    if(submitting) return;
     if(!name.trim()||!email.trim()||!phone.trim()||!company.trim()||!address.trim()||!city.trim()||!state.trim()||!zip.trim()){
       setErr("Please fill in all required fields: name, email, phone, company, and full address.");return;
     }
+    setSubmitting(true);
     onSubmit({name:name.trim(),email:email.trim(),phone:phone.trim(),company:company.trim(),
       address:address.trim(),city:city.trim(),state:state.trim(),zip:zip.trim(),
       territory:territory.trim(),experience:experience.trim(),industry:industry.trim(),
@@ -1291,11 +1294,13 @@ function ApplyForm({onSubmit,onCancel}) {
           placeholder="Tell us a bit about yourself…" style={Object.assign({},inp,{resize:"vertical",minHeight:64})}/>
       </div>
 
-      <button onClick={submit}
-        style={{width:"100%",padding:"10px",borderRadius:6,border:"none",background:"#635bff",
-                color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
-                boxShadow:"0 2px 10px rgba(99,91,255,.4)",marginBottom:10,letterSpacing:"-.01em"}}>
-        Submit Application
+      <button onClick={submit} disabled={submitting}
+        style={{width:"100%",padding:"10px",borderRadius:6,border:"none",
+                background:submitting?"#444":"#635bff",
+                color:"#fff",cursor:submitting?"not-allowed":"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14,
+                boxShadow:submitting?"none":"0 2px 10px rgba(99,91,255,.4)",marginBottom:10,letterSpacing:"-.01em",
+                opacity:submitting?.7:1}}>
+        {submitting?"Submitting…":"Submit Application"}
       </button>
       <button onClick={onCancel}
         style={{width:"100%",padding:"9px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
@@ -5100,6 +5105,19 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
     navigator.clipboard.writeText(link).then(function(){addToast("Invite link copied","success");});
   }
 
+  function resendInvite() {
+    if(!rep.email){ addToast("This rep has no email on file","warning"); return; }
+    // Persist any new token first so the email link matches what's stored
+    var token = rep.inviteToken || (rep.id+"_inv_"+Math.random().toString(36).slice(2,8));
+    if(!rep.inviteToken){
+      var withTok = Object.assign({},rep,{inviteToken:token});
+      setReps(function(prev){return prev.map(function(r){return r.id===rep.id?withTok:r;});});
+      dbSave("crm_reps",rep.id,withTok);
+    }
+    sendSetPasswordEmail(Object.assign({},rep,{inviteToken:token}));
+    addToast("Invite resent to "+rep.email,"success");
+  }
+
   var STATUS_COLOR = {active:C.success,pending:C.warning,suspended:C.danger}[rep.status]||C.muted;
   var TABS = [
     {id:"overview",    l:"Overview"},
@@ -5189,6 +5207,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                 {rep.status==="suspended" &&<Btn small variant="success" onClick={reactivate}>Reactivate</Btn>}
                 {rep.w9Status==="received"&&rep.w9ReviewStatus!=="approved"&&<Btn small variant="success" onClick={approveW9}>✓ Approve W-9</Btn>}
                 <Btn small variant="ghost" onClick={copyInvite}>✉ Copy Invite</Btn>
+                {!rep.registeredAt&&rep.email&&<Btn small variant="ghost" onClick={resendInvite}>↻ Resend Invite Email</Btn>}
               </div>
 
               {/* KPI strip */}
@@ -10863,6 +10882,17 @@ function _writeNotifRow(o){
   var row=Object.assign({id:id,ts:new Date().toISOString(),read:false},o);
   sb.from("crm_notifications").upsert({id:id,data:row,created_at:row.ts}).then(function(){});
 }
+// Helper: parse an email-edge-fn response leniently. Treats any HTTP 2xx as success
+// unless the parsed body explicitly says {ok:false}. Matches the queue processor's behavior
+// so a transient response-shape mismatch can't trigger a duplicate queue+send.
+function _emailRespOk(r){
+  return r.text().then(function(t){
+    var d=null; try{d=JSON.parse(t);}catch(_){}
+    var ok = !!r.ok && (!d || d.ok!==false);
+    return { ok: ok, err: (d&&d.error) || (!r.ok ? ("HTTP "+r.status) : null) };
+  });
+}
+
 // Central notification. Sends immediately if this session has email credentials (admin),
 // otherwise queues a row that an admin session delivers. `bell` optionally shows in a rep's bell.
 function notifyEmail(key, to, subject, html, bell){
@@ -10872,7 +10902,8 @@ function notifyEmail(key, to, subject, html, bell){
   if(to && cfg && cfg.edgeFnUrl){
     fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})})
-      .then(function(r){return r.json();}).then(function(d){ if(!(d&&d.ok)) queueEmail(); }).catch(function(){ queueEmail(); });
+      .then(_emailRespOk).then(function(res){ if(!res.ok){ console.warn("notifyEmail send failed:", res.err); queueEmail(); } })
+      .catch(function(e){ console.warn("notifyEmail fetch error:", (e&&e.message)||e); queueEmail(); });
     if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"});
     return;
   }
@@ -10888,7 +10919,8 @@ function sendRepEmail(to, subject, html){
     if(to && html && cfg && cfg.edgeFnUrl){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({to:to,subject:subject,html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})})
-        .then(function(r){return r.json();}).then(function(d){ if(!(d&&d.ok)) queue(); }).catch(function(){ queue(); });
+        .then(_emailRespOk).then(function(res){ if(!res.ok){ console.warn("sendRepEmail send failed:", res.err); queue(); } })
+        .catch(function(e){ console.warn("sendRepEmail fetch error:", (e&&e.message)||e); queue(); });
     } else { queue(); }
   }catch(e){}
 }
@@ -12233,7 +12265,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v23-comp-polish</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v24-email-dedup</div>
       </div>
     </div>
   );
@@ -13311,7 +13343,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v23-comp-polish
+        BUILD: 2026-05-30-v24-email-dedup
       </div>
     </div>
   );
