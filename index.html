@@ -5913,24 +5913,46 @@ function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
 /* ─── Admin Orders ───────────────────────────────────────────────────────── */
 
 /* ─── Payment Status Helpers ────────────────────────────────────────────── */
+/* Parse the day count out of a payMethod string.
+   net_15 → 15, net_30 → 30, net_45 → 45, etc.
+   Returns null for non-net methods (credit_card, due_receipt, check, …). */
+function termsDays(payMethod){
+  if(!payMethod) return null;
+  var m = /^net_(\d+)$/.exec(payMethod);
+  if(m) return parseInt(m[1],10);
+  if(payMethod==="terms") return 30; // legacy alias
+  return null;
+}
+
 function getPaymentStatus(o) {
   if(o.paidAt) return {key:"paid",label:"✅ Paid",color:"#22c55e",date:o.paidAt};
-  if(o.payMethod==="net_30"||o.payMethod==="net_60"||o.payMethod==="terms") {
-    var days = o.payMethod==="net_60"?60:30;
-    var dueDate = new Date((o.deliveredAt||o.createdAt));
+
+  var days = termsDays(o.payMethod);
+
+  // Net-terms order — count from deliveredAt (or invoiceSentAt) if available, else from createdAt
+  if(days!=null) {
+    var startDate = o.deliveredAt || o.invoiceSentAt || o.createdAt;
+    var dueDate = new Date(startDate);
     dueDate.setDate(dueDate.getDate()+days);
-    var now = Date.now();
-    var diff = Math.round((dueDate.getTime()-now)/(1000*60*60*24));
-    if(diff<0) return {key:"overdue",label:"⚠ "+Math.abs(diff)+"d overdue",color:"#ef4444",dueDate:dueDate};
-    return {key:"terms",label:"📋 Due in "+diff+"d",color:"#f59e0b",dueDate:dueDate};
+    var diff = Math.round((dueDate.getTime()-Date.now())/(1000*60*60*24));
+    if(diff<0) return {key:"overdue",label:"⚠ "+Math.abs(diff)+"d overdue (Net "+days+")",color:"#ef4444",dueDate:dueDate};
+    return {key:"terms",label:"📋 Net "+days+" · due in "+diff+"d",color:"#f59e0b",dueDate:dueDate};
   }
-  if(o.invoiceSentAt) {
+
+  // Due-on-receipt invoice that's been emailed — should NOT show "Due in 30d"
+  if(o.payMethod==="due_receipt" && o.invoiceSentAt) {
+    return {key:"invoice_sent",label:"📧 Due on receipt",color:"#8b5cf6",dueDate:new Date(o.invoiceSentAt)};
+  }
+
+  // Any other invoice-was-sent path (legacy data without explicit payMethod) — assume 30
+  if(o.invoiceSentAt && !o.payMethod) {
     var due2 = new Date(o.invoiceSentAt);
     due2.setDate(due2.getDate()+30);
     var diff2 = Math.round((due2.getTime()-Date.now())/(1000*60*60*24));
     if(diff2<0) return {key:"overdue",label:"⚠ "+Math.abs(diff2)+"d overdue",color:"#ef4444",dueDate:due2};
     return {key:"invoice_sent",label:"📧 Due in "+diff2+"d",color:"#8b5cf6",dueDate:due2};
   }
+
   return {key:"awaiting",label:"⏳ Awaiting",color:"#6b7280"};
 }
 
@@ -12556,7 +12578,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v35-auto-fulfill-on-paid</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v36-payment-terms-display</div>
       </div>
     </div>
   );
@@ -13635,7 +13657,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v35-auto-fulfill-on-paid
+        BUILD: 2026-05-30-v36-payment-terms-display
       </div>
     </div>
   );
