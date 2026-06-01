@@ -5888,7 +5888,7 @@ function getPaymentStatus(o) {
 }
 
 /* ─── CollectPaymentModal ────────────────────────────────────────────────── */
-function CollectPaymentModal({order, customers, products, currentUser, addToast, showResult, setOrders, onClose}) {
+function CollectPaymentModal({order, customers, products, currentUser, addToast, showResult, setOrders, onCollect, onClose}) {
   var cust = (customers||[]).find(function(x){return x.id===order.custId;})||{};
   var grand = order.totals&&order.totals.grand||0;
   var stripeConf = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
@@ -5934,12 +5934,18 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
         }).then(function(r){return r.json();}).then(function(d){
           setCharging(false);
           if(d.ok){
-            var upd=Object.assign({},order,{paidAt:new Date().toISOString(),payMethod:"credit_card",chargeId:d.chargeId,status:"Paid"});
-            setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
-            try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
-            addToast("✓ $"+grand.toFixed(2)+" charged successfully","success");
-            showResult({type:"payment",title:"Payment Collected!",subtitle:"Card charged successfully.",
-              rows:[["Order",order.id],["Amount","$"+grand.toFixed(2)],["Customer",cust.name||""],["Charge ID",d.chargeId||""]],cta:"Done"});
+            var payRef = {type:"card", chargeId:d.paymentIntentId||d.chargeId||"", last4:d.last4||"", brand:d.brand||"", receiptUrl:d.receiptUrl||"", paidAt:new Date().toISOString()};
+            if(typeof onCollect === "function"){
+              onCollect(payRef);
+            } else if(typeof setOrders === "function") {
+              // Fallback path if the modal is used without onCollect wired up
+              var upd=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:"credit_card",chargeId:payRef.chargeId,status:"Paid"});
+              setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
+              try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
+            }
+            if(addToast) addToast("✓ $"+grand.toFixed(2)+" charged successfully","success");
+            if(typeof showResult==="function") showResult({type:"payment",title:"Payment Collected!",subtitle:"Card charged successfully.",
+              rows:[["Order",order.id],["Amount","$"+grand.toFixed(2)],["Customer",cust.name||""],["Charge ID",payRef.chargeId||""]],cta:"Done"});
             onClose();
           } else { setErr(d.error||"Charge failed"); }
         });
@@ -5947,10 +5953,15 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
   }
 
   function markPaid(){
-    var upd=Object.assign({},order,{paidAt:new Date(markDate).toISOString(),payMethod:markMethod,status:"Paid"});
-    setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
-    try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
-    addToast("Order marked as paid","success");
+    var payRef = {type:markMethod, paidAt:new Date(markDate).toISOString()};
+    if(typeof onCollect === "function"){
+      onCollect(payRef);
+    } else if(typeof setOrders === "function") {
+      var upd=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:markMethod,status:"Paid"});
+      setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
+      try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
+    }
+    if(addToast) addToast("Order marked as paid","success");
     onClose();
   }
 
@@ -12480,7 +12491,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v32-stripe-mode-all-paths</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v33-collect-payment-fix</div>
       </div>
     </div>
   );
@@ -13558,7 +13569,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v32-stripe-mode-all-paths
+        BUILD: 2026-05-30-v33-collect-payment-fix
       </div>
     </div>
   );
