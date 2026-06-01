@@ -2827,7 +2827,7 @@ function CustomerSigningPage({signingData,onSigned,onDecline}) {
 }
 
 /* ─── PreviewOrderModal ────────────────────────────────────────────────── */
-function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,shipAddress,billingAddress,commRate,payMethod,onClose}) {
+function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,shipAddress,billingAddress,commRate,payMethod,selectedRate,onClose}) {
   var cust=selCust||{name:custName||"Customer"};
   var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
   var date=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
@@ -2842,6 +2842,13 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
   var effBilling = billingAddress && billingAddress.address ? billingAddress : null;
   var billHtml = effBilling ? fmtAddr(effBilling) : "";
   var billsSame = !effBilling;
+  // Shipping carrier label (e.g. "UPS Ground")
+  var shipCarrier = "";
+  if(selectedRate){
+    var sName = selectedRate.serviceName||selectedRate.service||selectedRate.name||"";
+    var sCarr = selectedRate.carrier||selectedRate.carrierCode||"";
+    shipCarrier = [sCarr, sName].filter(Boolean).join(" ").trim();
+  }
   function buildHtml(){
     var rows=(items||[]).filter(function(it){return it.prodId;}).map(function(it){
       var p=(products||[]).find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
@@ -2867,18 +2874,23 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
       +"<div>"
       +"<div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Bill To</div>"
       +"<div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+(cust.name||"")+"</div>"
-      +(cust.email?"<div style='font-size:12px;color:#6b7c93;margin-bottom:6px'>"+cust.email+"</div>":"")
+      +(cust.company?"<div style='font-size:11px;color:#6b7c93'>"+cust.company+"</div>":"")
+      +(cust.email?"<div style='font-size:12px;color:#6b7c93'>"+cust.email+"</div>":"")
+      +(cust.phone?"<div style='font-size:12px;color:#6b7c93;margin-bottom:6px'>📞 "+cust.phone+"</div>":"<div style='margin-bottom:6px'></div>")
       +(billsSame?"<div style='font-size:12px;color:#6b7c93;font-style:italic'>Billing same as shipping</div>":(billHtml?"<div style='font-size:12px;color:#6b7c93;line-height:1.55'>"+billHtml+"</div>":""))
       +"</div>"
       +"<div>"
       +"<div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Ship To</div>"
+      +"<div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+(cust.name||"")+"</div>"
+      +(cust.company?"<div style='font-size:11px;color:#6b7c93'>"+cust.company+"</div>":"")
+      +(cust.phone?"<div style='font-size:12px;color:#6b7c93;margin-bottom:6px'>📞 "+cust.phone+"</div>":"<div style='margin-bottom:6px'></div>")
       +(shipHtml?"<div style='font-size:12px;color:#1a1a2e;line-height:1.55'>"+shipHtml+"</div>":"<div style='font-size:12px;color:#a0aec0;font-style:italic'>No shipping address yet</div>")
       +"</div>"
       +"</div>"
       +"<table><thead><tr><th>Product</th><th style='text-align:right'>Qty</th><th style='text-align:right'>Price</th><th style='text-align:right'>Total</th></tr></thead><tbody>"+rows+"</tbody></table>"
       +"<div style='padding:14px 24px;border-top:2px solid #e8ecef'>"
       +(totals.discount>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Discount</span><span>-$"+totals.discount.toFixed(2)+"</span></div>":"")
-      +(totals.shipping>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Shipping</span><span>$"+totals.shipping.toFixed(2)+"</span></div>":"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Shipping</span><span>Free</span></div>")
+      +(totals.shipping>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Shipping"+(shipCarrier?" · "+shipCarrier:"")+"</span><span>$"+totals.shipping.toFixed(2)+"</span></div>":"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Shipping"+(shipCarrier?" · "+shipCarrier:"")+"</span><span>Free</span></div>")
       +(totals.tax>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;margin-bottom:4px'><span>Tax</span><span>$"+totals.tax.toFixed(2)+"</span></div>":"")
       +"<div style='display:flex;justify-content:space-between;font-size:18px;font-weight:900;color:#635bff'><span>Total</span><span>$"+((totals.grand||0).toFixed(2))+"</span></div>"
       +"</div></div></body></html>";
@@ -9688,8 +9700,6 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           })()}
           billingAddress={(function(){
             if(!selCust) return null;
-            // DEBUG: surfaces customer shape so we can diagnose persistent "same as shipping" issues
-            try{ console.log("[invoice-preview] selCust billing fields:", {billingAddress:selCust.billingAddress, billingCity:selCust.billingCity, billingState:selCust.billingState, billingZip:selCust.billingZip, addresses:selCust.addresses, shipAddrId:shipAddrId}); }catch(e){}
             var b = selCust.billingAddress;
             // 1. Object shape: {address, city, state, zip}
             if(b && typeof b === "object" && b.address) return b;
@@ -9722,6 +9732,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           })()}
           commRate={commRate}
           payMethod={payMethod}
+          selectedRate={selectedRate}
           onClose={function(){setShowPreview(false);}}/>
       )}
       {showPostInv&&placedOrder&&(
@@ -12338,7 +12349,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v28-billing-resolver</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v29-preview-detail</div>
       </div>
     </div>
   );
@@ -13416,7 +13427,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v28-billing-resolver
+        BUILD: 2026-05-30-v29-preview-detail
       </div>
     </div>
   );
