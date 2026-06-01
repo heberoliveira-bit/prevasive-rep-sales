@@ -12022,7 +12022,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v20-signup-2fa</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v21-tax-pct</div>
       </div>
     </div>
   );
@@ -12712,7 +12712,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Base subtotal</span><span>{fmtMoney(baseSubtotal)}</span></div>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.gold}}><span>+ Commission ({commRate}%)</span><span>{fmtMoney(commission)}</span></div>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.text,fontWeight:600,paddingTop:6,borderTop:"1px dashed "+C.border}}><span>Customer subtotal</span><span>{fmtMoney(subtotal)}</span></div>
-            {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax ({taxRate}%)</span><span>{fmtMoney(tax)}</span></div>}
+            {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax{taxInfo&&taxInfo.county?(" · "+taxInfo.county):""} ({(taxRate*100).toFixed(2).replace(/\.?0+$/,"")}%)</span><span>{fmtMoney(tax)}</span></div>}
             {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
             <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:800,paddingTop:8,marginTop:4,borderTop:"1px solid "+C.border,color:C.text}}>
               <span>Customer pays</span><span>{fmtMoney(total)}</span>
@@ -13098,7 +13098,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v20-signup-2fa
+        BUILD: 2026-05-30-v21-tax-pct
       </div>
     </div>
   );
