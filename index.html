@@ -8680,6 +8680,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     }
   }, [custId]);
 
+  // Pre-fill the "Send To" email on Confirm step with the customer's email — never override what the rep has typed
+  useEffect(function(){
+    if(custId && !placeEmail){
+      var cust3 = customers.find(function(x){return x.id===custId;});
+      if(cust3 && cust3.email) setPlaceEmail(cust3.email);
+    }
+  }, [custId, customers]);
+
   function applyDiscount() {
     if(!discCode.trim()) return;
     var code = (discountCodes||[]).find(function(d){return d.active&&d.code===discCode.trim().toUpperCase();});
@@ -8774,7 +8782,51 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   }
   function step2Valid() {
     if(!items.some(function(it){return it.prodId;})) return false;
+    // If live carrier rates are available (ShipStation configured + ship zip), a rate must be picked
+    try{
+      var ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");
+      var hasShipZip=(selCust&&((selCust.addresses&&selCust.addresses.length>0)||(selCust.address&&selCust.address.trim())))||(newCust&&custZip.trim());
+      if(ss&&(ss.ratesFnUrl||ss.edgeFnUrl)&&hasShipZip&&!selectedRate) return false;
+    }catch(e){}
     return true;
+  }
+
+  function step2Errors() {
+    var errs=[];
+    if(!items.some(function(it){return it.prodId;})) errs.push("Add at least one product");
+    try{
+      var ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");
+      var hasShipZip=(selCust&&((selCust.addresses&&selCust.addresses.length>0)||(selCust.address&&selCust.address.trim())))||(newCust&&custZip.trim());
+      if(ss&&(ss.ratesFnUrl||ss.edgeFnUrl)&&hasShipZip&&!selectedRate) errs.push("Select a shipping rate before continuing");
+    }catch(e){}
+    return errs;
+  }
+
+  function saveNewCustomer(){
+    // Validate the new-customer fields before committing
+    if(!custName.trim()){ addToast("Customer name is required","warning"); return; }
+    if(!custEmail.trim()){ addToast("Email is required","warning"); return; }
+    if(!custPhone.trim()){ addToast("Phone is required","warning"); return; }
+    if(!custAddr.trim()||!custCity.trim()||!custState2.trim()||!custZip.trim()){ addToast("Complete the shipping address (street, city, state, zip)","warning"); return; }
+    var nid = genId("cust");
+    var nc = {
+      id:nid, repId:repId, name:custName.trim(), email:custEmail.trim(),
+      phone:custPhone.trim(), company:custComp.trim(),
+      address:custAddr.trim(), city:custCity.trim(), state:custState2.trim(), zip:custZip.trim(),
+      billingAddress: billSameAsShip ? null : {address:billAddr.trim(),city:billCity.trim(),state:billState.trim(),zip:billZip.trim()},
+      billSameAsShip: billSameAsShip,
+      addresses:[{id:genId("adr"),label:"Primary",address:custAddr.trim(),city:custCity.trim(),state:custState2.trim(),zip:custZip.trim(),isPrimary:true}],
+      createdAt:new Date().toISOString()
+    };
+    setCustomers(function(prev){return [nc].concat(prev);});
+    dbSave("crm_customers",nid,nc).then(function(res){
+      if(!res.ok){ addToast("Customer saved locally but database write failed: "+((res.error&&res.error.message)||"unknown"),"danger"); return; }
+      addToast("Customer "+nc.name+" saved","success");
+    });
+    // Switch the form into "existing customer" mode with this new customer selected
+    setNewCust(false);
+    setCustId(nid);
+    setPlaceEmail(nc.email);
   }
 
   function getStripeKey(){
@@ -9064,6 +9116,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           </div>
                         </div>
                       )}
+                    </div>
+
+                    {/* Save Customer button — commits the new customer so the rest of the order works against a real record */}
+                    <div style={{gridColumn:"1/-1",marginTop:10,padding:"10px 12px",background:C.accent+"08",border:"1px solid "+C.accent+"22",borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>
+                        Save the customer before moving forward — gets a real ID, shipping rates can fetch, and the record sticks around for future orders.
+                      </div>
+                      <Btn small onClick={saveNewCustomer}>💾 Save Customer</Btn>
                     </div>
                   </div>
                 )}
@@ -9651,10 +9711,18 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           </Btn>
           {step<3?(
             <Btn onClick={function(){
-                if(step===1){if(!step1Valid()){setShowErrors(true);return;}setShowErrors(false);}
-                if(step===2&&!step2Valid()) return;
+                if(step===1){
+                  if(newCust){ addToast("Please save the new customer first (💾 Save Customer button above)","warning"); return; }
+                  if(!step1Valid()){setShowErrors(true);return;}
+                  setShowErrors(false);
+                }
+                if(step===2&&!step2Valid()){
+                  var errs=step2Errors();
+                  if(errs.length) addToast(errs[0],"warning");
+                  return;
+                }
                 setStep(step+1);}}
-              disabled={(step===2&&!step2Valid())}>
+              disabled={(step===1&&newCust)||(step===2&&!step2Valid())}>
               Next →
             </Btn>
           ):(
@@ -12349,7 +12417,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v29-preview-detail</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v30-step-gating</div>
       </div>
     </div>
   );
@@ -13427,7 +13495,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v29-preview-detail
+        BUILD: 2026-05-30-v30-step-gating
       </div>
     </div>
   );
