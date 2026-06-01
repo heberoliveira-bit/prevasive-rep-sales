@@ -36,6 +36,22 @@ function commissionHoldDays(order){
   if(pm==="net_45") return 46;
   return RETURN_WINDOW_DAYS;
 }
+
+/* Subscription gate. True if rep can use the platform (paid, in-trial, or comp). */
+function isSubscriptionActive(rep){
+  if(!rep) return false;
+  var st = rep.subscriptionStatus;
+  if(st==="active") return true;
+  if(st==="comp"){
+    if(!rep.compExpiresAt) return true;          // forever
+    return new Date(rep.compExpiresAt).getTime() > Date.now();
+  }
+  if(st==="trial" && rep.trialStartedAt){
+    var trialMs = Date.now() - new Date(rep.trialStartedAt).getTime();
+    return trialMs < TRIAL_DAYS*24*60*60*1000;
+  }
+  return false;
+}
 var REP_PLANS = [
   {id:"starter", name:"Starter", price:100, ceiling:1000,  desc:"Up to $1,000/mo"},
   {id:"pro",     name:"Pro",     price:200, ceiling:10000, desc:"Up to $10,000/mo"},
@@ -4972,11 +4988,15 @@ function NotificationsBell({notifications,onMarkRead,onClear}) {
 
 
 function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
-                    setCommissions,addToast,showResult,onViewAsRep,onClose}) {
+                    setCommissions,currentUser,addToast,showResult,onViewAsRep,onClose}) {
   const [tab,       setTab]       = useState("overview");
   const [payTarget, setPayTarget] = useState(null);
   const [adminNote, setAdminNote] = useState(rep.adminNote||"");
   const [noteMsg,   setNoteMsg]   = useState("");
+  const [showGrant, setShowGrant] = useState(false);
+  const [grantPlan, setGrantPlan] = useState(rep.planId||"starter");
+  const [grantExpiry, setGrantExpiry] = useState("forever"); // "forever" | "1m" | "3m" | "6m" | "12m" | "custom"
+  const [grantCustomDate, setGrantCustomDate] = useState("");
 
   var repOrds   = orders.filter(function(o){return o.repId===rep.id;});
   var repComms  = (commissions||[]).filter(function(cp){return cp.repId===rep.id;});
@@ -5014,7 +5034,59 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
   function reactivate(){ updateRep({status:"active"}); addToast(rep.name+" reactivated","success"); }
   function approveW9(){ updateRep({w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()}); addToast("W-9 approved","success"); }
   function rejectW9() { updateRep({w9ReviewStatus:"rejected"}); addToast("W-9 rejected","warning"); }
-  function changePlan(planId){ updateRep({planId:planId,subscriptionStatus:"active"}); addToast("Plan updated","info"); }
+  function changePlan(planId){
+    var patch = rep.subscriptionStatus==="comp" ? {planId:planId} : {planId:planId,subscriptionStatus:"active"};
+    updateRep(patch); addToast("Plan updated","info");
+  }
+
+  function grantComp(){
+    var adminName = (currentUser&&currentUser.name)||"Admin";
+    var expiresAt = null;
+    if(grantExpiry==="1m")  expiresAt = new Date(Date.now()+30*24*60*60*1000).toISOString();
+    if(grantExpiry==="3m")  expiresAt = new Date(Date.now()+90*24*60*60*1000).toISOString();
+    if(grantExpiry==="6m")  expiresAt = new Date(Date.now()+180*24*60*60*1000).toISOString();
+    if(grantExpiry==="12m") expiresAt = new Date(Date.now()+365*24*60*60*1000).toISOString();
+    if(grantExpiry==="custom"){
+      if(!grantCustomDate){addToast("Pick an expiry date","warning");return;}
+      expiresAt = new Date(grantCustomDate+"T23:59:59").toISOString();
+      if(new Date(expiresAt).getTime()<=Date.now()){addToast("Expiry must be in the future","warning");return;}
+    }
+    var entry = {
+      action:"Free plan granted",
+      actor:adminName,
+      ts:new Date().toISOString(),
+      detail:(REP_PLANS.find(function(p){return p.id===grantPlan;})||{name:grantPlan}).name+(expiresAt?" · expires "+fmtDate(expiresAt):" · forever")
+    };
+    updateRep({
+      subscriptionStatus:"comp",
+      planId:grantPlan,
+      previousSubscriptionStatus:rep.subscriptionStatus||"trial",
+      compGrantedBy:adminName,
+      compGrantedAt:new Date().toISOString(),
+      compExpiresAt:expiresAt,
+      auditLog:(rep.auditLog||[]).concat([entry])
+    });
+    setShowGrant(false);
+    addToast("Free plan granted to "+rep.name,"success");
+  }
+
+  function revokeComp(){
+    var adminName = (currentUser&&currentUser.name)||"Admin";
+    var revertTo  = rep.previousSubscriptionStatus || "cancelled";
+    if(!window.confirm("Revoke "+rep.name+"'s free plan? They'll be moved back to \""+revertTo+"\" and will need to subscribe through Stripe to keep access if their trial has ended.")) return;
+    var entry = {
+      action:"Free plan revoked",
+      actor:adminName,
+      ts:new Date().toISOString(),
+      detail:"Reverted to "+revertTo
+    };
+    updateRep({
+      subscriptionStatus:revertTo,
+      compGrantedBy:null, compGrantedAt:null, compExpiresAt:null, previousSubscriptionStatus:null,
+      auditLog:(rep.auditLog||[]).concat([entry])
+    });
+    addToast("Free plan revoked","info");
+  }
 
   function saveNote() {
     updateRep({adminNote:adminNote});
@@ -5185,17 +5257,66 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                 </div>
                 {[
                   ["Plan / Ceiling", (plan?plan.name:"—")+" · "+fmtMoney(plan?plan.ceiling:0)+"/mo"],
-                  ["Subscription",rep.subscriptionStatus||"—"],
+                  ["Subscription", rep.subscriptionStatus==="comp"
+                    ? ("🎁 Complimentary"+(rep.compExpiresAt
+                        ? (new Date(rep.compExpiresAt).getTime()<Date.now()?" · EXPIRED "+fmtDate(rep.compExpiresAt):" · expires "+fmtDate(rep.compExpiresAt))
+                        : " · forever"))
+                    : (rep.subscriptionStatus||"—")],
                   ["Trial Started",rep.trialStartedAt?fmtDate(rep.trialStartedAt):"—"],
                   ["Rep Since",fmtDate(rep.createdAt)],
                   ["Last Order",repOrds.length>0?fmtDate(repOrds[0].createdAt):"No orders"],
-                ].map(function(row,i){return (
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
-                                       borderBottom:"1px solid "+C.border,fontSize:12}}>
-                    <span style={{color:C.muted}}>{row[0]}</span>
-                    <span style={{fontWeight:600,color:C.text}}>{row[1]}</span>
+                ].map(function(row,i){
+                  var compExpired = rep.subscriptionStatus==="comp"&&rep.compExpiresAt&&new Date(rep.compExpiresAt).getTime()<Date.now();
+                  var subColor = row[0]==="Subscription"&&rep.subscriptionStatus==="comp"
+                    ? (compExpired?C.danger:C.gold)
+                    : C.text;
+                  return (
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
+                                         borderBottom:"1px solid "+C.border,fontSize:12}}>
+                      <span style={{color:C.muted}}>{row[0]}</span>
+                      <span style={{fontWeight:600,color:subColor}}>{row[1]}</span>
+                    </div>
+                  );
+                })}
+                {rep.subscriptionStatus==="comp"&&rep.compGrantedBy&&(
+                  <div style={{padding:"8px 14px",fontSize:11,color:C.muted,background:C.gold+"08"}}>
+                    Granted by {rep.compGrantedBy} on {fmtDate(rep.compGrantedAt)}
                   </div>
-                );})}
+                )}
+              </div>
+
+              {/* Grant / Revoke Free Plan */}
+              <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"12px 14px"}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Complimentary Subscription</div>
+                {rep.subscriptionStatus==="comp" ? (function(){
+                  var compExpired = rep.compExpiresAt && new Date(rep.compExpiresAt).getTime() < Date.now();
+                  var bannerColor = compExpired ? C.danger : C.gold;
+                  return (
+                    <div>
+                      <div style={{padding:"10px 12px",background:bannerColor+"12",border:"1px solid "+bannerColor+"30",borderRadius:8,fontSize:12,color:C.text,marginBottom:8,lineHeight:1.6}}>
+                        {compExpired ? "⚠️ " : "🎁 "}<strong>{rep.name}</strong> is on a complimentary {(REP_PLANS.find(function(p){return p.id===rep.planId;})||{}).name||"plan"}.
+                        {rep.compExpiresAt
+                          ? (compExpired
+                              ? <span style={{color:C.danger,fontWeight:700}}> EXPIRED {fmtDate(rep.compExpiresAt)} — platform access blocked.</span>
+                              : <span style={{color:C.muted}}> Expires {fmtDate(rep.compExpiresAt)}.</span>)
+                          : <span style={{color:C.muted}}> No expiry.</span>}
+                      </div>
+                      <Btn variant="outline" small onClick={revokeComp}>Revoke Free Plan</Btn>
+                    </div>
+                  );
+                })() : (
+                  <div>
+                    <div style={{fontSize:11,color:C.muted,marginBottom:8,lineHeight:1.5}}>
+                      Grant {rep.name} free platform access at one of the plan tiers. No Stripe charges. Revocable any time.
+                    </div>
+                    <Btn variant="outline" small onClick={function(){
+                      setGrantPlan(rep.planId||"starter");
+                      setGrantExpiry("forever");
+                      setGrantCustomDate("");
+                      setShowGrant(true);
+                    }}>🎁 Grant Free Plan</Btn>
+                  </div>
+                )}
               </div>
 
               {/* Plan change */}
@@ -5480,6 +5601,72 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
           )}
         </div>
       </div>
+      {showGrant&&(
+        <Modal title={"🎁 Grant Free Plan — "+rep.name} onClose={function(){setShowGrant(false);}}
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn variant="ghost" onClick={function(){setShowGrant(false);}}>Cancel</Btn>
+            <Btn onClick={grantComp}>Grant Free Plan</Btn>
+          </div>}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:18,lineHeight:1.6}}>
+            This will give {rep.name} full platform access without going through Stripe. Their plan tier determines their monthly commission ceiling. The grant is reversible — you can revoke any time.
+          </div>
+
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>Plan tier</div>
+          <div style={{display:"flex",gap:8,marginBottom:18}}>
+            {REP_PLANS.map(function(p){
+              var sel = grantPlan===p.id;
+              return (
+                <button key={p.id} onClick={function(){setGrantPlan(p.id);}}
+                  style={{flex:1,padding:"12px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",textAlign:"left",
+                          border:"2px solid "+(sel?C.accent:C.border),
+                          background:sel?C.accent+"10":C.surface2}}>
+                  <div style={{fontWeight:800,fontSize:13,color:sel?C.accent:C.text,marginBottom:2}}>{p.name}</div>
+                  <div style={{fontSize:10,color:C.dim}}>{fmtMoney(p.ceiling)}/mo ceiling</div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".05em"}}>Duration</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3, 1fr)",gap:6,marginBottom:12}}>
+            {[
+              ["forever","♾ Forever"],
+              ["1m","1 month"],
+              ["3m","3 months"],
+              ["6m","6 months"],
+              ["12m","12 months"],
+              ["custom","Custom date"]
+            ].map(function(opt){
+              var sel = grantExpiry===opt[0];
+              return (
+                <button key={opt[0]} onClick={function(){setGrantExpiry(opt[0]);}}
+                  style={{padding:"9px 6px",borderRadius:7,fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:sel?700:500,
+                          border:"1px solid "+(sel?C.accent:C.border),
+                          background:sel?C.accent+"12":C.surface2,
+                          color:sel?C.accent:C.text}}>
+                  {opt[1]}
+                </button>
+              );
+            })}
+          </div>
+          {grantExpiry==="custom"&&(
+            <div style={{marginBottom:12}}>
+              <input type="date" value={grantCustomDate} onChange={function(e){setGrantCustomDate(e.target.value);}}
+                min={new Date(Date.now()+24*60*60*1000).toISOString().slice(0,10)}
+                style={{width:"100%",padding:"10px 12px",borderRadius:7,border:"1px solid "+C.border,background:C.surface2,color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+          )}
+
+          <div style={{padding:"10px 12px",background:C.surface2,border:"1px solid "+C.border,borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.6}}>
+            <div style={{fontWeight:700,color:C.text,marginBottom:4}}>Summary</div>
+            {rep.name} will receive a complimentary <strong style={{color:C.text}}>{(REP_PLANS.find(function(p){return p.id===grantPlan;})||{}).name}</strong> plan
+            {grantExpiry==="forever" ? " with no expiry" :
+             grantExpiry==="custom" ? (grantCustomDate?" expiring on "+fmtDate(grantCustomDate):" (pick an expiry date above)") :
+             " for "+grantExpiry.replace("m"," month"+(grantExpiry==="1m"?"":"s"))}
+            . An audit-log entry will be recorded.
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -5577,14 +5764,16 @@ function AdminDashboard({orders,reps,customers,products,commissions,onNav}) {
           {(function(){
             var mrr = reps.filter(function(r){return r.subscriptionStatus==="active";})
               .reduce(function(s,r){var p=REP_PLANS.find(function(x){return x.id===r.planId;});return s+(p?p.price:0);},0);
-            var starters = reps.filter(function(r){return r.planId==="starter"&&r.subscriptionStatus==="active";}).length;
-            var pros = reps.filter(function(r){return r.planId==="pro"&&r.subscriptionStatus==="active";}).length;
+            var starters = reps.filter(function(r){return r.planId==="starter"&&(r.subscriptionStatus==="active"||r.subscriptionStatus==="comp");}).length;
+            var pros = reps.filter(function(r){return r.planId==="pro"&&(r.subscriptionStatus==="active"||r.subscriptionStatus==="comp");}).length;
             var trials = reps.filter(function(r){return r.subscriptionStatus==="trial";}).length;
+            var comps = reps.filter(function(r){return r.subscriptionStatus==="comp";}).length;
             return (
               <div>
                 <div style={{fontSize:28,fontWeight:800,fontFamily:"monospace",color:C.success,marginBottom:8}}>{fmtMoney(mrr)}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>
-                <div style={{display:"flex",gap:12,fontSize:11,color:C.muted}}>
+                <div style={{display:"flex",gap:12,fontSize:11,color:C.muted,flexWrap:"wrap"}}>
                   <span>{starters} Starter</span><span>{pros} Pro</span><span>{trials} Trial</span>
+                  {comps>0&&<span style={{color:C.gold}}>🎁 {comps} Comp</span>}
                 </div>
               </div>
             );
@@ -6601,7 +6790,7 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast}) {
 }
 
 /* ─── Admin Reps ─────────────────────────────────────────────────────────── */
-function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,setApplications,legalDocs,signatures,addToast,showResult,onViewAsRep}) {
+function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,setApplications,legalDocs,signatures,currentUser,addToast,showResult,onViewAsRep}) {
   const [tab,      setTab]      = useState("reps");
   const [showForm, setShowForm] = useState(false);
   const [name,     setName]     = useState("");
@@ -6657,7 +6846,8 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
   }
 
   function changePlan(rep, planId) {
-    var updated = Object.assign({},rep,{planId:planId,subscriptionStatus:planId?"active":"trial"});
+    var nextStatus = rep.subscriptionStatus==="comp" ? "comp" : (planId?"active":"trial");
+    var updated = Object.assign({},rep,{planId:planId,subscriptionStatus:nextStatus});
     setReps(function(prev){return prev.map(function(r){return r.id===rep.id?updated:r;});});
     dbSave("crm_reps",rep.id,updated);
     addToast("Plan updated for "+rep.name,"info");
@@ -6897,14 +7087,15 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
               <tbody>
                 {reps.map(function(rep){
                   var plan = REP_PLANS.find(function(p){return p.id===rep.planId;})||REP_PLANS[0];
-                  var sc = {active:C.success,trial:C.accent,suspended:C.danger}[rep.subscriptionStatus]||C.muted;
+                  var sc = {active:C.success,trial:C.accent,suspended:C.danger,comp:C.gold}[rep.subscriptionStatus]||C.muted;
+                  var subLabel = rep.subscriptionStatus==="comp" ? "🎁 Comp" : (rep.subscriptionStatus||"—");
                   return (
                     <tr key={rep.id} style={{borderTop:"1px solid "+C.border}}>
                       <td style={{padding:"10px 16px",fontSize:13,fontWeight:600,color:C.text}}>{rep.name}</td>
                       <td style={{padding:"10px 16px",fontSize:12,color:C.text}}>{plan?plan.name:"—"}</td>
                       <td style={{padding:"10px 16px",fontSize:12,fontFamily:"monospace",color:C.muted}}>{plan?fmtMoney(plan.ceiling)+"/mo":"—"}</td>
                       <td style={{padding:"10px 16px"}}>
-                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"18",color:sc,textTransform:"capitalize"}}>{rep.subscriptionStatus}</span>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:sc+"18",color:sc,textTransform:rep.subscriptionStatus==="comp"?"none":"capitalize"}}>{subLabel}</span>
                       </td>
                       <td style={{padding:"10px 16px"}}>
                         <select value={rep.planId||""} onChange={function(e){changePlan(rep,e.target.value);}}
@@ -6930,6 +7121,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
           orders={orders} commissions={commissions} legalDocs={legalDocs}
           signatures={signatures} reps={reps} setReps={setReps}
           setCommissions={setCommissions}
+          currentUser={currentUser}
           addToast={addToast} showResult={showResult}
           onViewAsRep={onViewAsRep}
           onClose={function(){setDrawerRep(null);}}/>
@@ -10351,17 +10543,30 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
                     {plan&&<div style={{fontSize:12,color:C.muted,marginTop:3}}>{plan.desc}</div>}
                   </div>
                   <div style={{textAlign:"right"}}>
-                    {plan&&<div style={{fontSize:28,fontWeight:900,fontFamily:"monospace",color:C.text}}>${plan.price}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>}
+                    {plan&&repData.subscriptionStatus!=="comp"&&<div style={{fontSize:28,fontWeight:900,fontFamily:"monospace",color:C.text}}>${plan.price}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>}
+                    {plan&&repData.subscriptionStatus==="comp"&&<div style={{fontSize:18,fontWeight:800,color:C.gold}}>🎁 Complimentary</div>}
                     <span style={{fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,
-                      background:repData.subscriptionStatus==="active"?C.success+"18":repData.subscriptionStatus==="trial"?C.accent+"18":C.warning+"18",
-                      color:repData.subscriptionStatus==="active"?C.success:repData.subscriptionStatus==="trial"?C.accent:C.warning,
-                      textTransform:"capitalize"}}>{repData.subscriptionStatus||"inactive"}</span>
+                      background:repData.subscriptionStatus==="comp"?C.gold+"18":(repData.subscriptionStatus==="active"?C.success+"18":(repData.subscriptionStatus==="trial"?C.accent+"18":C.warning+"18")),
+                      color:repData.subscriptionStatus==="comp"?C.gold:(repData.subscriptionStatus==="active"?C.success:(repData.subscriptionStatus==="trial"?C.accent:C.warning)),
+                      textTransform:repData.subscriptionStatus==="comp"?"none":"capitalize"}}>{repData.subscriptionStatus==="comp"?"Comp":(repData.subscriptionStatus||"inactive")}</span>
                   </div>
                 </div>
+                {repData.subscriptionStatus==="comp"&&(
+                  <div style={{padding:"12px 14px",background:C.gold+"10",border:"1px solid "+C.gold+"30",borderRadius:8,fontSize:12,color:C.text,marginBottom:12,lineHeight:1.6}}>
+                    🎁 You've been granted a complimentary {plan?plan.name:""} plan{repData.compGrantedBy?" by "+repData.compGrantedBy:""}.
+                    {repData.compExpiresAt
+                      ? <span> Expires <strong>{fmtDate(repData.compExpiresAt)}</strong>.</span>
+                      : <span> No expiry — full platform access at no cost.</span>}
+                  </div>
+                )}
                 {/* Plan details */}
                 {(function(){
                   var rows=[["Commission Ceiling", plan?fmtMoney(plan.ceiling)+"/mo":"—"]];
-                  if(repData.subscriptionStatus==="active"){
+                  if(repData.subscriptionStatus==="comp"){
+                    rows.push(["Billing","Complimentary — $0/month"]);
+                    rows.push(["Granted", repData.compGrantedAt?fmtDate(repData.compGrantedAt):"—"]);
+                    if(repData.compExpiresAt) rows.push(["Expires", fmtDate(repData.compExpiresAt)]);
+                  } else if(repData.subscriptionStatus==="active"){
                     rows.push(["Billing","$"+(plan?plan.price:0)+"/month"]);
                     rows.push(["Member since", repData.activatedAt?fmtDate(repData.activatedAt):(repData.trialStartedAt?fmtDate(repData.trialStartedAt):"—")]);
                   } else {
@@ -10413,13 +10618,19 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
 
                 return (
                   <div>
-                    {pastDue&&(
+                    {repData.subscriptionStatus==="comp"&&(
+                      <div style={{marginBottom:14,padding:"12px 14px",background:C.gold+"10",border:"1px solid "+C.gold+"30",borderRadius:10}}>
+                        <div style={{fontWeight:700,fontSize:12,color:C.gold,marginBottom:2}}>🎁 Complimentary plan</div>
+                        <div style={{fontSize:11,color:C.muted}}>You're not being billed. Stripe subscription not required.</div>
+                      </div>
+                    )}
+                    {pastDue&&repData.subscriptionStatus!=="comp"&&(
                       <div style={{marginBottom:12,padding:"12px 14px",background:C.danger+"10",border:"1px solid "+C.danger+"25",borderRadius:10}}>
                         <div style={{fontWeight:700,fontSize:12,color:C.danger,marginBottom:2}}>⚠ Payment past due</div>
                         <div style={{fontSize:11,color:C.muted}}>Update your card to keep your subscription active.</div>
                       </div>
                     )}
-                    {!isActive&&(
+                    {!isActive&&repData.subscriptionStatus!=="comp"&&(
                       <div style={{marginBottom:14}}>
                         <button onClick={function(){callBilling("create_checkout", repData.planId||"starter");}}
                           style={{display:"block",width:"100%",textAlign:"center",padding:"13px",borderRadius:10,
@@ -12022,7 +12233,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v21-tax-pct</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v23-comp-polish</div>
       </div>
     </div>
   );
@@ -13057,8 +13268,10 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
         <div style={{fontSize:22,fontWeight:800,marginBottom:2}}>{(repData&&repData.name)||(currentUser&&currentUser.name)||"My Profile"}</div>
         <div style={{fontSize:13,opacity:0.85}}>{(repData&&repData.email)||(currentUser&&currentUser.email)||""}</div>
         {plan&&(
-          <div style={{marginTop:14,padding:"6px 12px",background:"rgba(255,255,255,.18)",borderRadius:20,display:"inline-block",fontSize:11,fontWeight:700,textTransform:"capitalize"}}>
-            {plan.name} · ${plan.price}/mo · {subStatus}
+          <div style={{marginTop:14,padding:"6px 12px",background:"rgba(255,255,255,.18)",borderRadius:20,display:"inline-block",fontSize:11,fontWeight:700,textTransform:subStatus==="comp"?"none":"capitalize"}}>
+            {subStatus==="comp"
+              ? <span>🎁 {plan.name} · Complimentary{repData.compExpiresAt?(" · until "+fmtDate(repData.compExpiresAt)):""}</span>
+              : <span>{plan.name} · ${plan.price}/mo · {subStatus}</span>}
           </div>
         )}
       </div>
@@ -13098,7 +13311,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v21-tax-pct
+        BUILD: 2026-05-30-v23-comp-polish
       </div>
     </div>
   );
@@ -13721,11 +13934,11 @@ function App() {
 
   // Rep agreement gate (skip when admin impersonating)
   var needsAgreement = !isAdmin && !viewAsRep && myRepData && !myRepData.agreementSignedAt;
-  // Rep subscription gate
+  // Rep subscription gate — comp status passes like active
   var now2 = Date.now();
   var trialExpired = !isAdmin && !viewAsRep && myRepData && myRepData.trialStartedAt &&
     (now2-new Date(myRepData.trialStartedAt).getTime()) >= TRIAL_DAYS*24*60*60*1000 &&
-    myRepData.subscriptionStatus!=="active";
+    !isSubscriptionActive(myRepData);
 
   // Terms of service gate — first login only for reps (skip when admin impersonating)
   var needsTerms = !isAdmin && !viewAsRep && myRepData && !myRepData.termsAcceptedAt;
@@ -13880,6 +14093,7 @@ function App() {
             commissions={commissions} setCommissions={setCommissions}
             applications={applications} setApplications={setApplications}
             legalDocs={legalDocs} signatures={signatures}
+            currentUser={currentUser}
             addToast={addToast} showResult={showResult}
             onViewAsRep={function(rep){setViewAsRep(rep);setActiveTab("dashboard");}}/>
         )}
