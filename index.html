@@ -11869,7 +11869,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v18-edit-addr-inline</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v19-mobile-edit-addr</div>
       </div>
     </div>
   );
@@ -12024,6 +12024,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [cardError, setCardError] = useState("");
   const [chargeErr, setChargeErr] = useState("");
   const stripeRef = useState({stripe:null, card:null, el:null})[0];
+  const [editAddr, setEditAddr] = useState(null); // null | "ship" | "bill"
+  const [editForm, setEditForm] = useState({address:"",city:"",state:"",zip:""});
 
   useEffect(function(){
     if(!custId){
@@ -12329,15 +12331,104 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         )}
         {selCust && shipAddr && (
           <div style={{marginTop:8,fontSize:14,color:C.text,padding:"12px 14px",background:C.surface2,borderRadius:8,lineHeight:1.55}}>
-            <div><strong style={{color:C.text}}>📍 Ship to:</strong> <span style={{color:C.muted}}>{shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}</span></div>
-            {selCust.billingAddress && (selCust.billingAddress.address||selCust.billingAddress.zip) ? (
-              <div style={{marginTop:6}}><strong style={{color:C.text}}>💳 Bill to:</strong> <span style={{color:C.muted}}>{selCust.billingAddress.address}, {selCust.billingAddress.city}, {selCust.billingAddress.state} {selCust.billingAddress.zip}</span></div>
+            {editAddr==="ship" ? (
+              <div style={{fontSize:13}}>
+                <div style={{fontWeight:700,color:C.text,marginBottom:8,fontSize:12,letterSpacing:".05em",textTransform:"uppercase"}}>📍 Edit Shipping</div>
+                <PlacesAutocomplete value={editForm.address}
+                  onChange={function(v){setEditForm(Object.assign({},editForm,{address:v}));}}
+                  placeholder="Street address"
+                  onSelect={function(a){setEditForm({address:a.street,city:a.city,state:a.state,zip:a.zip});}}/>
+                <input placeholder="City" value={editForm.city} onChange={function(e){setEditForm(Object.assign({},editForm,{city:e.target.value}));}}
+                  style={{width:"100%",padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box",marginTop:8}}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+                  <input placeholder="State" maxLength={2} value={editForm.state} onChange={function(e){setEditForm(Object.assign({},editForm,{state:e.target.value.toUpperCase().slice(0,2)}));}}
+                    style={{width:"100%",padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                  <input placeholder="ZIP" value={editForm.zip} onChange={function(e){setEditForm(Object.assign({},editForm,{zip:e.target.value}));}}
+                    style={{width:"100%",padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                </div>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <button onClick={function(){
+                    if(!editForm.address.trim()||!editForm.zip.trim()){addToast&&addToast("Street + ZIP required","warning");return;}
+                    var hasMulti = selCust.addresses && selCust.addresses.length>0;
+                    var updated;
+                    if(hasMulti){
+                      // Update the selected address inside the addresses array
+                      var addrs = selCust.addresses.map(function(a){
+                        return a.id===shipAddr.id ? Object.assign({},a,{address:editForm.address.trim(),city:editForm.city.trim(),state:editForm.state.trim().toUpperCase(),zip:editForm.zip.trim()}) : a;
+                      });
+                      updated = Object.assign({}, selCust, {addresses:addrs});
+                    } else {
+                      updated = Object.assign({}, selCust, {address:editForm.address.trim(),city:editForm.city.trim(),state:editForm.state.trim().toUpperCase(),zip:editForm.zip.trim()});
+                    }
+                    setCustomers(function(prev){return (prev||[]).map(function(c){return c.id===selCust.id?updated:c;});});
+                    try{var sb=getSB();if(sb)sb.from("crm_customers").update({data:updated}).eq("id",selCust.id).then(function(){});}catch(e){}
+                    addToast&&addToast("Shipping address updated","success");
+                    setSelectedRate(null);
+                    setEditAddr(null);
+                  }} style={{flex:1,padding:"12px",borderRadius:8,border:"none",background:C.accent,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14}}>Save</button>
+                  <button onClick={function(){setEditAddr(null);}}
+                    style={{padding:"12px 16px",borderRadius:8,border:"1px solid "+C.border,background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14}}>Cancel</button>
+                </div>
+              </div>
+            ) : editAddr==="bill" ? (
+              <div style={{fontSize:13}}>
+                <div style={{fontWeight:700,color:C.text,marginBottom:6,fontSize:12,letterSpacing:".05em",textTransform:"uppercase"}}>💳 Edit Billing</div>
+                <div style={{fontSize:11,color:C.muted,marginBottom:8}}>Leave blank to use shipping address.</div>
+                <PlacesAutocomplete value={editForm.address}
+                  onChange={function(v){setEditForm(Object.assign({},editForm,{address:v}));}}
+                  placeholder="Billing street"
+                  onSelect={function(a){setEditForm({address:a.street,city:a.city,state:a.state,zip:a.zip});}}/>
+                <input placeholder="City" value={editForm.city} onChange={function(e){setEditForm(Object.assign({},editForm,{city:e.target.value}));}}
+                  style={{width:"100%",padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box",marginTop:8}}/>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginTop:8}}>
+                  <input placeholder="State" maxLength={2} value={editForm.state} onChange={function(e){setEditForm(Object.assign({},editForm,{state:e.target.value.toUpperCase().slice(0,2)}));}}
+                    style={{width:"100%",padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                  <input placeholder="ZIP" value={editForm.zip} onChange={function(e){setEditForm(Object.assign({},editForm,{zip:e.target.value}));}}
+                    style={{width:"100%",padding:"12px 10px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box"}}/>
+                </div>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <button onClick={function(){
+                    var blank = !editForm.address.trim() && !editForm.city.trim() && !editForm.zip.trim();
+                    var updated = Object.assign({}, selCust, {
+                      billingAddress: blank ? null : {address:editForm.address.trim(),city:editForm.city.trim(),state:editForm.state.trim().toUpperCase(),zip:editForm.zip.trim()}
+                    });
+                    setCustomers(function(prev){return (prev||[]).map(function(c){return c.id===selCust.id?updated:c;});});
+                    try{var sb=getSB();if(sb)sb.from("crm_customers").update({data:updated}).eq("id",selCust.id).then(function(){});}catch(e){}
+                    addToast&&addToast(blank?"Billing set to match shipping":"Billing address updated","success");
+                    setEditAddr(null);
+                  }} style={{flex:1,padding:"12px",borderRadius:8,border:"none",background:C.accent,color:"#fff",cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:14}}>Save</button>
+                  <button onClick={function(){setEditAddr(null);}}
+                    style={{padding:"12px 16px",borderRadius:8,border:"1px solid "+C.border,background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontWeight:600,fontSize:14}}>Cancel</button>
+                </div>
+              </div>
             ) : (
-              <div style={{marginTop:6,fontStyle:"italic",color:C.muted}}>💳 Billing same as shipping</div>
-            )}
-            {selCust.termsStatus==="active" && (
-              <div style={{marginTop:10,padding:"5px 10px",background:C.success+"18",color:C.success,borderRadius:6,display:"inline-block",fontWeight:700,fontSize:11,letterSpacing:".03em"}}>
-                ✓ {fmtTerms(selCust.termsType||"due_receipt")} APPROVED
+              <div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
+                  <div style={{flex:1,minWidth:0}}><strong style={{color:C.text}}>📍 Ship to:</strong> <span style={{color:C.muted}}>{shipAddr.address}, {shipAddr.city}, {shipAddr.state} {shipAddr.zip}</span></div>
+                  <button onClick={function(){
+                    setEditForm({address:shipAddr.address||"",city:shipAddr.city||"",state:shipAddr.state||"",zip:shipAddr.zip||""});
+                    setEditAddr("ship");
+                  }} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontSize:12,fontWeight:700,padding:"2px 6px",fontFamily:"inherit",flexShrink:0}}>✏️ Edit</button>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginTop:6}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    {selCust.billingAddress && (selCust.billingAddress.address||selCust.billingAddress.zip) ? (
+                      <span><strong style={{color:C.text}}>💳 Bill to:</strong> <span style={{color:C.muted}}>{selCust.billingAddress.address}, {selCust.billingAddress.city}, {selCust.billingAddress.state} {selCust.billingAddress.zip}</span></span>
+                    ) : (
+                      <span style={{fontStyle:"italic",color:C.muted}}>💳 Billing same as shipping</span>
+                    )}
+                  </div>
+                  <button onClick={function(){
+                    var b = selCust.billingAddress||{};
+                    setEditForm({address:b.address||"",city:b.city||"",state:b.state||"",zip:b.zip||""});
+                    setEditAddr("bill");
+                  }} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontSize:12,fontWeight:700,padding:"2px 6px",fontFamily:"inherit",flexShrink:0}}>✏️ Edit</button>
+                </div>
+                {selCust.termsStatus==="active" && (
+                  <div style={{marginTop:10,padding:"5px 10px",background:C.success+"18",color:C.success,borderRadius:6,display:"inline-block",fontWeight:700,fontSize:11,letterSpacing:".03em"}}>
+                    ✓ {fmtTerms(selCust.termsType||"due_receipt")} APPROVED
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -12854,7 +12945,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v18-edit-addr-inline
+        BUILD: 2026-05-30-v19-mobile-edit-addr
       </div>
     </div>
   );
