@@ -2615,7 +2615,8 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
       products=payData.products||[];
   var isTerms = customer.termsStatus==="active";
   var stripeConf=(function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
-  var pubKey=stripeConf.publishableKey||"";
+  var stripeMode=stripeConf.stripeMode||"live";
+  var pubKey=(stripeMode==="test" ? stripeConf.publishableKeyTest : (stripeConf.publishableKeyLive||stripeConf.publishableKey))||"";
   var edgeFn=stripeConf.edgeFnUrl||"";
   const [cardHolder,setCardHolder]=useState(customer.name||"");
   const [agreed,setAgreed]=useState(false);
@@ -5891,7 +5892,8 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
   var cust = (customers||[]).find(function(x){return x.id===order.custId;})||{};
   var grand = order.totals&&order.totals.grand||0;
   var stripeConf = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
-  var pubKey = stripeConf.publishableKey||"";
+  var stripeMode = stripeConf.stripeMode||"live";
+  var pubKey = (stripeMode==="test" ? stripeConf.publishableKeyTest : (stripeConf.publishableKeyLive||stripeConf.publishableKey))||"";
   var edgeFn = stripeConf.edgeFnUrl||"";
 
   const [mode,       setMode]       = useState("card"); // card | link | manual
@@ -12478,7 +12480,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v31-stripe-test-mode</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v32-stripe-mode-all-paths</div>
       </div>
     </div>
   );
@@ -13556,7 +13558,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v31-stripe-test-mode
+        BUILD: 2026-05-30-v32-stripe-mode-all-paths
       </div>
     </div>
   );
