@@ -2650,9 +2650,11 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
     sr.stripe.createPaymentMethod({type:"card",card:sr.card,billing_details:{name:cardHolder}})
       .then(function(result){
         if(result.error){setErr(result.error.message);setPaying(false);return;}
+        var stripeMode = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").stripeMode||"live";}catch(e){return "live";}})();
         return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge",paymentMethodId:result.paymentMethod.id,
             amount:Math.round((totals.grand||0)*100),currency:"usd",
+            mode: stripeMode,
             orderId:(payData&&payData.orderId)||(order&&order.id)||"",
             payToken:payToken||"",
             description:company+" — Order "+(payData.orderId||order.id)})
@@ -5920,9 +5922,11 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
     sr.stripe.createPaymentMethod({type:"card",card:sr.card,billing_details:{name:cardHolder}})
       .then(function(res){
         if(res.error){setErr(res.error.message);setCharging(false);return;}
+        var stripeMode = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").stripeMode||"live";}catch(e){return "live";}})();
         return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge",paymentMethodId:res.paymentMethod.id,
             amount:Math.round(grand*100),currency:"usd",
+            mode: stripeMode,
             orderId:(order&&order.id)||"",
             description:"PreVasive — Order "+order.id+" — "+(cust.name||"")})
         }).then(function(r){return r.json();}).then(function(d){
@@ -7591,17 +7595,43 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
             </div>
 
             <div style={{background:C.bg,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:11,color:C.muted,lineHeight:1.7,border:"1px solid "+C.border}}>
-              <strong style={{color:C.text}}>Secret key goes in Supabase — not here:</strong><br/>
-              <code style={{color:C.accent}}>supabase secrets set STRIPE_SECRET_KEY=sk_live_...</code>
+              <strong style={{color:C.text}}>Secret keys go in Supabase — not here:</strong><br/>
+              <code style={{color:C.accent}}>supabase secrets set STRIPE_SECRET_KEY=sk_live_...</code><br/>
+              <code style={{color:C.accent}}>supabase secrets set STRIPE_TEST_SECRET_KEY=sk_test_...</code>
             </div>
 
-            <Field label="Publishable Key" value={(stripeAccountA&&stripeAccountA.publishableKey)||""}
-              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{publishableKey:v});});}}
-              placeholder="pk_live_…" hint="Shows the card form on customer payment page"/>
+            {/* Mode toggle */}
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Active Mode</div>
+              <div style={{display:"flex",gap:8}}>
+                {[
+                  ["live", "🔴 Live", "Real charges, real money"],
+                  ["test", "🧪 Test", "No real money — use Stripe test cards"]
+                ].map(function(opt){
+                  var sel = ((stripeAccountA&&stripeAccountA.stripeMode)||"live")===opt[0];
+                  return (
+                    <button key={opt[0]} onClick={function(){onSaveStripeAccountA(function(p){return Object.assign({},p,{stripeMode:opt[0]});});}}
+                      style={{flex:1,padding:"10px 12px",borderRadius:8,fontFamily:"inherit",cursor:"pointer",textAlign:"left",
+                              border:"2px solid "+(sel?(opt[0]==="test"?C.warning:C.danger):C.border),
+                              background:sel?(opt[0]==="test"?C.warning+"10":C.danger+"08"):C.surface}}>
+                      <div style={{fontWeight:800,fontSize:13,color:sel?(opt[0]==="test"?C.warning:C.danger):C.text}}>{opt[1]}</div>
+                      <div style={{fontSize:10,color:C.dim,marginTop:2}}>{opt[2]}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <Field label="Live Publishable Key" value={(stripeAccountA&&(stripeAccountA.publishableKeyLive||stripeAccountA.publishableKey))||""}
+              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{publishableKeyLive:v});});}}
+              placeholder="pk_live_…" hint="Used for real charges. From Stripe Dashboard (Live mode toggle on)."/>
+            <Field label="Test Publishable Key" value={(stripeAccountA&&stripeAccountA.publishableKeyTest)||""}
+              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{publishableKeyTest:v});});}}
+              placeholder="pk_test_…" hint="Used for test charges. From Stripe Dashboard (Test mode toggle on)."/>
             <Field label="Charge Edge Function URL" value={(stripeAccountA&&stripeAccountA.edgeFnUrl)||""}
               onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
               placeholder="https://xxx.supabase.co/functions/v1/stripe-charge"
-              hint="Processes customer card payments — deploy stripe-charge function first"/>
+              hint="One URL handles both modes — the active mode is sent in each request."/>
             <Field label="Connect Edge Function URL" value={(stripeAccountA&&stripeAccountA.connectFnUrl)||""}
               onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{connectFnUrl:v});});}}
               placeholder="https://xxx.supabase.co/functions/v1/stripe-connect"
@@ -7610,12 +7640,22 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
               onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{platformFee:parseFloat(v)||0});});}}
               type="number" placeholder="0" hint="Optional: % withheld from each payout (0 = no fee)"/>
 
-            {(stripeAccountA&&stripeAccountA.publishableKey&&stripeAccountA.edgeFnUrl)&&(
-              <div style={{marginTop:12,padding:"8px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,fontSize:11,color:C.success,fontWeight:600}}>
-                ✓ Customer payments ready
-                {stripeAccountA.connectFnUrl&&" · ✓ Rep payouts ready"}
-              </div>
-            )}
+            {(stripeAccountA&&stripeAccountA.edgeFnUrl)&&(function(){
+              var mode = (stripeAccountA.stripeMode||"live");
+              var hasKey = mode==="test" ? !!stripeAccountA.publishableKeyTest : !!(stripeAccountA.publishableKeyLive||stripeAccountA.publishableKey);
+              return (
+                <div style={{marginTop:12,padding:"8px 12px",
+                            background:(mode==="test"?C.warning:C.success)+"10",
+                            border:"1px solid "+(mode==="test"?C.warning:C.success)+"25",
+                            borderRadius:8,fontSize:11,
+                            color:(mode==="test"?C.warning:C.success),fontWeight:600}}>
+                  {hasKey
+                    ? "✓ "+(mode==="test"?"TEST":"LIVE")+" mode active — customer payments ready"
+                    : "⚠ "+(mode==="test"?"TEST":"LIVE")+" mode active but no "+(mode==="test"?"test":"live")+" publishable key set above"}
+                  {stripeAccountA.connectFnUrl&&hasKey&&" · ✓ Rep payouts ready"}
+                </div>
+              );
+            })()}
           </div>
 
           {/* ── Account 2 ────────────────────────────────────────── */}
@@ -8829,8 +8869,16 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     setPlaceEmail(nc.email);
   }
 
+  function getStripeMode(){
+    try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").stripeMode||"live";}catch(e){return "live";}
+  }
   function getStripeKey(){
-    try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").publishableKey||"";}catch(e){return "";}
+    try{
+      var cfg = JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");
+      var mode = cfg.stripeMode||"live";
+      var key = mode==="test" ? cfg.publishableKeyTest : (cfg.publishableKeyLive||cfg.publishableKey);
+      return key||"";
+    }catch(e){return "";}
   }
   function getStripeEdgeFn(){
     try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}
@@ -8851,10 +8899,12 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         fetch(stripeEdge,{
           method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge",paymentMethodId:pmId,amount:Math.round((calcTotals().grand||0)*100),currency:"usd",
+            mode: getStripeMode(),
             orderId:preId, repId:repId||"", custId:custId||"",
+            customerEmail:(selCust&&selCust.email)||custEmail||"",
             description:"Order "+preId+" — "+(selCust?selCust.name:custName)}),
         }).then(function(r){return r.json();}).then(function(d){
-          if(d.error){setPlacing(false);setChargeErr(d.error);return;}
+          if(!d.ok||d.error){setPlacing(false);setChargeErr(d.error||"Charge failed");return;}
           setCharged({id:d.paymentIntentId||pmId,last4:d.last4||"????",brand:d.brand||"Card"});
           setCardLast4(d.last4||"");
           doPlace(preId);
@@ -9574,6 +9624,17 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           {/* Step 3 — Confirm */}
           {step===3&&(
             <div>
+              {/* Test mode banner */}
+              {getStripeMode()==="test"&&(
+                <div style={{padding:"10px 14px",background:C.warning+"15",border:"2px dashed "+C.warning+"60",borderRadius:8,fontSize:12,marginBottom:14,color:C.warning,fontWeight:700,display:"flex",alignItems:"center",gap:10}}>
+                  <span style={{fontSize:18}}>🧪</span>
+                  <div>
+                    <div>TEST MODE — no real charges</div>
+                    <div style={{fontSize:10,fontWeight:500,color:C.muted,marginTop:2}}>Use Stripe test cards (e.g. 4242 4242 4242 4242 with any future date and any CVC). Switch to Live in Settings → Stripe to charge real cards.</div>
+                  </div>
+                </div>
+              )}
+
               {/* Commission ceiling check */}
               {(function(){
                 if(!plan) return null;
@@ -12417,7 +12478,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v30-step-gating</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v31-stripe-test-mode</div>
       </div>
     </div>
   );
@@ -13495,7 +13556,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v30-step-gating
+        BUILD: 2026-05-30-v31-stripe-test-mode
       </div>
     </div>
   );
