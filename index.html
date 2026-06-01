@@ -9688,10 +9688,12 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           })()}
           billingAddress={(function(){
             if(!selCust) return null;
+            // DEBUG: surfaces customer shape so we can diagnose persistent "same as shipping" issues
+            try{ console.log("[invoice-preview] selCust billing fields:", {billingAddress:selCust.billingAddress, billingCity:selCust.billingCity, billingState:selCust.billingState, billingZip:selCust.billingZip, addresses:selCust.addresses, shipAddrId:shipAddrId}); }catch(e){}
             var b = selCust.billingAddress;
-            // Object shape: {address, city, state, zip}
+            // 1. Object shape: {address, city, state, zip}
             if(b && typeof b === "object" && b.address) return b;
-            // Legacy flat shape: billingAddress is the street string + sibling billingCity/billingState/billingZip
+            // 2. Legacy flat shape: billingAddress is the street string + sibling billingCity/billingState/billingZip
             if(typeof b === "string" && b.trim()){
               return {
                 address: b,
@@ -9699,6 +9701,22 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 state: selCust.billingState||"",
                 zip: selCust.billingZip||""
               };
+            }
+            // 3. Sibling billing fields without billingAddress (partial data)
+            if(selCust.billingCity||selCust.billingState||selCust.billingZip){
+              return {
+                address: typeof b === "string" ? b : "",
+                city: selCust.billingCity||"",
+                state: selCust.billingState||"",
+                zip: selCust.billingZip||""
+              };
+            }
+            // 4. Multi-address array: pick an entry whose label/type/flag says "billing"
+            if(Array.isArray(selCust.addresses)){
+              var billA = selCust.addresses.find(function(a){
+                return a && (a.isBilling===true || a.type==="billing" || (a.label && /bill/i.test(a.label)));
+              });
+              if(billA && billA.address) return billA;
             }
             return null;
           })()}
@@ -12320,7 +12338,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v27-preview-billing</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v28-billing-resolver</div>
       </div>
     </div>
   );
@@ -13398,7 +13416,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v27-preview-billing
+        BUILD: 2026-05-30-v28-billing-resolver
       </div>
     </div>
   );
