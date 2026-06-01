@@ -3680,6 +3680,23 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
             setOrders(function(prev){return prev.map(function(x){return x.id===collectTarget.id?updated:x;});});
             dbSave("crm_orders",collectTarget.id,updated);
+            // Invalidate any existing payment token so the customer-facing link shows "Already Paid"
+            if(collectTarget.payToken){
+              try{
+                var sbT=getSB();
+                if(sbT){
+                  sbT.from("crm_pay_tokens").select("data").eq("id",collectTarget.payToken).single().then(function(rr){
+                    var tokenData = (rr && rr.data && rr.data.data) || {};
+                    var paidTokenData = Object.assign({}, tokenData, {
+                      paid:true, status:"paid",
+                      paidAt: updated.paidAt, paidVia: payRef.type,
+                      receiptToken: rTok, receiptLink: rLink
+                    });
+                    sbT.from("crm_pay_tokens").update({data:paidTokenData,updated_at:new Date().toISOString()}).eq("id",collectTarget.payToken).then(function(){});
+                  });
+                }
+              }catch(e){}
+            }
             notifyEmail("receipt",cust3.email||"","Payment receipt — "+collectTarget.id,
               notifEmailHtml(co3,"Payment received","<p>Hi "+(cust3.name||"there")+",</p><p>We've received your payment for order <strong>"+collectTarget.id+"</strong>"+(collectTarget.totals?(" of <strong>$"+((collectTarget.totals.grand||0)).toFixed(2)+"</strong>"):"")+". Thank you!</p>","View receipt",rLink,"#1ea672"));
             addToast("Payment collected! Receipt link ready to send.","success");
@@ -12491,7 +12508,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v33-collect-payment-fix</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v34-pay-link-already-paid</div>
       </div>
     </div>
   );
@@ -13569,7 +13586,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v33-collect-payment-fix
+        BUILD: 2026-05-30-v34-pay-link-already-paid
       </div>
     </div>
   );
@@ -13639,12 +13656,41 @@ function App() {
   const [quoteNotFound,  setQuoteNotFound]   = useState(false);
   const [quoteDone,      setQuoteDone]       = useState(null);
 
-  // Fetch payment token from Supabase if not in localStorage
+  // Fetch payment token from Supabase + verify live order status (so a rep manually marking paid invalidates the form)
   useEffect(function(){
     if(!payToken) return;
     var local = null;
     try{local=JSON.parse(localStorage.getItem("__pv__pay_"+payToken)||"null");}catch(e){}
-    if(local){setPayDataFromDB(local);return;}
+
+    function verifyLiveStatus(pd){
+      // If the snapshot already says paid, no need to re-check
+      if(pd && (pd.paid===true || pd.status==="paid" || pd.status==="Paid")){ setPayDataFromDB(pd); return; }
+      var orderId = (pd && (pd.orderId || (pd.order && pd.order.id))) || null;
+      if(!orderId){ setPayDataFromDB(pd); return; }
+      var sbL = getSB();
+      if(!sbL){ setPayDataFromDB(pd); return; }
+      sbL.from("crm_orders").select("data").eq("id",orderId).single()
+        .then(function(r){
+          var live = r && r.data && r.data.data;
+          var isPaid = live && (live.status==="Paid" || live.paidAt);
+          if(isPaid){
+            var paidPd = Object.assign({}, pd, {
+              paid:true, status:"paid",
+              paidAt: live.paidAt || pd.paidAt || new Date().toISOString(),
+              paidVia: live.payMethod || pd.paidVia || "manual",
+              receiptToken: live.receiptToken || pd.receiptToken || null,
+              receiptLink:  live.receiptLink  || pd.receiptLink  || null
+            });
+            // Patch localStorage cache so next reload short-circuits
+            try{ localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(paidPd)); }catch(_){}
+            setPayDataFromDB(paidPd);
+          } else {
+            setPayDataFromDB(pd);
+          }
+        }).catch(function(){ setPayDataFromDB(pd); });
+    }
+
+    if(local){ verifyLiveStatus(local); return; }
     var sb2=getSB();
     if(!sb2){setPayDataNotFound(true);return;}
     setPayDataLoading(true);
@@ -13654,7 +13700,7 @@ function App() {
         if(result.data&&result.data.data){
           var pd=result.data.data;
           localStorage.setItem("__pv__pay_"+payToken,JSON.stringify(pd));
-          setPayDataFromDB(pd);
+          verifyLiveStatus(pd);
         } else {
           setPayDataNotFound(true);
         }
@@ -14017,7 +14063,31 @@ function App() {
       React.createElement("div",{style:{fontSize:32}},"⏳"),
       React.createElement("div",{style:{fontWeight:700,fontSize:16,color:"#1a1a2e"}},"Loading…")
     );
-    if(payData2 && payData2.status!=="paid") {
+    if(payData2 && (payData2.status==="paid" || payData2.paid===true)){
+      var alreadyPaidOrderId = (payData2.order && payData2.order.id) || payData2.orderId || "";
+      var alreadyPaidAmount  = (payData2.totals && payData2.totals.grand) || (payData2.order && payData2.order.totals && payData2.order.totals.grand) || 0;
+      var alreadyPaidDate    = payData2.paidAt ? new Date(payData2.paidAt).toLocaleString("en-US",{month:"long",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}) : "";
+      var receiptHref        = payData2.receiptLink || (payData2.receiptToken ? (window.location.origin+window.location.pathname+"#receipt="+payData2.receiptToken) : null);
+      return React.createElement("div",{style:{minHeight:"100vh",background:"#f6f9fc",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"Inter,system-ui,sans-serif",padding:16}},
+        React.createElement("div",{style:{background:"#fff",border:"1px solid #e8ecef",borderRadius:14,padding:"36px 32px",maxWidth:440,width:"100%",textAlign:"center",boxShadow:"0 16px 48px rgba(0,0,0,.08)"}},
+          React.createElement("div",{style:{width:64,height:64,borderRadius:"50%",background:"#1ea67215",border:"2px solid #1ea67230",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,margin:"0 auto 18px"}},"✓"),
+          React.createElement("div",{style:{fontSize:20,fontWeight:800,color:"#1a1a2e",marginBottom:6,letterSpacing:"-.02em"}},"Payment Already Received"),
+          React.createElement("div",{style:{fontSize:13,color:"#6b7c93",marginBottom:22,lineHeight:1.6}},
+            "This invoice for ",
+            alreadyPaidOrderId ? React.createElement("strong",{style:{color:"#1a1a2e"}}, alreadyPaidOrderId) : "your order",
+            " has already been paid",
+            alreadyPaidDate ? (" on "+alreadyPaidDate) : "",
+            ". No further action is needed."
+          ),
+          alreadyPaidAmount>0 && React.createElement("div",{style:{padding:"12px 16px",background:"#f6f9fc",borderRadius:8,marginBottom:18,fontSize:13}},
+            React.createElement("div",{style:{color:"#6b7c93",marginBottom:2}}, "Amount paid"),
+            React.createElement("div",{style:{fontWeight:800,fontSize:22,fontFamily:"monospace",color:"#635bff"}}, "$"+Number(alreadyPaidAmount).toFixed(2))
+          ),
+          receiptHref && React.createElement("a",{href:receiptHref,style:{display:"inline-block",padding:"10px 20px",background:"#635bff",color:"#fff",borderRadius:8,textDecoration:"none",fontWeight:700,fontSize:13}}, "View Receipt →")
+        )
+      );
+    }
+    if(payData2 && payData2.status!=="paid" && payData2.paid!==true) {
       return React.createElement(CustomerPaymentPage, {
         payData: payData2,
         onPaid: function(result) {
