@@ -9650,8 +9650,18 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               <Btn variant="ghost" onClick={function(){setShowPreview(true);}}>
                 👁 Preview Invoice
               </Btn>
-              <Btn onClick={place} disabled={!agreed||placing}>
-                {placing?(dorPath==="card"&&cardMode==="online"&&!charged?"Processing payment…":dorPath==="link"&&sendOnPlace&&placeEmail?"Sending…":"Placing…"):isEdit?"Save Changes":dorPath==="link"&&sendOnPlace&&placeEmail?"Send Invoice →":"Place Order"}
+              <Btn onClick={place} disabled={!agreed||placing||(dorPath==="link"&&sendOnPlace&&!placeEmail.trim())}>
+                {(function(){
+                  if(placing){
+                    if(dorPath==="card"&&cardMode==="online"&&!charged) return "Processing payment…";
+                    if(dorPath==="link"&&sendOnPlace&&placeEmail) return "Sending…";
+                    return "Placing…";
+                  }
+                  if(isEdit) return "Save Changes";
+                  if(dorPath==="card"&&cardMode==="online") return "💳 Charge & Place Order";
+                  if(dorPath==="link"&&sendOnPlace) return "✉ Send Invoice & Place Order →";
+                  return "Place Order";
+                })()}
               </Btn>
             </div>
           )}
@@ -12298,7 +12308,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v25-rep-save-errors</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v26-place-order-label</div>
       </div>
     </div>
   );
@@ -13376,7 +13386,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v25-rep-save-errors
+        BUILD: 2026-05-30-v26-place-order-label
       </div>
     </div>
   );
