@@ -131,9 +131,17 @@ function addAuditEntry(order, action, actor, detail) {
 }
 
 function dbSave(table, id, data) {
-  var sb = getSB(); if(!sb) return;
-  sb.from(table).upsert({id:id,data:data,updated_at:new Date().toISOString()})
-    .then(function(r){if(r.error) console.warn("dbSave:",r.error.message);});
+  var sb = getSB();
+  if(!sb) return Promise.resolve({ok:false, error:{message:"Offline — Supabase client unavailable"}});
+  return sb.from(table).upsert({id:id,data:data,updated_at:new Date().toISOString()})
+    .then(function(r){
+      if(r.error) console.warn("dbSave ["+table+"]:",r.error.message);
+      return {ok: !r.error, error: r.error || null};
+    })
+    .catch(function(e){
+      console.warn("dbSave ["+table+"] fetch error:", e && e.message);
+      return {ok:false, error:{message:(e&&e.message)||"network error"}};
+    });
 }
 
 function dbDel(table, id) {
@@ -11596,8 +11604,16 @@ function W9SubmitModal({repData,setReps,addToast,onClose}){
             w9FileName:f.name,
           });
           setReps(function(prev){return prev.map(function(r){return r.id===repData.id?u:r;});});
-          dbSave("crm_reps",repData.id,u);
-          if(addToast) addToast("W-9 sent to admin","success");
+          dbSave("crm_reps",repData.id,u).then(function(sres){
+            if(!sres.ok){
+              try{
+                var queue = JSON.parse(localStorage.getItem("__pv__failedRepPatches")||"[]");
+                queue.push({id:repData.id, patch:{w9Status:"received",w9ReviewStatus:"pending",w9SubmittedAt:u.w9SubmittedAt,w9FileName:f.name}, error:(sres.error&&sres.error.message)||"unknown", ts:new Date().toISOString()});
+                localStorage.setItem("__pv__failedRepPatches", JSON.stringify(queue.slice(-20)));
+              }catch(e){}
+              if(addToast) addToast("W-9 emailed, but status could not be saved: "+((sres.error&&sres.error.message)||"unknown")+". Your admin still received the file.","danger");
+            } else if(addToast) addToast("W-9 sent to admin","success");
+          });
           onClose();
         } else {
           setErr("Could not send: "+(res.err||"email failed"));
@@ -11664,7 +11680,17 @@ function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,
   function patchRep(patch){
     var u=Object.assign({},myRepData,patch);
     setReps(function(prev){return prev.map(function(r){return r.id===myRepData.id?u:r;});});
-    dbSave("crm_reps",myRepData.id,u);
+    dbSave("crm_reps",myRepData.id,u).then(function(res){
+      if(!res.ok){
+        // Stash the failed write so it's not totally lost — admin can inspect later
+        try{
+          var queue = JSON.parse(localStorage.getItem("__pv__failedRepPatches")||"[]");
+          queue.push({id:myRepData.id, patch:patch, error:(res.error&&res.error.message)||"unknown", ts:new Date().toISOString()});
+          localStorage.setItem("__pv__failedRepPatches", JSON.stringify(queue.slice(-20)));
+        }catch(e){}
+        if(addToast) addToast("Save failed: "+((res.error&&res.error.message)||"unknown")+" — your change may be lost on refresh. Please contact your admin.","danger");
+      }
+    });
   }
   var w9State = myRepData.w9ReviewStatus==="approved"?"done":(myRepData.w9Status==="received"?"pending":"todo");
   var steps=[
@@ -11705,7 +11731,14 @@ function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,
       {modal==="terms"&&<TermsModal onAccept={function(){patchRep({termsAcceptedAt:new Date().toISOString()});setModal(null);}} onDecline={function(){setModal(null);}}/>}
       {modal==="agreement"&&<RepAgreementModal repName={effectiveUser.name} onAgree={function(){patchRep({agreementSignedAt:new Date().toISOString(),agreementVersion:REP_AGREEMENT_VERSION});try{var _cn=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();notifyAdmin("Rep signed the agreement — "+(effectiveUser.name||""),notifEmailHtml(_cn,"Agreement signed","<p><strong>"+(effectiveUser.name||"A rep")+"</strong> signed the Rep Agreement (v"+REP_AGREEMENT_VERSION+").</p>",null,null,"#635bff"),(effectiveUser.name||"A rep")+" signed the Rep Agreement","rep_agreement");}catch(e){}setModal(null);}} onDecline={function(){setModal(null);}}/>}
       {doc&&<LegalDocSignModal doc={doc} repId={rid} repName={effectiveUser.name}
-        onSign={function(){var sig={id:genId("sig"),docId:doc.id,version:doc.version,repId:rid,repName:effectiveUser.name,signedAt:new Date().toISOString()};setSignatures(function(prev){return prev.concat([sig]);});dbSave("crm_legal_signatures",sig.id,sig);setModal(null);}}
+        onSign={function(){
+          var sig={id:genId("sig"),docId:doc.id,version:doc.version,repId:rid,repName:effectiveUser.name,signedAt:new Date().toISOString()};
+          setSignatures(function(prev){return prev.concat([sig]);});
+          dbSave("crm_legal_signatures",sig.id,sig).then(function(sres){
+            if(!sres.ok&&addToast) addToast("Signature could not be saved: "+((sres.error&&sres.error.message)||"unknown")+" — please contact your admin","danger");
+          });
+          setModal(null);
+        }}
         onDecline={function(){setModal(null);}}/>}
       {modal==="w9"&&<W9SubmitModal repData={myRepData} setReps={setReps} addToast={addToast} onClose={function(){setModal(null);}}/>}
     </div>
@@ -12265,7 +12298,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v24-email-dedup</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v25-rep-save-errors</div>
       </div>
     </div>
   );
@@ -13343,7 +13376,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v24-email-dedup
+        BUILD: 2026-05-30-v25-rep-save-errors
       </div>
     </div>
   );
