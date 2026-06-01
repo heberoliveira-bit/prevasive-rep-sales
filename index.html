@@ -2645,11 +2645,21 @@ function CustomerSigningPage({signingData,onSigned,onDecline}) {
 }
 
 /* ─── PreviewOrderModal ────────────────────────────────────────────────── */
-function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,commRate,payMethod,onClose}) {
+function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,custName,shipAddress,billingAddress,commRate,payMethod,onClose}) {
   var cust=selCust||{name:custName||"Customer"};
   var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
   var date=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
   var rate2=parseFloat(commRate)||0;
+  function fmtAddr(a){
+    if(!a||!a.address) return "";
+    var parts=[a.address, [a.city,a.state].filter(Boolean).join(", "), a.zip].filter(Boolean);
+    return parts.join("<br>");
+  }
+  var shipHtml = fmtAddr(shipAddress);
+  // Default billing = same as shipping unless explicitly different
+  var effBilling = billingAddress && billingAddress.address ? billingAddress : null;
+  var billHtml = effBilling ? fmtAddr(effBilling) : "";
+  var billsSame = !effBilling;
   function buildHtml(){
     var rows=(items||[]).filter(function(it){return it.prodId;}).map(function(it){
       var p=(products||[]).find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
@@ -2669,10 +2679,18 @@ function PreviewOrderModal({items,totals,customers,products,currentUser,selCust,
       +"<div style='font-weight:900;font-size:18px;color:#1a1a2e'>"+company+"</div>"
       +"<div style='text-align:right'><div style='font-size:24px;font-weight:900;font-family:monospace;color:#635bff'>$"+((totals.grand||0).toFixed(2))+"</div>"
       +"<div style='font-size:11px;color:#6b7c93'>"+date+"</div></div></div>"
-      +"<div style='padding:14px 24px;background:#f6f9fc;border-bottom:1px solid #e8ecef'>"
+      +"<div style='padding:14px 24px;background:#f6f9fc;border-bottom:1px solid #e8ecef;display:grid;grid-template-columns:1fr 1fr;gap:18px'>"
+      +"<div>"
       +"<div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Bill To</div>"
-      +"<div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+cust.name+"</div>"
-      +(cust.email?"<div style='font-size:12px;color:#6b7c93'>"+cust.email+"</div>":"")+"</div>"
+      +"<div style='font-weight:700;font-size:14px;color:#1a1a2e'>"+(cust.name||"")+"</div>"
+      +(cust.email?"<div style='font-size:12px;color:#6b7c93;margin-bottom:6px'>"+cust.email+"</div>":"")
+      +(billsSame?"<div style='font-size:12px;color:#6b7c93;font-style:italic'>Billing same as shipping</div>":(billHtml?"<div style='font-size:12px;color:#6b7c93;line-height:1.55'>"+billHtml+"</div>":""))
+      +"</div>"
+      +"<div>"
+      +"<div style='font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;margin-bottom:4px'>Ship To</div>"
+      +(shipHtml?"<div style='font-size:12px;color:#1a1a2e;line-height:1.55'>"+shipHtml+"</div>":"<div style='font-size:12px;color:#a0aec0;font-style:italic'>No shipping address yet</div>")
+      +"</div>"
+      +"</div>"
       +"<table><thead><tr><th>Product</th><th style='text-align:right'>Qty</th><th style='text-align:right'>Price</th><th style='text-align:right'>Total</th></tr></thead><tbody>"+rows+"</tbody></table>"
       +"<div style='padding:14px 24px;border-top:2px solid #e8ecef'>"
       +(totals.discount>0?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#1ea672;margin-bottom:4px'><span>Discount</span><span>-$"+totals.discount.toFixed(2)+"</span></div>":"")
@@ -5627,6 +5645,119 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
   );
 }
 
+function OrderAddressesEditor({order, onSave, addToast}){
+  const [editing, setEditing] = useState(false);
+  const ship0 = order.shipAddress || order.shipAddr || {};
+  const bill0 = order.billingAddress || null;
+  const [ship, setShip] = useState({
+    label:  ship0.label||"Primary",
+    address:ship0.address||"",
+    city:   ship0.city||"",
+    state:  (ship0.state||"").toUpperCase(),
+    zip:    ship0.zip||"",
+  });
+  const [billSame, setBillSame] = useState(!bill0);
+  const [bill, setBill] = useState({
+    address: (bill0&&bill0.address)||"",
+    city:    (bill0&&bill0.city)||"",
+    state:   ((bill0&&bill0.state)||"").toUpperCase(),
+    zip:     (bill0&&bill0.zip)||"",
+  });
+
+  function fmt(a){
+    if(!a||!a.address) return "—";
+    return [a.address, a.city, a.state, a.zip].filter(Boolean).join(", ");
+  }
+  function gaCheck(zip){ return zip ? !!getGaTaxRate(zip) : false; }
+
+  function save(){
+    if(!ship.address.trim()||!ship.city.trim()||!ship.state.trim()||!ship.zip.trim()){
+      if(addToast) addToast("Shipping address is incomplete","warning"); return;
+    }
+    var updated = Object.assign({}, order, {
+      shipAddress: {label:ship.label.trim()||"Primary", address:ship.address.trim(), city:ship.city.trim(), state:ship.state.trim().toUpperCase(), zip:ship.zip.trim()},
+      billingAddress: billSame ? null : {address:bill.address.trim(), city:bill.city.trim(), state:bill.state.trim().toUpperCase(), zip:bill.zip.trim()},
+    });
+    onSave(updated);
+    setEditing(false);
+  }
+
+  if(!editing){
+    var taxNote = "";
+    if(ship.zip){
+      taxNote = gaCheck(ship.zip)
+        ? "🏷 Georgia shipping address — sales tax applies"
+        : "🏷 Outside Georgia — no sales tax";
+    }
+    return (
+      <div style={{background:C.surface2,borderRadius:10,padding:"12px 14px",marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:".07em"}}>Addresses</div>
+          <button onClick={function(){setEditing(true);}}
+            style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontSize:11,fontWeight:700,padding:"4px 8px",fontFamily:"inherit"}}>✏️ Edit</button>
+        </div>
+        <div style={{fontSize:12,color:C.text,lineHeight:1.6}}>
+          <div><strong style={{color:C.text}}>📍 Ship to:</strong> <span style={{color:C.muted}}>{fmt(ship0)}</span></div>
+          <div style={{marginTop:4}}>
+            <strong style={{color:C.text}}>💳 Bill to:</strong>{" "}
+            <span style={{color:C.muted}}>{bill0?fmt(bill0):"Same as shipping"}</span>
+          </div>
+          {taxNote && (
+            <div style={{marginTop:8,fontSize:11,color:C.muted,fontStyle:"italic"}}>{taxNote}</div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  var inputStyle = {width:"100%",padding:"9px 11px",fontSize:13,border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box"};
+
+  return (
+    <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+      <div style={{fontSize:10,fontWeight:700,color:C.dim,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Edit Addresses</div>
+
+      <div style={{fontSize:11,color:C.muted,fontWeight:700,marginBottom:6}}>📍 SHIPPING</div>
+      <input style={Object.assign({},inputStyle,{marginBottom:6})} placeholder="Label (e.g. Main Office)" value={ship.label}
+        onChange={function(e){setShip(Object.assign({},ship,{label:e.target.value}));}}/>
+      <input style={Object.assign({},inputStyle,{marginBottom:6})} placeholder="Street address" value={ship.address}
+        onChange={function(e){setShip(Object.assign({},ship,{address:e.target.value}));}}/>
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:6,marginBottom:10}}>
+        <input style={inputStyle} placeholder="City" value={ship.city} onChange={function(e){setShip(Object.assign({},ship,{city:e.target.value}));}}/>
+        <input style={inputStyle} placeholder="State" maxLength={2} value={ship.state} onChange={function(e){setShip(Object.assign({},ship,{state:e.target.value.toUpperCase()}));}}/>
+        <input style={inputStyle} placeholder="ZIP" value={ship.zip} onChange={function(e){setShip(Object.assign({},ship,{zip:e.target.value}));}}/>
+      </div>
+      {ship.zip && !gaCheck(ship.zip) && (
+        <div style={{padding:"7px 10px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:6,fontSize:11,color:C.accent,marginBottom:10}}>
+          ℹ Non-Georgia ZIP — no sales tax will apply if you recalculate totals.
+        </div>
+      )}
+
+      <label style={{display:"flex",alignItems:"center",gap:8,padding:"8px 0",cursor:"pointer",fontSize:12,color:C.muted}}>
+        <input type="checkbox" checked={billSame} onChange={function(e){setBillSame(e.target.checked);}} style={{width:14,height:14,accentColor:C.accent}}/>
+        <span>Billing address same as shipping</span>
+      </label>
+
+      {!billSame && (
+        <div style={{marginTop:6}}>
+          <div style={{fontSize:11,color:C.muted,fontWeight:700,marginBottom:6}}>💳 BILLING</div>
+          <input style={Object.assign({},inputStyle,{marginBottom:6})} placeholder="Street address" value={bill.address}
+            onChange={function(e){setBill(Object.assign({},bill,{address:e.target.value}));}}/>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:6,marginBottom:10}}>
+            <input style={inputStyle} placeholder="City" value={bill.city} onChange={function(e){setBill(Object.assign({},bill,{city:e.target.value}));}}/>
+            <input style={inputStyle} placeholder="State" maxLength={2} value={bill.state} onChange={function(e){setBill(Object.assign({},bill,{state:e.target.value.toUpperCase()}));}}/>
+            <input style={inputStyle} placeholder="ZIP" value={bill.zip} onChange={function(e){setBill(Object.assign({},bill,{zip:e.target.value}));}}/>
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:8,marginTop:8}}>
+        <Btn small onClick={save}>Save</Btn>
+        <Btn small variant="ghost" onClick={function(){setEditing(false);}}>Cancel</Btn>
+      </div>
+    </div>
+  );
+}
+
 function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResult,currentUser,returns,setReturns}) {
   const [search,      setSearch]      = useState("");
   const [filter,      setFilter]      = useState("all");
@@ -5978,6 +6109,15 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                   <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>{viewOrder.notes}</div>
                 </div>
               )}
+
+              {/* Addresses (editable) */}
+              <OrderAddressesEditor order={viewOrder} onSave={function(updated){
+                var stamped = Object.assign({}, updated, {
+                  auditLog:(updated.auditLog||[]).concat([{action:"Address updated",actor:(currentUser&&currentUser.name)||"Admin",ts:new Date().toISOString(),detail:""}])
+                });
+                onUpdate(stamped); setViewOrder(stamped); dbSave("crm_orders", stamped.id, stamped);
+                if(addToast) addToast("Addresses updated","success");
+              }} addToast={addToast}/>
 
               {/* Audit Log */}
               {auditTab&&(
@@ -8194,8 +8334,15 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     }
     var discounted = subtotal - discount;
     var shipping   = calcShipping(baseSubtotal);
-    // Georgia tax — on customer price (post-markup, post-discount)
-    var taxInfo  = selCust ? getGaTaxRate(selCust.zip) : null;
+    // Sales tax — only GA addresses; based on the actual ship-to ZIP, not the customer's primary ZIP
+    var shipZip = (function(){
+      if(newCust) return custZip||"";
+      if(!selCust) return "";
+      if(shipAddrId&&selCust.addresses){var a=selCust.addresses.find(function(x){return x.id===shipAddrId;}); if(a) return a.zip||"";}
+      if(selCust.addresses&&selCust.addresses.length>0){var pa=selCust.addresses.find(function(a){return a.isPrimary;})||selCust.addresses[0]; return pa.zip||"";}
+      return selCust.zip||"";
+    })();
+    var taxInfo  = shipZip ? getGaTaxRate(shipZip) : null;
     var taxRate  = taxInfo ? taxInfo.rate : 0;
     var tax      = Math.round(discounted*taxRate*100)/100;
     var grand    = discounted + shipping + tax;
@@ -9071,6 +9218,20 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           currentUser={currentUser}
           selCust={selCust}
           custName={custName}
+          shipAddress={(function(){
+            if(newCust){
+              return {address:custAddr,city:custCity,state:custState2,zip:custZip};
+            }
+            if(!selCust) return null;
+            if(shipAddrId && selCust.addresses){var a=selCust.addresses.find(function(x){return x.id===shipAddrId;}); if(a) return a;}
+            if(selCust.addresses && selCust.addresses.length>0) return selCust.addresses.find(function(a){return a.isPrimary;})||selCust.addresses[0];
+            if(selCust.address) return {address:selCust.address,city:selCust.city,state:selCust.state,zip:selCust.zip};
+            return null;
+          })()}
+          billingAddress={(function(){
+            if(!selCust) return null;
+            return selCust.billingAddress || null;
+          })()}
           commRate={commRate}
           payMethod={payMethod}
           onClose={function(){setShowPreview(false);}}/>
@@ -11632,7 +11793,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v13-mobile-readable</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v15-invoice-addr</div>
       </div>
     </div>
   );
@@ -11668,7 +11829,7 @@ function MobileShell(props){
   var screen = null;
   if(tab==="home")      screen = <MobileHome currentUser={currentUser} repData={repData} myOrders={myOrders} myCustomers={myCustomers} customers={customers} setTab={go} setSelectedOrderId={setSelectedOrderId}/>;
   if(tab==="new")       screen = <MobileNewOrder key={"no-"+preselectCustId} initialCustId={preselectCustId} repData={repData} customers={myCustomers} setCustomers={setCustomers} setOrders={setOrders} products={products} taxCfg={taxCfg} shippingRules={shippingRules} addToast={addToast} onPlaced={function(){setPreselectCustId(""); go("orders");}}/>;
-  if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} addToast={addToast}/>;
+  if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} setOrders={setOrders} addToast={addToast}/>;
   if(tab==="customers") screen = <MobileCustomers myCustomers={myCustomers} setCustomers={setCustomers} repData={repData} myOrders={myOrders} selectedCustomerId={selectedCustomerId} setSelectedCustomerId={setSelectedCustomerId} onStartOrderFor={startNewOrderFor} addToast={addToast}/>;
   if(tab==="profile")   screen = <MobileProfile currentUser={currentUser} repData={repData} commissions={commissions} preferDesktop={preferDesktop} setPreferDesktop={setPreferDesktop} onLogout={onLogout} addToast={addToast} stripeLinks={stripeLinks} onHelp={onHelp}/>;
 
@@ -11899,8 +12060,10 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var baseSubtotal = lines.reduce(function(s,it){return s + (Number(it.qty)||0)*(Number(it.unitPrice)||0);},0);
   var commission = Math.round(baseSubtotal * commRate) / 100;
   var subtotal = Math.round((baseSubtotal + commission)*100)/100;
-  var taxRate = (taxCfg && Number(taxCfg.rate))||0;
-  var tax = Math.round(subtotal * taxRate) / 100;
+  // Sales tax only applies to deliveries inside Georgia. getGaTaxRate returns null for non-GA ZIPs.
+  var taxInfo = (shipAddr && shipAddr.zip) ? getGaTaxRate(shipAddr.zip) : null;
+  var taxRate = taxInfo ? taxInfo.rate : 0;
+  var tax = Math.round(subtotal * taxRate * 100) / 100;
   var shipping = selectedRate ? (Number(selectedRate.shipmentCost)||0) : 0;
   var total = Math.round((subtotal + tax + shipping)*100)/100;
 
@@ -11951,7 +12114,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
             customerPrice: Math.round(base*(1+commRate/100)*100)/100,
           });
         }),
-        subtotal:subtotal, tax:tax, shipping:shipping, total:total,
+        subtotal:subtotal, tax:tax, taxRate:taxRate, taxInfo:taxInfo, shipping:shipping, total:total,
         shippingRate: selectedRate ? {
           amount: Number(selectedRate.shipmentCost)||0,
           label: (selectedRate.carrierName||selectedRate.carrierCode||"")+" — "+(selectedRate.serviceName||""),
@@ -12318,7 +12481,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   );
 }
 
-function MobileOrders({myOrders, customers, products, selectedOrderId, setSelectedOrderId, addToast}){
+function MobileOrders({myOrders, customers, products, selectedOrderId, setSelectedOrderId, setOrders, addToast}){
   const [filter, setFilter] = useState("all");
 
   var filtered = myOrders.slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);});
@@ -12352,6 +12515,14 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
           {c && c.email && <div style={{fontSize:13,color:C.muted,marginTop:4}}>{c.email}</div>}
           {c && c.phone && <div style={{fontSize:13,color:C.muted,marginTop:2}}>{c.phone}</div>}
         </div>
+
+        <OrderAddressesEditor order={selectedOrder} addToast={addToast} onSave={function(updated){
+          var stamped = Object.assign({}, updated, {
+            auditLog:(updated.auditLog||[]).concat([{action:"Address updated (mobile)",actor:"Rep",ts:new Date().toISOString(),detail:""}])
+          });
+          if(setOrders) setOrders(function(prev){return (prev||[]).map(function(o){return o.id===stamped.id?stamped:o;});});
+          dbSave("crm_orders", stamped.id, stamped);
+        }}/>
 
         <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:12}}>
           <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Items</div>
@@ -12607,7 +12778,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v13-mobile-readable
+        BUILD: 2026-05-30-v15-invoice-addr
       </div>
     </div>
   );
