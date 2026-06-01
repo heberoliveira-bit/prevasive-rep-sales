@@ -3132,9 +3132,9 @@ function ReturnModal({order,currentUser,onProcess,onClose,mode}) {
   const [notes,    setNotes]    = useState("");
   const [err,      setErr]      = useState("");
   var now = Date.now();
-  var delMs = order.deliveredAt ? new Date(order.shippedAt).getTime() : null;
-  var inWindow = delMs && (now-delMs) < commissionHoldDays(order)*24*60*60*1000;
-  var daysUsed = delMs ? Math.floor((now-delMs)/(24*60*60*1000)) : 0;
+  var shipMs = order.shippedAt ? new Date(order.shippedAt).getTime() : null;
+  var inWindow = shipMs && (now-shipMs) < commissionHoldDays(order)*24*60*60*1000;
+  var daysUsed = shipMs ? Math.floor((now-shipMs)/(24*60*60*1000)) : 0;
 
   function process() {
     if(!reason.trim()){setErr("Please select a return reason.");return;}
@@ -5786,6 +5786,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     var next = getNextOrderStatus(order);
     if(!next) return;
     var patch = {status:next};
+    if(next==="Shipped" && !order.shippedAt) patch.shippedAt = new Date().toISOString();
     if(next==="Delivered") patch.deliveredAt = new Date().toISOString();
     var withAudit = addAuditEntry(Object.assign({},order,patch),"Status → "+next,currentUser&&currentUser.name);
     onUpdate(withAudit);
@@ -5844,7 +5845,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
         <div style={{padding:"10px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:14,display:"flex",alignItems:"center",gap:12}}>
           <span style={{fontSize:13,fontWeight:700,color:C.accent}}>{Object.keys(selected).length} selected</span>
           <Btn small onClick={function(){Object.keys(selected).forEach(function(id){var o=orders.find(function(x){return x.id===id;});if(o&&o.status==="Submitted"){var u=addAuditEntry(Object.assign({},o,{status:"Processing"}),"> Processing","Admin");onUpdate(u);dbSave("crm_orders",id,u);}});setSelected({});addToast("Orders moved to Processing","info");}}>→ Mark Processing</Btn>
-          <Btn small onClick={function(){Object.keys(selected).forEach(function(id){var o=orders.find(function(x){return x.id===id;});if(o&&o.status==="Processing"){var u=addAuditEntry(Object.assign({},o,{status:"Shipped"}),"> Shipped","Admin");onUpdate(u);dbSave("crm_orders",id,u);}});setSelected({});addToast("Orders marked Shipped","info");}}>→ Mark Shipped</Btn>
+          <Btn small onClick={function(){Object.keys(selected).forEach(function(id){var o=orders.find(function(x){return x.id===id;});if(o&&o.status==="Processing"){var stamp=o.shippedAt||new Date().toISOString();var u=addAuditEntry(Object.assign({},o,{status:"Shipped",shippedAt:stamp}),"> Shipped","Admin");onUpdate(u);dbSave("crm_orders",id,u);}});setSelected({});addToast("Orders marked Shipped","info");}}>→ Mark Shipped</Btn>
           <button onClick={function(){setSelected({});}} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>Clear selection</button>
         </div>
       )}
@@ -11793,7 +11794,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v15-invoice-addr</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v16-audit</div>
       </div>
     </div>
   );
@@ -11829,7 +11830,7 @@ function MobileShell(props){
   var screen = null;
   if(tab==="home")      screen = <MobileHome currentUser={currentUser} repData={repData} myOrders={myOrders} myCustomers={myCustomers} customers={customers} setTab={go} setSelectedOrderId={setSelectedOrderId}/>;
   if(tab==="new")       screen = <MobileNewOrder key={"no-"+preselectCustId} initialCustId={preselectCustId} repData={repData} customers={myCustomers} setCustomers={setCustomers} setOrders={setOrders} products={products} taxCfg={taxCfg} shippingRules={shippingRules} addToast={addToast} onPlaced={function(){setPreselectCustId(""); go("orders");}}/>;
-  if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} setOrders={setOrders} addToast={addToast}/>;
+  if(tab==="orders")    screen = <MobileOrders myOrders={myOrders} customers={customers} products={products} selectedOrderId={selectedOrderId} setSelectedOrderId={setSelectedOrderId} setOrders={setOrders} currentUser={currentUser} addToast={addToast}/>;
   if(tab==="customers") screen = <MobileCustomers myCustomers={myCustomers} setCustomers={setCustomers} repData={repData} myOrders={myOrders} selectedCustomerId={selectedCustomerId} setSelectedCustomerId={setSelectedCustomerId} onStartOrderFor={startNewOrderFor} addToast={addToast}/>;
   if(tab==="profile")   screen = <MobileProfile currentUser={currentUser} repData={repData} commissions={commissions} preferDesktop={preferDesktop} setPreferDesktop={setPreferDesktop} onLogout={onLogout} addToast={addToast} stripeLinks={stripeLinks} onHelp={onHelp}/>;
 
@@ -12481,7 +12482,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   );
 }
 
-function MobileOrders({myOrders, customers, products, selectedOrderId, setSelectedOrderId, setOrders, addToast}){
+function MobileOrders({myOrders, customers, products, selectedOrderId, setSelectedOrderId, setOrders, currentUser, addToast}){
   const [filter, setFilter] = useState("all");
 
   var filtered = myOrders.slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);});
@@ -12518,7 +12519,7 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
 
         <OrderAddressesEditor order={selectedOrder} addToast={addToast} onSave={function(updated){
           var stamped = Object.assign({}, updated, {
-            auditLog:(updated.auditLog||[]).concat([{action:"Address updated (mobile)",actor:"Rep",ts:new Date().toISOString(),detail:""}])
+            auditLog:(updated.auditLog||[]).concat([{action:"Address updated (mobile)",actor:(currentUser&&currentUser.name)||"Rep",ts:new Date().toISOString(),detail:""}])
           });
           if(setOrders) setOrders(function(prev){return (prev||[]).map(function(o){return o.id===stamped.id?stamped:o;});});
           dbSave("crm_orders", stamped.id, stamped);
@@ -12778,7 +12779,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v15-invoice-addr
+        BUILD: 2026-05-30-v16-audit
       </div>
     </div>
   );
