@@ -9688,7 +9688,19 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
           })()}
           billingAddress={(function(){
             if(!selCust) return null;
-            return selCust.billingAddress || null;
+            var b = selCust.billingAddress;
+            // Object shape: {address, city, state, zip}
+            if(b && typeof b === "object" && b.address) return b;
+            // Legacy flat shape: billingAddress is the street string + sibling billingCity/billingState/billingZip
+            if(typeof b === "string" && b.trim()){
+              return {
+                address: b,
+                city: selCust.billingCity||"",
+                state: selCust.billingState||"",
+                zip: selCust.billingZip||""
+              };
+            }
+            return null;
           })()}
           commRate={commRate}
           payMethod={payMethod}
@@ -12308,7 +12320,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v26-place-order-label</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v27-preview-billing</div>
       </div>
     </div>
   );
@@ -13386,7 +13398,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v26-place-order-label
+        BUILD: 2026-05-30-v27-preview-billing
       </div>
     </div>
   );
