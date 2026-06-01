@@ -1349,12 +1349,16 @@ function InviteModal({rep,onClose,addToast,setReps}) {
 }
 
 function InviteRegistration({token,onComplete}) {
+  const [step,    setStep]    = useState("identity"); // "identity" | "verify" | "register"
   const [name,    setName]    = useState("");
   const [email,   setEmail]   = useState("");
+  const [code,    setCode]    = useState("");
   const [pass,    setPass]    = useState("");
   const [pass2,   setPass2]   = useState("");
   const [err,     setErr]     = useState("");
   const [busy,    setBusy]    = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [resendTimer, setResendTimer] = useState(0);
   const [done,    setDone]    = useState(false);
   const [matchedRep, setMatchedRep] = useState(null);
   const [emailLocked, setEmailLocked] = useState(false);
@@ -1368,9 +1372,46 @@ function InviteRegistration({token,onComplete}) {
     },function(){});
   },[]);
 
+  useEffect(function(){
+    if(resendTimer<=0) return;
+    var t = setTimeout(function(){setResendTimer(resendTimer-1);}, 1000);
+    return function(){clearTimeout(t);};
+  },[resendTimer]);
+
+  function sendCode(){
+    if(!name.trim()){setErr("Enter your full name.");return;}
+    var em = email.trim().toLowerCase();
+    if(!em||!/^[^@]+@[^@]+\.[^@]+$/.test(em)){setErr("Enter a valid email address.");return;}
+    setSendingCode(true); setErr("");
+    fetch(SUPABASE_URL+"/functions/v1/auth-2fa",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"send", email:em}),
+    }).then(function(r){return r.json();}).then(function(d){
+      setSendingCode(false);
+      if(d.ok){setStep("verify"); setResendTimer(45); setCode("");}
+      else setErr(d.error||"Could not send code");
+    }).catch(function(e){setSendingCode(false); setErr((e&&e.message)||"Network error");});
+  }
+
+  function resendCode(){ if(resendTimer===0) sendCode(); }
+
+  function verifyCode(){
+    if(!/^\d{6}$/.test(code.trim())){setErr("Enter the 6-digit code.");return;}
+    setBusy(true); setErr("");
+    fetch(SUPABASE_URL+"/functions/v1/auth-2fa",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"verify", email:email.trim().toLowerCase(), code:code.trim()}),
+    }).then(function(r){return r.json();}).then(function(d){
+      setBusy(false);
+      if(d.ok){setStep("register"); setErr("");}
+      else setErr(d.error||"Invalid code");
+    }).catch(function(e){setBusy(false); setErr((e&&e.message)||"Network error");});
+  }
+
+  function changeEmail(){ setStep("identity"); setCode(""); setErr(""); }
+
   function register() {
-    if(!name.trim()||!email.trim()||!pass){setErr("All fields are required.");return;}
-    if(pass.length<8){setErr("Password must be at least 8 characters.");return;}
+    if(!pass||pass.length<8){setErr("Password must be at least 8 characters.");return;}
     if(pass!==pass2){setErr("Passwords do not match.");return;}
     var sb = getSB();
     if(!sb){setErr("Service unavailable.");return;}
@@ -1386,13 +1427,13 @@ function InviteRegistration({token,onComplete}) {
           subscriptionStatus:(matchedRep&&matchedRep.data&&matchedRep.data.subscriptionStatus)||"trial",
           trialStartedAt:(matchedRep&&matchedRep.data&&matchedRep.data.trialStartedAt)||new Date().toISOString(),
           planId:(matchedRep&&matchedRep.data&&matchedRep.data.planId)||"starter",
-          inviteToken:token, authUid:uid, registeredAt:new Date().toISOString()
+          inviteToken:token, authUid:uid, registeredAt:new Date().toISOString(),
+          emailVerifiedAt:new Date().toISOString()
         });
         return Promise.all([
           sb.from("crm_users").upsert({id:uid,email:email.trim(),name:name.trim(),role:"rep",rep_id:repRowId,updated_at:new Date().toISOString()}),
           sb.from("crm_reps").upsert({id:repRowId,data:repData,updated_at:new Date().toISOString()})
         ]).then(function(res){
-          // If crm_users has no rep_id column yet, the first upsert errors — retry without it so the account still works.
           var uErr = res && res[0] && res[0].error;
           if(uErr){ return sb.from("crm_users").upsert({id:uid,email:email.trim(),name:name.trim(),role:"rep",updated_at:new Date().toISOString()}); }
         }).then(function(){
@@ -1404,13 +1445,21 @@ function InviteRegistration({token,onComplete}) {
                 "Go to my dashboard", getSiteUrl(), "#1ea672"));
             notifyAdmin("New rep activated — "+name.trim(),
               notifEmailHtml(company2,"Rep activated",
-                "<p><strong>"+name.trim()+"</strong> ("+email.trim()+") just set their password and activated their rep account.</p>","View reps", getSiteUrl(), "#635bff"),
+                "<p><strong>"+name.trim()+"</strong> ("+email.trim()+") just verified their email, set their password, and activated their rep account.</p>","View reps", getSiteUrl(), "#635bff"),
               name.trim()+" activated their rep account", "rep_signup");
           }catch(e){}
           setBusy(false);setDone(true);
         });
       })
       .catch(function(e){setBusy(false);setErr(e.message||"Error");});
+  }
+
+  function maskEmail(e){
+    var parts = String(e||"").split("@");
+    if(parts.length!==2) return e;
+    var u = parts[0]; var d = parts[1];
+    if(u.length<=2) return e;
+    return u[0] + "***" + u[u.length-1] + "@" + d;
   }
 
   var inp = {width:"100%",background:C.surface2,border:"1px solid "+C.border,borderRadius:7,
@@ -1428,33 +1477,137 @@ function InviteRegistration({token,onComplete}) {
     </div>
   );
 
+  // Step indicator
+  var stepData = [["identity","Identity"],["verify","Verify"],["register","Password"]];
+  var currentIdx = stepData.findIndex(function(s){return s[0]===step;});
+
   return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
-      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"40px 36px",maxWidth:420,width:"100%",boxShadow:"0 16px 48px rgba(0,0,0,.2)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:24}}>
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,padding:"36px 32px",maxWidth:440,width:"100%",boxShadow:"0 16px 48px rgba(0,0,0,.2)"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:22}}>
           <div style={{width:26,height:26,borderRadius:6,background:C.accent,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:900,color:"#fff"}}>P</div>
           <span style={{fontWeight:700,fontSize:15,color:C.text}}>PreVasive Rep Sales</span>
         </div>
         <div style={{fontSize:20,fontWeight:700,color:C.text,marginBottom:6,letterSpacing:"-.02em"}}>Create your account</div>
-        <div style={{fontSize:12,color:C.muted,marginBottom:22}}>You have been invited to join as a sales rep.</div>
-        {err&&<div style={{padding:"9px 12px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:6,color:C.danger,fontSize:12,marginBottom:14}}>{err}</div>}
-        {[["Full Name",name,setName,"text","Jane Smith"],["Email",email,setEmail,"email","you@company.com"],["Password",pass,setPass,"password","Min 8 characters"],["Confirm Password",pass2,setPass2,"password","Re-enter password"]].map(function(f){return (
-          <div key={f[0]} style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>{f[0]}</div>
-            <input value={f[1]} onChange={function(e){if(f[0]==="Email"&&emailLocked)return;f[2](e.target.value);}} type={f[3]} placeholder={f[4]}
-              readOnly={f[0]==="Email"&&emailLocked}
-              onKeyDown={f[0]==="Confirm Password"?function(e){if(e.key==="Enter")register();}:undefined}
-              style={Object.assign({},inp,(f[0]==="Email"&&emailLocked)?{opacity:.65,cursor:"not-allowed"}:{})}/>
-          </div>
-        );})}
-        <div style={{marginTop:18}}>
-          <button onClick={register} disabled={busy}
-            style={{width:"100%",padding:"11px",borderRadius:6,border:"none",
-                    background:busy?C.dim:C.accent,color:"#fff",cursor:busy?"not-allowed":"pointer",
-                    fontFamily:"inherit",fontWeight:700,fontSize:14,letterSpacing:"-.01em",marginBottom:10}}>
-            {busy?"Creating account…":"Create Account →"}
-          </button>
+        <div style={{fontSize:12,color:C.muted,marginBottom:18}}>You have been invited to join as a sales rep.</div>
+
+        {/* Step indicator */}
+        <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:22}}>
+          {stepData.map(function(s,i){
+            var active = i===currentIdx;
+            var doneStep = i<currentIdx;
+            return (
+              <React.Fragment key={s[0]}>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexShrink:0}}>
+                  <div style={{width:22,height:22,borderRadius:"50%",
+                    background:doneStep?C.success:(active?C.accent:C.surface2),
+                    color:doneStep||active?"#fff":C.muted,
+                    border:doneStep||active?"none":"1px solid "+C.border,
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:11,fontWeight:700}}>{doneStep?"✓":(i+1)}</div>
+                  <span style={{color:active?C.text:C.muted,fontWeight:active?700:500,fontSize:11}}>{s[1]}</span>
+                </div>
+                {i<stepData.length-1 && <div style={{flex:1,height:2,background:doneStep?C.success:C.border,borderRadius:1}}/>}
+              </React.Fragment>
+            );
+          })}
         </div>
+
+        {err&&<div style={{padding:"9px 12px",background:C.danger+"12",border:"1px solid "+C.danger+"30",borderRadius:6,color:C.danger,fontSize:12,marginBottom:14}}>{err}</div>}
+
+        {/* Step 1: Identity */}
+        {step==="identity" && (
+          <div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Full Name</div>
+              <input value={name} onChange={function(e){setName(e.target.value);}} type="text" placeholder="Jane Smith" style={inp}/>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Email</div>
+              <input value={email}
+                onChange={function(e){if(!emailLocked) setEmail(e.target.value);}}
+                type="email" inputMode="email" autoCapitalize="none" placeholder="you@company.com"
+                readOnly={emailLocked}
+                style={Object.assign({},inp, emailLocked?{opacity:.65,cursor:"not-allowed"}:{})}/>
+              {emailLocked && <div style={{fontSize:10,color:C.dim,marginTop:4}}>Pre-set by your admin. Email cannot be changed.</div>}
+            </div>
+            <div style={{marginTop:18}}>
+              <button onClick={sendCode} disabled={sendingCode||!name.trim()||!email.trim()}
+                style={{width:"100%",padding:"11px",borderRadius:6,border:"none",
+                        background:(sendingCode||!name.trim()||!email.trim())?C.dim:C.accent,color:"#fff",
+                        cursor:(sendingCode||!name.trim()||!email.trim())?"not-allowed":"pointer",
+                        fontFamily:"inherit",fontWeight:700,fontSize:14}}>
+                {sendingCode?"Sending code…":"Send verification code →"}
+              </button>
+            </div>
+            <div style={{fontSize:10,color:C.dim,textAlign:"center",marginTop:10,lineHeight:1.5}}>
+              We'll send a 6-digit code to verify your email before creating your account.
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Verify code */}
+        {step==="verify" && (
+          <div>
+            <div style={{padding:"12px 14px",background:C.accent+"08",border:"1px solid "+C.accent+"22",borderRadius:8,marginBottom:14,fontSize:12,color:C.muted,lineHeight:1.6}}>
+              We sent a 6-digit code to<br/><strong style={{color:C.text}}>{maskEmail(email)}</strong>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Enter the 6-digit code</div>
+              <input value={code} type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6} autoFocus
+                placeholder="000000"
+                onChange={function(e){setCode(e.target.value.replace(/\D/g,"").slice(0,6));}}
+                onKeyDown={function(e){if(e.key==="Enter"&&code.length===6) verifyCode();}}
+                style={Object.assign({},inp,{textAlign:"center",fontSize:22,letterSpacing:8,fontFamily:"monospace",padding:"14px 10px"})}/>
+            </div>
+            <button onClick={verifyCode} disabled={busy||code.length!==6}
+              style={{width:"100%",padding:"11px",borderRadius:6,border:"none",
+                      background:(busy||code.length!==6)?C.dim:C.accent,color:"#fff",
+                      cursor:(busy||code.length!==6)?"not-allowed":"pointer",
+                      fontFamily:"inherit",fontWeight:700,fontSize:14,marginBottom:12}}>
+              {busy?"Verifying…":"Verify →"}
+            </button>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:11}}>
+              <button onClick={changeEmail}
+                style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:11,padding:"4px 0",textDecoration:"underline"}}>
+                ← Change email
+              </button>
+              <button onClick={resendCode} disabled={resendTimer>0}
+                style={{background:"none",border:"none",color:resendTimer>0?C.dim:C.accent,
+                        cursor:resendTimer>0?"not-allowed":"pointer",fontFamily:"inherit",fontSize:11,fontWeight:700,padding:"4px 0",
+                        textDecoration:resendTimer>0?"none":"underline"}}>
+                {resendTimer>0?"Resend in "+resendTimer+"s":"Resend code"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Password */}
+        {step==="register" && (
+          <div>
+            <div style={{padding:"9px 12px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:7,marginBottom:14,fontSize:12,color:C.success,display:"flex",alignItems:"center",gap:6}}>
+              <span style={{fontSize:13}}>✓</span><span><strong>{email}</strong> verified</span>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Password</div>
+              <input value={pass} onChange={function(e){setPass(e.target.value);}} type="password" placeholder="Min 8 characters" style={inp}/>
+            </div>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,fontWeight:500,color:C.muted,marginBottom:4}}>Confirm Password</div>
+              <input value={pass2} onChange={function(e){setPass2(e.target.value);}}
+                onKeyDown={function(e){if(e.key==="Enter")register();}}
+                type="password" placeholder="Re-enter password" style={inp}/>
+            </div>
+            <div style={{marginTop:18}}>
+              <button onClick={register} disabled={busy}
+                style={{width:"100%",padding:"11px",borderRadius:6,border:"none",
+                        background:busy?C.dim:C.accent,color:"#fff",cursor:busy?"not-allowed":"pointer",
+                        fontFamily:"inherit",fontWeight:700,fontSize:14,letterSpacing:"-.01em"}}>
+                {busy?"Creating account…":"Create Account →"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -11869,7 +12022,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v19-mobile-edit-addr</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v20-signup-2fa</div>
       </div>
     </div>
   );
@@ -12945,7 +13098,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v19-mobile-edit-addr
+        BUILD: 2026-05-30-v20-signup-2fa
       </div>
     </div>
   );
