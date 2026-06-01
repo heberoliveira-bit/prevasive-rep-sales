@@ -52,6 +52,33 @@ function isSubscriptionActive(rep){
   }
   return false;
 }
+/* Auto-fulfill helper.
+   When an order flips to Paid and the setting is enabled, also flip to "Waiting Shipping"
+   so ShipStation's custom-store poll picks it up on the next cycle.
+   Returns the order with the status bump + an audit-log entry applied.
+   If the setting is off or order isn't Paid, returns the order unchanged. */
+function autoFulfillIfPaid(order, actor){
+  if(!order) return order;
+  var status = order.status;
+  if(status !== "Paid") return order;
+  var enabled = true;
+  try{
+    var cfg = JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");
+    if(cfg && cfg.autoFulfillOnPaid === false) enabled = false;
+  }catch(e){}
+  if(!enabled) return order;
+  var entry = {
+    action:"Auto-sent to fulfillment",
+    actor: actor || "System",
+    ts: new Date().toISOString(),
+    detail:"Status auto-bumped Paid → Waiting Shipping for ShipStation pickup"
+  };
+  return Object.assign({}, order, {
+    status:"Waiting Shipping",
+    autoFulfilledAt: new Date().toISOString(),
+    auditLog:(order.auditLog||[]).concat([entry])
+  });
+}
 var REP_PLANS = [
   {id:"starter", name:"Starter", price:100, ceiling:1000,  desc:"Up to $1,000/mo"},
   {id:"pro",     name:"Pro",     price:200, ceiling:10000, desc:"Up to $10,000/mo"},
@@ -3673,11 +3700,13 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             var cust3=customers.find(function(x){return x.id===collectTarget.custId;})||{name:collectTarget.custName||""};
             var rTok=generateReceiptToken(collectTarget,cust3,payRef,co3);
             var rLink=getSiteUrl()+"#receipt="+rTok;
-            var updated=addAuditEntry(Object.assign({},collectTarget,{
+            var paidOrder=addAuditEntry(Object.assign({},collectTarget,{
               status:"Paid",paidAt:new Date().toISOString(),
               paymentRef:payRef,paymentType:payRef.type,
               receiptToken:rTok,receiptLink:rLink,
             }),"Payment collected","Admin",payRef.type==="card"?"Card ····"+payRef.last4:payRef.type);
+            // Auto-bump status to "Waiting Shipping" so ShipStation picks it up (if enabled in settings)
+            var updated = autoFulfillIfPaid(paidOrder, (currentUser&&currentUser.name)||"Admin");
             setOrders(function(prev){return prev.map(function(x){return x.id===collectTarget.id?updated:x;});});
             dbSave("crm_orders",collectTarget.id,updated);
             // Invalidate any existing payment token so the customer-facing link shows "Already Paid"
@@ -3689,7 +3718,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     var tokenData = (rr && rr.data && rr.data.data) || {};
                     var paidTokenData = Object.assign({}, tokenData, {
                       paid:true, status:"paid",
-                      paidAt: updated.paidAt, paidVia: payRef.type,
+                      paidAt: paidOrder.paidAt, paidVia: payRef.type,
                       receiptToken: rTok, receiptLink: rLink
                     });
                     sbT.from("crm_pay_tokens").update({data:paidTokenData,updated_at:new Date().toISOString()}).eq("id",collectTarget.payToken).then(function(){});
@@ -3699,7 +3728,8 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             }
             notifyEmail("receipt",cust3.email||"","Payment receipt — "+collectTarget.id,
               notifEmailHtml(co3,"Payment received","<p>Hi "+(cust3.name||"there")+",</p><p>We've received your payment for order <strong>"+collectTarget.id+"</strong>"+(collectTarget.totals?(" of <strong>$"+((collectTarget.totals.grand||0)).toFixed(2)+"</strong>"):"")+". Thank you!</p>","View receipt",rLink,"#1ea672"));
-            addToast("Payment collected! Receipt link ready to send.","success");
+            var fulfillSuffix = (updated.status==="Waiting Shipping") ? " · order sent to ShipStation" : "";
+            addToast("Payment collected!"+fulfillSuffix,"success");
             setCollectTarget(null);
           }}
           onClose={function(){setCollectTarget(null);}}/>
@@ -5956,9 +5986,10 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
               onCollect(payRef);
             } else if(typeof setOrders === "function") {
               // Fallback path if the modal is used without onCollect wired up
-              var upd=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:"credit_card",chargeId:payRef.chargeId,status:"Paid"});
+              var paidOrder=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:"credit_card",chargeId:payRef.chargeId,status:"Paid"});
+              var upd=autoFulfillIfPaid(paidOrder, "Admin");
               setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
-              try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
+              try{var sb=getSB();if(sb)sb.from("crm_orders").update({data:upd,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
             }
             if(addToast) addToast("✓ $"+grand.toFixed(2)+" charged successfully","success");
             if(typeof showResult==="function") showResult({type:"payment",title:"Payment Collected!",subtitle:"Card charged successfully.",
@@ -5974,9 +6005,10 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
     if(typeof onCollect === "function"){
       onCollect(payRef);
     } else if(typeof setOrders === "function") {
-      var upd=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:markMethod,status:"Paid"});
+      var paidOrder=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:markMethod,status:"Paid"});
+      var upd=autoFulfillIfPaid(paidOrder, "Admin");
       setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
-      try{var sb=getSB();if(sb)sb.from("crm_orders").update({paidAt:upd.paidAt,status:"Paid"}).eq("id",order.id).then(function(){});}catch(e){}
+      try{var sb=getSB();if(sb)sb.from("crm_orders").update({data:upd,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
     }
     if(addToast) addToast("Order marked as paid","success");
     onClose();
@@ -7961,6 +7993,22 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                 ✓ Custom Store configured — deploy shipstation-store Edge Function to activate
               </div>
             )}
+
+            {/* Auto-fulfill toggle */}
+            <div style={{marginTop:14,padding:"12px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:10}}>
+              <label style={{display:"flex",alignItems:"flex-start",gap:10,cursor:"pointer"}}>
+                <input type="checkbox"
+                  checked={(shipStationCfg&&shipStationCfg.autoFulfillOnPaid!==false)}
+                  onChange={function(e){onSaveShipStation(Object.assign({},shipStationCfg,{autoFulfillOnPaid:e.target.checked}));}}
+                  style={{accentColor:C.accent,marginTop:2,flexShrink:0,width:14,height:14}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:2}}>Auto-send to fulfillment when paid</div>
+                  <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+                    When an order is marked Paid (via Charge Card, customer payment link, or Mark Paid), automatically flip the status to <strong style={{color:C.text}}>Waiting Shipping</strong> so ShipStation picks it up on the next poll. Turn off if you want to review orders before fulfillment.
+                  </div>
+                </div>
+              </label>
+            </div>
           </div>
 
           {/* ── API for Live Rates ────────────────────────────────────── */}
@@ -12508,7 +12556,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v34-pay-link-already-paid</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v35-auto-fulfill-on-paid</div>
       </div>
     </div>
   );
@@ -12866,16 +12914,17 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           }),
         }).then(function(r){return r.json();}).then(function(d){
           if(d.error){ setPlacing(false); setChargeErr(d.error); return; }
-          var order = buildOrder({
+          var paidOrder = buildOrder({
             status:"Paid", paid:true,
             paidAt: new Date().toISOString(),
             paymentIntentId: d.paymentIntentId||"",
             cardLast4: d.last4||"", cardBrand: d.brand||"Card",
           });
+          var order = autoFulfillIfPaid(paidOrder, (repData&&repData.name)||"Rep");
           setOrders(function(prev){return [order].concat(prev);});
           dbSave("crm_orders", orderId, order);
           setPlacing(false);
-          addToast("Order placed and charged!","success");
+          addToast(order.status==="Waiting Shipping"?"Order placed, charged, and sent to ShipStation!":"Order placed and charged!","success");
           onPlaced();
         });
       }).catch(function(e){ setPlacing(false); setChargeErr("Could not reach payment server: "+((e&&e.message)||e)); });
@@ -13586,7 +13635,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v34-pay-link-already-paid
+        BUILD: 2026-05-30-v35-auto-fulfill-on-paid
       </div>
     </div>
   );
@@ -14091,26 +14140,33 @@ function App() {
       return React.createElement(CustomerPaymentPage, {
         payData: payData2,
         onPaid: function(result) {
-          var updated = Object.assign({},payData2,{status:"paid",paidAt:result.paidAt,payMethod:result.method,cardRef:result.cardRef});
-          localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
+          var paidPayload = Object.assign({},payData2,{status:"paid",paidAt:result.paidAt,payMethod:result.method,cardRef:result.cardRef});
           // Generate receipt token
           var co2 = JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
           var rToken = generateReceiptToken(payData2.order,payData2.customer,{type:result.method},co2);
           var rLink  = getSiteUrl()+"#receipt="+rToken;
           notifyEmail("receipt",(payData2.custEmail||(payData2.customer&&payData2.customer.email)||""),"Payment receipt — "+((payData2.order&&payData2.order.id)||payData2.orderId||""),
             notifEmailHtml(co2,"Payment received","<p>Thank you — we've received your payment"+((payData2.order&&payData2.order.id)?(" for order "+payData2.order.id):"")+".</p>","View receipt",rLink,"#1ea672"));
-          updated.receiptToken = rToken;
-          updated.receiptLink  = rLink;
-          localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(updated));
-          // Update order in Supabase
+          paidPayload.receiptToken = rToken;
+          paidPayload.receiptLink  = rLink;
+          localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(paidPayload));
+          // Mark order in Supabase as Paid, then auto-bump to Waiting Shipping if enabled
           var sb = getSB();
           if(sb && payData2.order && payData2.order.id) {
-            sb.from("crm_orders").update({data:Object.assign({},payData2.order,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken}),updated_at:new Date().toISOString()}).eq("id",payData2.order.id);
+            var paidOrder = Object.assign({},payData2.order,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken});
+            var finalOrder = autoFulfillIfPaid(paidOrder, "Customer (online payment)");
+            sb.from("crm_orders").update({data:finalOrder,updated_at:new Date().toISOString()}).eq("id",payData2.order.id);
+            // Also update in-memory orders if admin is viewing
+            setOrders(function(prev){return prev.map(function(o){
+              return o.id===payData2.order.id ? Object.assign({},o,finalOrder) : o;
+            });});
+          } else {
+            setOrders(function(prev){return prev.map(function(o){
+              if(o.id!==(payData2.order&&payData2.order.id)) return o;
+              var paid = Object.assign({},o,{status:"Paid",paidAt:result.paidAt,receiptToken:rToken});
+              return autoFulfillIfPaid(paid, "Customer (online payment)");
+            });});
           }
-          // Also update in-memory orders if admin is viewing
-          setOrders(function(prev){return prev.map(function(o){
-            return o.id===payData2.order.id?Object.assign({},o,{status:"Paid",paidAt:result.paidAt,receiptToken:rToken}):o;
-          });});
         },
         onDecline: function(){ setPayToken(null); if(window.history) window.history.replaceState(null,"",window.location.pathname); },
       });
