@@ -188,6 +188,50 @@ function dbLoad(table) {
     .catch(function(e){console.warn("dbLoad ["+table+"] fetch error:",e.message);return [];});
 }
 
+/* Subscribe to realtime changes on a Supabase table. Calls setState({id, data}-shaped)
+   to upsert/remove records as INSERT/UPDATE/DELETE events arrive.
+   Requires the table to be added to the supabase_realtime publication on the DB side:
+     ALTER PUBLICATION supabase_realtime ADD TABLE <table>;
+   Returns the channel handle so the caller can clean up on unmount. */
+function subscribeTable(table, setState){
+  var sb = getSB();
+  if(!sb) return null;
+  var ch = sb.channel("rt_"+table+"_"+Math.random().toString(36).slice(2,8))
+    .on("postgres_changes", { event:"*", schema:"public", table:table }, function(payload){
+      try{
+        var ev = payload.eventType || payload.type;
+        if(ev === "DELETE"){
+          var oldId = payload.old && payload.old.id;
+          if(!oldId) return;
+          setState(function(prev){ return (prev||[]).filter(function(p){return p.id!==oldId;}); });
+          return;
+        }
+        // INSERT or UPDATE — upsert by id (replace existing or prepend new)
+        var row = payload.new || {};
+        var rec = row.data;
+        if(!rec) return;
+        if(rec.id == null) rec.id = row.id;
+        setState(function(prev){
+          var found = false;
+          var arr = (prev||[]).map(function(p){
+            if(p.id === rec.id){ found = true; return rec; }
+            return p;
+          });
+          if(!found) arr = [rec].concat(arr);
+          return arr;
+        });
+      }catch(e){ console.warn("realtime "+table+" handler error:", e); }
+    })
+    .subscribe(function(status){
+      if(status === "SUBSCRIBED") {
+        // Silent success
+      } else if(status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        console.warn("realtime channel "+table+" status:", status, "— table may not be in supabase_realtime publication");
+      }
+    });
+  return ch;
+}
+
 /* ─── Theme ──────────────────────────────────────────────────────────────── */
 var THEMES = {
   dark: {
@@ -12759,7 +12803,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v40-places-street-num</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v41-realtime-sync</div>
       </div>
     </div>
   );
@@ -13838,7 +13882,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v40-places-street-num
+        BUILD: 2026-05-30-v41-realtime-sync
       </div>
     </div>
   );
@@ -14281,8 +14325,30 @@ function App() {
     }});
     (function(){var sbs=getSB(); if(sbs) sbs.from("crm_settings").select("data").eq("id","email_notifications").single()
       .then(function(r){if(alive&&r.data&&r.data.data) setNotifPrefs(r.data.data);}).catch(function(){});})();
-    Promise.all([]).then(function(){if(alive) setDataLoading(false);}); 
-    return function(){alive=false;};
+    Promise.all([]).then(function(){if(alive) setDataLoading(false);});
+
+    // Realtime subscriptions — push DB changes from any browser/session into
+    // local state immediately. RLS still applies on the server, so reps only
+    // receive events for rows they can see.
+    var subs = [
+      subscribeTable("crm_orders",             setOrders),
+      subscribeTable("crm_customers",          setCustomers),
+      subscribeTable("crm_products",           setProducts),
+      subscribeTable("crm_reps",               setReps),
+      subscribeTable("crm_commission_payouts", setCommissions),
+      subscribeTable("crm_applications",       setApplications),
+      subscribeTable("crm_terms_requests",     setTermsRequests),
+      subscribeTable("crm_payout_requests",    setPayoutRequests),
+      subscribeTable("crm_tickets",            setTickets),
+      subscribeTable("crm_returns",            setReturns),
+      subscribeTable("crm_quotes",             setQuotes),
+    ];
+
+    return function(){
+      alive = false;
+      var sbc = getSB();
+      if(sbc) subs.forEach(function(ch){ if(ch) sbc.removeChannel(ch); });
+    };
   }, [currentUser&&currentUser.id]);
 
   function handleLogin(user) { setCurrentUser(user); setActiveTab("dashboard"); }
