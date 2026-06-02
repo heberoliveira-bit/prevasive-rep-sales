@@ -4987,6 +4987,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   const [commRate,  setCommRate]  = useState(10);
   const [quoteRate, setQuoteRate] = useState(null);
   const [quoteShip, setQuoteShip] = useState(0);
+  // Freight on quotes — same triggers as orders
+  const [quoteFreightAcc,   setQuoteFreightAcc]   = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
+  const [quoteFreightNotes, setQuoteFreightNotes] = useState("");
 
   var myQuotes = isAdmin ? quotes : quotes.filter(function(q){
     return q.repId===(currentUser&&(currentUser.rep_id||currentUser.id));
@@ -5015,14 +5018,27 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var rate3 = parseFloat(commRate)||0;
     var productBase = calcTotal();
     var productCustomer = Math.round(productBase*(1+rate3/100)*100)/100;
-    var ship = parseFloat(quoteShip)||0;
+    // Freight detection
     var ti = (selCust&&selCust.zip) ? getGaTaxRate(selCust.zip) : null;
     var taxRate = ti ? ti.rate : 0;
     var tax = Math.round(productCustomer*taxRate*100)/100;
+    var quoteIsFreight = isOrderFreight(items, products, selCust, productCustomer+tax);
+    var ship = quoteIsFreight ? 0 : (parseFloat(quoteShip)||0);
     var grand = Math.round((productCustomer+ship+tax)*100)/100;
     var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
               repName:currentUser&&currentUser.name,
-              shipping:ship,shippingService:quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):"",
+              shipping:ship,
+              shippingService: quoteIsFreight ? "TBD — Freight" : (quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):""),
+              shippingType: quoteIsFreight ? "freight" : "parcel",
+              freightDetails: quoteIsFreight ? {
+                pallets: computeFreightSummary(items, products).suggestedPallets || 1,
+                totalWeight: computeFreightSummary(items, products).totalWeight || 0,
+                totalVolume: computeFreightSummary(items, products).totalVolume || 0,
+                accessorials: Object.assign({}, quoteFreightAcc),
+                notesForCarrier: quoteFreightNotes,
+                requestedAt: new Date().toISOString(),
+                requestedBy: { repId: currentUser&&(currentUser.rep_id||currentUser.id), repName: currentUser&&currentUser.name }
+              } : null,
               custId:custId,custName:selCust?selCust.name:"",
               items:items.filter(function(it){return it.prodId;}).map(function(it){
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
@@ -5039,9 +5055,11 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               status:"draft",createdAt:new Date().toISOString()};
     setQuotes(function(prev){return [q].concat(prev);});
     dbSave("crm_quotes",id,q);
-    addToast("Quote "+id+" created","success");
+    addToast("Quote "+id+(quoteIsFreight?" (freight) ":" ")+"created","success");
     setShowForm(false); setCustId(""); setItems([{prodId:"",qty:1}]); setNotes("");
     setQuoteRate(null); setQuoteShip(0);
+    setQuoteFreightAcc({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
+    setQuoteFreightNotes("");
   }
 
   function convertToOrder(quote) {
@@ -5050,10 +5068,11 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     if(!commR&&quote.repId) { var repForComm=reps.find(function(r){return r.id===quote.repId;}); commR=(repForComm&&repForComm.defaultCommissionRate)||10; }
     // Backward-compat: older quotes stored the BASE subtotal in `total` and had no productBase
     var base = (quote.productBase!=null) ? quote.productBase : (quote.total||0);
-    var ship = quote.shipping||0;
-    var subtotal = Math.round(base*(1+commR/100)*100)/100;   // customer goods (markup on products only)
-    // Carry the ship-to address from the customer so the invoice Ship To block populates
     var qCust = customers.find(function(c2){return c2.id===quote.custId;})||{};
+    // Re-evaluate freight at convert time (in case settings or product flags changed)
+    var isFreightConv = quote.shippingType==="freight" || isOrderFreight(quote.items||[], products, qCust, quote.total||0);
+    var ship = isFreightConv ? 0 : (quote.shipping||0);
+    var subtotal = Math.round(base*(1+commR/100)*100)/100;
     var ti = qCust.zip ? getGaTaxRate(qCust.zip) : null;
     var taxRate = ti ? ti.rate : 0;
     var tax = Math.round(subtotal*taxRate*100)/100;
@@ -5062,21 +5081,75 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var shipAddr = (qCust.shippingAddress||qCust.shippingCity)
       ? {address:qCust.shippingAddress||"",address2:qCust.shippingAddress2||"",city:qCust.shippingCity||"",state:qCust.shippingState||"",zip:qCust.shippingZip||"",label:"Shipping"}
       : (qCust.address?{address:qCust.address,city:qCust.city,state:qCust.state,zip:qCust.zip,label:"Primary"}:null);
-    var order = Object.assign({},quote,{id:id,status:"Submitted",
+
+    // Pull freight metadata from the quote if it was a freight quote
+    var freightDetails = null;
+    if(isFreightConv) {
+      var s = computeFreightSummary(quote.items||[], products);
+      freightDetails = quote.freightDetails || {
+        pallets: s.suggestedPallets || 1,
+        totalWeight: s.totalWeight || 0,
+        totalVolume: s.totalVolume || 0,
+        accessorials: {residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false},
+        notesForCarrier: "",
+        requestedAt: new Date().toISOString(),
+        requestedBy: { repId: quote.repId, repName: quote.repName }
+      };
+    }
+
+    var order = Object.assign({},quote,{
+      id:id,
+      status: isFreightConv ? "Awaiting Freight Quote" : "Submitted",
       createdAt:new Date().toISOString(),commissionRate:commR,
       shipAddress:quote.shipAddress||shipAddr,
       totals:{baseSubtotal:base,subtotal:subtotal,shipping:ship,tax:tax,taxRate:taxRate,
               grand:grand,commission:commission,commRate:commR,
-              shippingService:quote.shippingService||""},
-      quoteId:quote.id,payMethod:"pay_later"});
+              shippingService: isFreightConv ? "TBD — Freight" : (quote.shippingService||"")},
+      shippingType: isFreightConv ? "freight" : "parcel",
+      freightDetails: freightDetails,
+      freightQuote: null,
+      quoteId:quote.id,payMethod:"pay_later",
+      auditLog:[{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:isFreightConv?"Quote converted to freight order — admin quote requested":"Quote converted to order",detail:"From quote "+quote.id}]
+    });
     setOrders(function(prev){return [order].concat(prev);});
     dbSave("crm_orders",id,order);
     var updated = Object.assign({},quote,{status:"converted",convertedOrderId:id});
     setQuotes(function(prev){return prev.map(function(q){return q.id===quote.id?updated:q;});});
     dbSave("crm_quotes",quote.id,updated);
-    addToast("Quote converted to Order "+id,"success");
-    showResult({type:"order",title:"Order Created!",subtitle:"Quote converted to order successfully.",
-      rows:[["Order #",id],["Customer",quote.custName],["Total",fmtMoney(grand)],["Status","Submitted"]],cta:"Done"});
+
+    // If freight, email admin so they can quote it
+    if(isFreightConv){
+      try{
+        var coN=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+        var freightAdminEmail = getFreightCfg().notifyEmail || getAdminNotifyEmail();
+        var acc = (freightDetails && freightDetails.accessorials) || {};
+        var accList = Object.keys(acc).filter(function(k){return acc[k];}).map(function(k){
+          return {residential:"Residential delivery",liftgate:"Liftgate at delivery",inside:"Inside delivery",appointment:"Appointment required",limitedAccess:"Limited access location"}[k];
+        }).filter(Boolean);
+        var shipAddrStr = (function(){
+          var sa = order.shipAddress; if(!sa) return "(no address)";
+          return [sa.address, [sa.city,sa.state].filter(Boolean).join(", "), sa.zip].filter(Boolean).join(", ");
+        })();
+        var bodyHtml =
+          "<p>A new freight order needs your quote (converted from quote "+quote.id+"). The customer has NOT been invoiced — they'll get the invoice after the rep sends it once you enter the carrier rate.</p>" +
+          "<table style='border-collapse:collapse;width:100%;margin:14px 0;font-size:13px;'>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Order</td><td style='padding:6px 10px;'>"+id+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Customer</td><td style='padding:6px 10px;'>"+(quote.custName||"")+(qCust.email?" &lt;"+qCust.email+"&gt;":"")+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Ship to</td><td style='padding:6px 10px;'>"+shipAddrStr+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Pallets</td><td style='padding:6px 10px;'>"+(freightDetails.pallets||1)+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Total weight</td><td style='padding:6px 10px;'>"+(freightDetails.totalWeight||0)+" lbs</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Accessorials</td><td style='padding:6px 10px;'>"+(accList.length?accList.join(", "):"None")+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Carrier notes</td><td style='padding:6px 10px;'>"+(freightDetails.notesForCarrier?freightDetails.notesForCarrier.replace(/</g,"&lt;").replace(/\n/g,"<br>"):"<em style='color:#94a3b8;'>none</em>")+"</td></tr>" +
+          "</table>";
+        notifyEmail("freightQuoteReq", freightAdminEmail,
+          "🚛 Freight quote needed — "+id+" — "+(quote.custName||""),
+          notifEmailHtml(coN, "Freight quote needed", bodyHtml, "Enter quote", getSiteUrl()+"#tab=tasks", "#b45309"));
+      }catch(e){}
+    }
+
+    addToast(isFreightConv?"Quote → freight order "+id+" — admin will quote carrier rate":"Quote converted to Order "+id,"success");
+    showResult({type:"order",title:isFreightConv?"Freight Order Created!":"Order Created!",subtitle:isFreightConv?"Admin will enter the carrier rate, then you can send the invoice to the customer.":"Quote converted to order successfully.",
+      rows:[["Order #",id],["Customer",quote.custName],["Status",isFreightConv?"Awaiting Freight Quote":"Submitted"],["Total",isFreightConv?"TBD (pending freight)":fmtMoney(grand)]],cta:"Done"});
     setViewQuote(null);
   }
 
@@ -5153,7 +5226,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                   <tr key={q.id} style={{borderTop:"1px solid "+C.border,cursor:"pointer"}}
                     onClick={function(){setViewQuote(q);}}>
                     <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.accent}}>{q.id}</td>
-                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{q.custName||"—"}</td>
+                    <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{q.custName||"—"}{(q.shippingType==="freight"||q.freightDetails)&&<span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:9,fontWeight:700}}>🚛</span>}</td>
                     {isAdmin&&<td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{q.repName||"—"}</td>}
                     <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700}}>{fmtMoney(q.total||0)}</td>
                     <td style={{padding:"10px 14px",fontSize:11,color:expired?C.danger:C.muted}}>{fmtDate(q.validUntil)}</td>
@@ -5187,13 +5260,59 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 opts={[{v:"",label:"Select customer…"}].concat(customers.filter(function(c2){return !isAdmin?c2.repId===(currentUser&&(currentUser.rep_id||currentUser.id)):true;}).map(function(c2){return {v:c2.id,label:c2.name+(c2.company?" — "+c2.company:"")};}))}/>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <Field label="Valid For (days)" value={validDays} onChange={setValidDays} type="number"/>
-              {/* Live shipping rates */}
+              {/* Live shipping rates OR Freight UI */}
               {(function(){
                 var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
-                if(!ss||!(ss.ratesFnUrl||ss.edgeFnUrl)) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
                 var cust = customers&&customers.find(function(cx){return cx.id===custId;});
                 var toZip = cust&&(cust.zip||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].zip))||"";
                 var toState = cust&&(cust.state||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].state))||"";
+
+                // Freight detection — independent of ShipStation config
+                var quoteGrandForFreight = calcCustomerSub() + calcTax();
+                var quoteIsFreight = items.some(function(it){return it.prodId;}) && isOrderFreight(items, products, cust, quoteGrandForFreight);
+                if(quoteIsFreight){
+                  var reasons = freightTriggerReasons(items, products, cust, quoteGrandForFreight);
+                  return (
+                    <div style={{marginTop:12,padding:"14px 16px",background:C.warning+"10",border:"2px dashed "+C.warning+"50",borderRadius:10}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                        <span style={{fontSize:18}}>🚛</span>
+                        <div style={{fontWeight:800,fontSize:13,color:C.warning}}>Freight Shipping Required</div>
+                      </div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+                        This quote needs LTL/pallet shipping. The customer will see "Shipping: TBD" on the quote. The carrier rate is added by admin after the customer accepts.
+                      </div>
+                      {reasons.length>0 && (
+                        <ul style={{fontSize:11,color:C.muted,margin:"0 0 10px 18px",padding:0,lineHeight:1.7}}>
+                          {reasons.map(function(r,i){return <li key={i}>{r}</li>;})}
+                        </ul>
+                      )}
+                      <div style={{marginBottom:8}}>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements <span style={{textTransform:"none",letterSpacing:0,color:C.dim,fontWeight:500}}>(admin uses this when quoting)</span></div>
+                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                          {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access"]].map(function(opt){
+                            return (
+                              <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.text,cursor:"pointer",padding:"3px 0"}}>
+                                <input type="checkbox" checked={!!quoteFreightAcc[opt[0]]}
+                                  onChange={function(e){setQuoteFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
+                                  style={{accentColor:C.accent,width:14,height:14}}/>
+                                <span>{opt[1]}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier</div>
+                        <textarea value={quoteFreightNotes} onChange={function(e){setQuoteFreightNotes(e.target.value);}} rows="2"
+                          placeholder="Loading dock hours, special instructions…"
+                          style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical"}}/>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Parcel rate picker (existing)
+                if(!ss||!(ss.ratesFnUrl||ss.edgeFnUrl)) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
                 if(!toZip) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: select a customer with a zip code to see carrier rates.</div>;
                 return (
                   <div style={{marginTop:12}}>
@@ -5299,6 +5418,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 })}
                 {(viewQuote.shipping||0)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>Shipping{viewQuote.shippingService?" — "+viewQuote.shippingService:""}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(viewQuote.shipping)}</span></div>
+                )}
+                {(viewQuote.shipping||0)===0 && (viewQuote.shippingType==="freight" || !!viewQuote.freightDetails) && (
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border,color:C.warning,fontWeight:600}}><span>🚛 Shipping (LTL freight)</span><span style={{fontFamily:"monospace"}}>TBD</span></div>
                 )}
                 {(viewQuote.tax||0)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>Sales Tax</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(viewQuote.tax)}</span></div>
@@ -12070,6 +12192,11 @@ function buildQuoteEmail(quote, company, link){
     var lp=it.customerPrice||it.unitPrice||0;
     return "<tr><td style='padding:6px 0;color:#4a5568'>"+(it.qty||1)+"&times; "+(it.name||it.prodId||"Item")+"</td><td style='padding:6px 0;text-align:right;color:#1a1a2e'>$"+(lp*(it.qty||1)).toFixed(2)+"</td></tr>";
   }).join("");
+  var isFreightEmail = quote.shippingType==="freight" || !!quote.freightDetails;
+  var totalLabel = isFreightEmail ? "Subtotal" : "Total";
+  var freightNote = isFreightEmail
+    ? "<div style='margin:0 0 16px;padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#78350f;line-height:1.6'><strong>🚛 Freight shipping required.</strong> The subtotal above does not include shipping. We'll send you the final invoice with the carrier rate after you accept this quote, typically within 1 business day.</div>"
+    : "";
   return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
     +"<div style='max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
     +"<div style='background:#635bff;padding:24px 32px'><div style='color:#fff;font-size:20px;font-weight:800'>"+company+"</div>"
@@ -12077,7 +12204,9 @@ function buildQuoteEmail(quote, company, link){
     +"<div style='padding:32px'>"
     +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:20px'>Please review your quote below. Click to accept and we'll get your order started.</div>"
     +"<table style='width:100%;border-collapse:collapse;font-size:13px;border-bottom:1px solid #e8ecef;margin-bottom:8px'>"+rows+"</table>"
-    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 24px'><span>Total</span><span style='color:#635bff'>$"+((quote.total||0)).toFixed(2)+"</span></div>"
+    +(isFreightEmail?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#b45309;margin:8px 0;font-weight:600'><span>🚛 Shipping (LTL freight)</span><span>TBD</span></div>":"")
+    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 16px'><span>"+totalLabel+"</span><span style='color:#635bff'>$"+((quote.total||0)).toFixed(2)+"</span></div>"
+    +freightNote
     +"<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:14px;border-radius:8px;font-weight:700;font-size:15px'>Review &amp; accept quote</a>"
     +"<div style='font-size:11px;color:#a0aec0;text-align:center;margin-top:16px'>Or open this link:<br>"+link+"</div>"
     +"</div></div></body></html>";
@@ -12203,6 +12332,7 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
   var company=snap.company||"PreVasive USA";
   var items=quote.items||[];
   var expired=quote.validUntil&&new Date(quote.validUntil)<new Date();
+  var isFreightQuote = quote.shippingType==="freight" || !!quote.freightDetails;
   function money(n){return "$"+(Math.round((n||0)*100)/100).toFixed(2);}
   return (
     <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
@@ -12223,11 +12353,21 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
             );
           })}
           <div style={{borderTop:"1px solid #e8ecef",marginTop:12,paddingTop:12}}>
-            {(quote.shipping||0)>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span>{money(quote.shipping)}</span></div>}
+            {isFreightQuote && (
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#b45309",marginBottom:4,fontWeight:600}}>
+                <span>🚛 Shipping (LTL freight)</span><span>TBD</span>
+              </div>
+            )}
+            {!isFreightQuote && (quote.shipping||0)>0 && <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Shipping</span><span>{money(quote.shipping)}</span></div>}
             {(quote.tax||0)>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:"#6b7c93",marginBottom:4}}><span>Sales Tax</span><span>{money(quote.tax)}</span></div>}
             <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,color:"#1a1a2e",marginTop:8}}>
-              <span>Total</span><span style={{color:"#635bff"}}>{money(quote.total)}</span>
+              <span>{isFreightQuote?"Subtotal":"Total"}</span><span style={{color:"#635bff"}}>{money(quote.total)}</span>
             </div>
+            {isFreightQuote && (
+              <div style={{marginTop:10,padding:"10px 12px",background:"#fffbeb",border:"1px solid #fde68a",borderRadius:8,fontSize:11.5,color:"#78350f",lineHeight:1.6}}>
+                <strong>Freight shipping required.</strong> The subtotal above does not include shipping. We'll send you the final invoice with the carrier rate after you accept this quote, typically within 1 business day.
+              </div>
+            )}
           </div>
           {quote.validUntil&&<div style={{fontSize:11,color:expired?"#df1b41":"#a0aec0",marginTop:12,textAlign:"center"}}>{expired?"This quote has expired.":"Valid until "+new Date(quote.validUntil).toLocaleDateString()}</div>}
         </div>
@@ -12241,7 +12381,7 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
               style={{width:"100%",background:"none",color:"#6b7c93",border:"none",padding:"12px",marginTop:6,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
               Decline
             </button>
-            <div style={{fontSize:10,color:"#a0aec0",textAlign:"center",marginTop:8}}>Accepting creates your order. We'll be in touch with next steps.</div>
+            <div style={{fontSize:10,color:"#a0aec0",textAlign:"center",marginTop:8}}>{isFreightQuote?"Accepting reserves your order. We'll email you the freight invoice within 1 business day.":"Accepting creates your order. We'll be in touch with next steps."}</div>
           </div>
         )}
       </div>
@@ -13544,7 +13684,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v45-shipping-tbd</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v46-quotes-freight</div>
       </div>
     </div>
   );
@@ -14855,7 +14995,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v45-shipping-tbd
+        BUILD: 2026-05-30-v46-quotes-freight
       </div>
     </div>
   );
@@ -15050,15 +15190,26 @@ function App() {
     var q=snap.quote||{};
     var commR=q.commissionRate||0;
     var base=(q.productBase!=null)?q.productBase:(q.total||0);
-    var ship=q.shipping||0, tax=q.tax||0;
+    var isFreightAccept = q.shippingType==="freight" || !!q.freightDetails;
+    var ship = isFreightAccept ? 0 : (q.shipping||0);
+    var tax=q.tax||0;
     var subtotal=Math.round(base*(1+commR/100)*100)/100;
-    var grand=(q.total!=null)?q.total:Math.round((subtotal+ship+tax)*100)/100;
+    var grand = isFreightAccept
+      ? Math.round((subtotal+tax)*100)/100
+      : ((q.total!=null)?q.total:Math.round((subtotal+ship+tax)*100)/100);
     var oid="ORD-"+String(Date.now()).slice(-6);
-    var order=Object.assign({},q,{id:oid,status:"Submitted",createdAt:new Date().toISOString(),
+    var order=Object.assign({},q,{id:oid,
+      status: isFreightAccept ? "Awaiting Freight Quote" : "Submitted",
+      shippingType: isFreightAccept ? "freight" : "parcel",
+      freightDetails: isFreightAccept ? (q.freightDetails || {pallets:1,totalWeight:0,totalVolume:0,accessorials:{},notesForCarrier:"",requestedAt:new Date().toISOString(),requestedBy:{repId:q.repId,repName:q.repName}}) : null,
+      freightQuote: null,
+      createdAt:new Date().toISOString(),
       commissionRate:commR,shipAddress:q.shipAddress||snap.shipAddress||null,
       totals:{baseSubtotal:base,subtotal:subtotal,shipping:ship,tax:tax,taxRate:q.taxRate||0,grand:grand,
-              commission:Math.round(base*commR/100*100)/100,commRate:commR,shippingService:q.shippingService||""},
-      quoteId:q.id,payMethod:"pay_later",acceptedByCustomer:true,acceptedAt:new Date().toISOString()});
+              commission:Math.round(base*commR/100*100)/100,commRate:commR,shippingService: isFreightAccept ? "TBD — Freight" : (q.shippingService||"")},
+      quoteId:q.id,payMethod:"pay_later",acceptedByCustomer:true,acceptedAt:new Date().toISOString(),
+      auditLog:[{ts:new Date().toISOString(),actor:"Customer (accepted quote)",action: isFreightAccept ? "Quote accepted — freight quote requested" : "Quote accepted",detail:"From quote "+q.id}]
+    });
     var sb=getSB();
     if(sb){
       sb.from("crm_orders").upsert({id:oid,data:order,updated_at:new Date().toISOString()}).then(function(){});
@@ -15067,6 +15218,20 @@ function App() {
       sb.from("crm_quote_tokens").upsert({id:qToken,data:snapUpd,updated_at:new Date().toISOString()}).then(function(){});
       try{localStorage.setItem("__pv__quote_"+qToken,JSON.stringify(snapUpd));}catch(e){}
       writeRepNotif(snap,q,oid,"accepted");
+      // Freight orders: queue an admin notification so they know to quote
+      if(isFreightAccept){
+        try{
+          var notif = {
+            id:"ntf_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,6),
+            adminNotify:true, ts:new Date().toISOString(),
+            kind:"freight_quote_needed",
+            title:"🚛 Customer accepted freight quote — "+oid+" needs your carrier rate",
+            body:"Quote "+q.id+" was accepted by "+(q.custName||"customer")+". Open Tasks → Freight Quote Requests to enter the carrier rate.",
+            orderId:oid, seen:false
+          };
+          sb.from("crm_notifications").upsert({id:notif.id,data:notif,created_at:notif.ts}).then(function(){});
+        }catch(e){}
+      }
     }
     setQuoteDone("accepted");
   }
