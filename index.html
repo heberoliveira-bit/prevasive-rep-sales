@@ -2454,7 +2454,7 @@ function FileUpload({files,onChange,label,maxFiles}) {
 }
 
 /* ─── TermsRequestModal ────────────────────────────────────────────────── */
-function TermsRequestModal({customer,repId,repName,onClose,addToast}) {
+function TermsRequestModal({customer,repId,repName,onSubmit,onClose,addToast}) {
   const [termType,   setTermType]   = useState("net_30");
   const [limit,      setLimit]      = useState("1000");
   const [bizName,    setBizName]    = useState(customer.company||"");
@@ -2505,7 +2505,8 @@ function TermsRequestModal({customer,repId,repName,onClose,addToast}) {
       references:refs,
       status:"pending",createdAt:new Date().toISOString()
     };
-    try{var sb=getSB();if(sb)sb.from("crm_terms_requests").upsert({id:req.id,data:req,created_at:req.createdAt}).then(function(){});}catch(e){}
+    // Delegate to parent — parent updates state, persists to DB, and sends the admin email
+    if(typeof onSubmit === "function") onSubmit(req);
     setSending(false);
     addToast("Credit terms request submitted for "+customer.name,"success");
     onClose();
@@ -10491,17 +10492,85 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
         <TermsRequestModal
           customer={termsReqCust}
           repId={repId}
-          repName=""
+          repName={(repData&&repData.name)||""}
           onSubmit={function(req){
-            var id=genId("tr");
-            var newReq=Object.assign({},req,{id:id});
-            setTermsRequests(function(prev){return [newReq].concat(prev);});
-            dbSave("crm_terms_requests",id,newReq);
-            notifyEmail("termsReq",getAdminNotifyEmail(),"Credit terms request — "+(termsReqCust&&termsReqCust.name||""),
-              notifEmailHtml("PreVasive USA","Credit terms requested","<p><strong>"+(termsReqCust&&termsReqCust.name||"A customer")+"</strong> requested credit terms"+(newReq.requestedLimit?(" with a limit of $"+newReq.requestedLimit):"")+". Review it under Tasks.</p>","#f6ab2f"));
+            // Persist to local state + Supabase
+            setTermsRequests(function(prev){return [req].concat(prev);});
+            dbSave("crm_terms_requests",req.id,req);
+
+            // Update customer to reflect "pending terms" so they can't place credit orders yet
             var updated=Object.assign({},termsReqCust,{termsStatus:"pending",termsRequestedAt:new Date().toISOString()});
             setCustomers(function(prev){return prev.map(function(x){return x.id===termsReqCust.id?updated:x;});});
             dbSave("crm_customers",termsReqCust.id,updated);
+
+            // Build the rich admin email
+            var co=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+            var termLabel = fmtTerms(req.termType);
+            var limitStr  = "$"+(parseFloat(req.creditLimit)||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
+
+            // Customer's order history with this rep
+            var custOrders = (orders||[]).filter(function(o){return o.custId===termsReqCust.id;});
+            var ordersCount = custOrders.length;
+            var lifetimeRevenue = custOrders.reduce(function(a,o){return a + (o.totals && o.totals.grand || 0);},0);
+            var paidOrders = custOrders.filter(function(o){return o.paidAt;}).length;
+
+            // References block
+            var refsHtml = (req.references||[]).filter(function(r){return r.name&&r.name.trim();}).map(function(r,i){
+              return "<tr><td style='padding:4px 8px;border:1px solid #e8ecef;'>"+(i+1)+"</td>"+
+                     "<td style='padding:4px 8px;border:1px solid #e8ecef;'>"+(r.name||"—")+"</td>"+
+                     "<td style='padding:4px 8px;border:1px solid #e8ecef;'>"+(r.phone||"—")+"</td>"+
+                     "<td style='padding:4px 8px;border:1px solid #e8ecef;'>"+(r.email||"—")+"</td></tr>";
+            }).join("");
+
+            // Attachments
+            var attachLine = (req.files&&req.files.length)
+              ? "<p style='margin:8px 0 4px;'><strong>Attachments:</strong> "+req.files.length+" file"+(req.files.length===1?"":"s")+" — "+req.files.map(function(f){return "<em>"+f.name+"</em>";}).join(", ")+"</p>"
+              : "";
+
+            var noteLine = req.note ? "<div style='background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:10px;margin:10px 0;font-size:13px;color:#78350f;'><strong>Rep's note:</strong><br>"+req.note.replace(/</g,"&lt;").replace(/\n/g,"<br>")+"</div>" : "";
+
+            var bodyHtml =
+              "<p>A new credit terms request was just submitted and is awaiting your approval.</p>" +
+
+              "<table style='border-collapse:collapse;width:100%;margin:14px 0;font-size:13px;'>" +
+              "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Customer</td><td style='padding:6px 10px;'>"+(termsReqCust.name||"")+"</td></tr>" +
+              (termsReqCust.company?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Company</td><td style='padding:6px 10px;'>"+termsReqCust.company+"</td></tr>":"") +
+              (termsReqCust.email?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Email</td><td style='padding:6px 10px;'><a href='mailto:"+termsReqCust.email+"'>"+termsReqCust.email+"</a></td></tr>":"") +
+              (termsReqCust.phone?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Phone</td><td style='padding:6px 10px;'>"+termsReqCust.phone+"</td></tr>":"") +
+              "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Submitted by</td><td style='padding:6px 10px;'>"+(req.repName||"a rep")+"</td></tr>" +
+              "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Requested terms</td><td style='padding:6px 10px;font-weight:700;color:#635bff;'>"+termLabel+"</td></tr>" +
+              "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Credit limit</td><td style='padding:6px 10px;font-weight:700;color:#635bff;'>"+limitStr+"</td></tr>" +
+              "</table>" +
+
+              "<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>Business details</h3>" +
+              "<table style='border-collapse:collapse;width:100%;font-size:13px;'>" +
+              (req.bizName?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Legal name</td><td style='padding:6px 10px;'>"+req.bizName+"</td></tr>":"") +
+              (req.taxId?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Tax ID / EIN</td><td style='padding:6px 10px;'>"+req.taxId+"</td></tr>":"") +
+              (req.yearsInBiz?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Years in business</td><td style='padding:6px 10px;'>"+req.yearsInBiz+"</td></tr>":"") +
+              (req.revenue?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Annual revenue</td><td style='padding:6px 10px;'>"+req.revenue+"</td></tr>":"") +
+              "</table>" +
+
+              "<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>History with "+(req.repName||"this rep")+"</h3>" +
+              "<table style='border-collapse:collapse;width:100%;font-size:13px;'>" +
+              "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Orders placed</td><td style='padding:6px 10px;'>"+ordersCount+" total ("+paidOrders+" paid)</td></tr>" +
+              "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Lifetime revenue</td><td style='padding:6px 10px;'>$"+lifetimeRevenue.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</td></tr>" +
+              "</table>" +
+
+              (refsHtml ?
+                ("<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>Trade references</h3>" +
+                 "<table style='border-collapse:collapse;width:100%;font-size:12px;'>" +
+                 "<thead><tr><th style='padding:6px 8px;background:#f6f9fc;text-align:left;'>#</th><th style='padding:6px 8px;background:#f6f9fc;text-align:left;'>Name</th><th style='padding:6px 8px;background:#f6f9fc;text-align:left;'>Phone</th><th style='padding:6px 8px;background:#f6f9fc;text-align:left;'>Email</th></tr></thead>" +
+                 "<tbody>"+refsHtml+"</tbody></table>") : "") +
+
+              noteLine +
+              attachLine +
+
+              "<p style='margin-top:18px;'>Click the button below to review the full request, see attachments, and approve or deny it.</p>";
+
+            notifyEmail("termsReq", getAdminNotifyEmail(),
+              "Credit terms request — "+termLabel+" / "+limitStr+" — "+(termsReqCust.name||""),
+              notifEmailHtml(co, "Credit terms requested — action needed", bodyHtml, "Review under Tasks", getSiteUrl()+"#tasks", "#f6ab2f")
+            );
           }}
           onClose={function(){setTermsReqCust(null);}}
           addToast={addToast}/>
@@ -12591,7 +12660,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v37-collect-rep-gating</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v38-terms-request-email</div>
       </div>
     </div>
   );
@@ -13670,7 +13739,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v37-collect-rep-gating
+        BUILD: 2026-05-30-v38-terms-request-email
       </div>
     </div>
   );
@@ -13686,7 +13755,15 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading,     setLoading]     = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
-  const [activeTab,   setActiveTab]   = useState("dashboard");
+  const [activeTab,   setActiveTab]   = useState((function(){
+    // Honor #tab=... or simple #tasks / #orders / #customers / etc., from inbound email links
+    try{
+      var h = (window.location.hash||"").toLowerCase();
+      var tabMatch = h.match(/^#tab=([a-z]+)/) || h.match(/^#(dashboard|orders|customers|products|reps|tasks|legal|commissions|settings|helpdesk|returns|reports|email|pricing|quotes)$/);
+      if(tabMatch) return tabMatch[1];
+    }catch(e){}
+    return "dashboard";
+  })());
   const [orders,      setOrders]      = useState([]);
   const [customers,   setCustomers]   = useState([]);
   const [products,    setProducts]    = useState([]);
