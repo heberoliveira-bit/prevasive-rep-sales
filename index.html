@@ -10472,11 +10472,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                       <textarea value={freightNotes} onChange={function(e){setFreightNotes(e.target.value);}} rows="2"
                         style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical"}}/>
                     </div>
-                    <div style={{marginTop:10,paddingTop:8,borderTop:"1px solid "+C.warning+"30",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                      <div style={{fontSize:11,color:C.muted}}>Shipping cost: <strong style={{color:C.warning}}>pending admin quote</strong></div>
-                      <button type="button" onClick={function(){setForceParcel(true);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,padding:"4px 10px",fontSize:10,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>
-                        Override and use parcel shipping instead
-                      </button>
+                    <div style={{marginTop:10,paddingTop:8,borderTop:"1px solid "+C.warning+"30",fontSize:11,color:C.muted}}>
+                      Shipping cost: <strong style={{color:C.warning}}>pending admin quote</strong>
                     </div>
                   </div>
                 );
@@ -10591,20 +10588,27 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
               {/* Totals */}
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",border:"1px solid "+C.border}}>
-                {[["Subtotal",fmtMoney(totals.subtotal)],
-                  totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount)],
-                  totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
-                  totals.shipping===0&&["Shipping","Free ✓"],
-                  totals.tax>0&&["Tax ("+(totals.taxInfo&&totals.taxInfo.county?totals.taxInfo.county+" ":"")+(((totals.taxRate||0)*100).toFixed(1))+"%)","+ "+fmtMoney(totals.tax)],
-                  ["Commission ("+commRate+"%)",fmtMoney(totals.commission)],
-                ].filter(Boolean).map(function(row,i){return (
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
-                                       color:row[0]==="Shipping"&&totals.shipping===0?C.success:C.muted,marginBottom:6}}>
-                    <span>{row[0]}</span>
-                    <span style={{fontFamily:"monospace",fontWeight:600,
-                                  color:row[0]==="Shipping"&&totals.shipping===0?C.success:"inherit"}}>{row[1]}</span>
-                  </div>
-                );})}
+                {(function(){
+                  var _isFreightTotals = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  return [["Subtotal",fmtMoney(totals.subtotal)],
+                    totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount)],
+                    totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
+                    totals.shipping===0&&["Shipping", _isFreightTotals ? "TBD" : "Free ✓"],
+                    totals.tax>0&&["Tax ("+(totals.taxInfo&&totals.taxInfo.county?totals.taxInfo.county+" ":"")+(((totals.taxRate||0)*100).toFixed(1))+"%)","+ "+fmtMoney(totals.tax)],
+                    ["Commission ("+commRate+"%)",fmtMoney(totals.commission)],
+                  ].filter(Boolean).map(function(row,i){
+                    var isShippingTBD = row[0]==="Shipping" && row[1]==="TBD";
+                    var isShippingFree = row[0]==="Shipping" && row[1]==="Free ✓";
+                    return (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                           color: isShippingTBD ? C.warning : isShippingFree ? C.success : C.muted, marginBottom:6}}>
+                        <span>{row[0]}</span>
+                        <span style={{fontFamily:"monospace",fontWeight:600,
+                                      color: isShippingTBD ? C.warning : isShippingFree ? C.success : "inherit"}}>{row[1]}</span>
+                      </div>
+                    );
+                  });
+                })()}
                 <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:900,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}>
                   <span>Grand Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(totals.grand)}</span>
                 </div>
@@ -10643,14 +10647,17 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid "+C.border}}>
                 <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Order Summary</div>
-                {[["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
-                  ["Shipping",totals.shipping===0?"Free ✓":"$"+totals.shipping.toFixed(2)],
-                  totals.tax>0&&["Tax",(((totals.taxRate||0)*100).toFixed(1))+"% = "+fmtMoney(totals.tax)],
-                  ["Payment",fmtTerms(payMethod)+(dorPath==="card"?" — Collect Card":dorPath==="link"?" — Send Invoice Link":"")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
-                  ["Grand Total",fmtMoney(totals.grand)]].map(function(row,i){return (
+                {(function(){
+                  var _isFreightConf = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  return [["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
+                    ["Shipping", totals.shipping===0 ? (_isFreightConf?"TBD":"Free ✓") : "$"+totals.shipping.toFixed(2)],
+                    totals.tax>0&&["Tax",(((totals.taxRate||0)*100).toFixed(1))+"% = "+fmtMoney(totals.tax)],
+                    ["Payment",fmtTerms(payMethod)+(dorPath==="card"?" — Collect Card":dorPath==="link"?" — Send Invoice Link":"")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
+                    ["Grand Total",fmtMoney(totals.grand)]];
+                })().filter(Boolean).map(function(row,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"5px 0",borderBottom:"1px solid "+C.border}}>
                     <span style={{color:C.muted}}>{row[0]}</span>
-                    <span style={{fontWeight:700,color:C.text,textTransform:"capitalize"}}>{row[1]}</span>
+                    <span style={{fontWeight:700,color:row[1]==="TBD"?C.warning:C.text,textTransform:"capitalize"}}>{row[1]}</span>
                   </div>
                 );})}
               </div>
@@ -13537,7 +13544,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v44-mobile-freight</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v45-shipping-tbd</div>
       </div>
     </div>
   );
@@ -14281,10 +14288,6 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                     placeholder="Loading dock hours, special instructions…"
                     style={{width:"100%",padding:"12px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box",resize:"vertical"}}/>
                 </div>
-                <button type="button" onClick={function(){setForceParcel(true);}}
-                  style={{marginTop:8,width:"100%",padding:"10px",background:"none",border:"1px solid "+C.border,borderRadius:8,fontSize:11,color:C.muted,fontFamily:"inherit",cursor:"pointer"}}>
-                  Override and use parcel shipping
-                </button>
               </div>
             </div>
           );
@@ -14374,6 +14377,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.text,fontWeight:600,paddingTop:6,borderTop:"1px dashed "+C.border}}><span>Customer subtotal</span><span>{fmtMoney(subtotal)}</span></div>
             {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax{taxInfo&&taxInfo.county?(" · "+taxInfo.county):""} ({(taxRate*100).toFixed(2).replace(/\.?0+$/,"")}%)</span><span>{fmtMoney(tax)}</span></div>}
             {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
+            {shipping===0 && _mobileIsFreight && <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.warning,fontWeight:700}}><span>Shipping</span><span>TBD</span></div>}
             <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:800,paddingTop:8,marginTop:4,borderTop:"1px solid "+C.border,color:C.text}}>
               <span>Customer pays</span><span>{fmtMoney(total)}</span>
             </div>
@@ -14851,7 +14855,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v44-mobile-freight
+        BUILD: 2026-05-30-v45-shipping-tbd
       </div>
     </div>
   );
