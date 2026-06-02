@@ -319,9 +319,11 @@ function subscribeTable(table, setState){
     })
     .subscribe(function(status){
       if(status === "SUBSCRIBED") {
-        // Silent success
+        try{ console.info("[realtime] ✓ "+table+" — live updates connected"); }catch(e){}
       } else if(status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        console.warn("realtime channel "+table+" status:", status, "— table may not be in supabase_realtime publication");
+        try{ console.warn("[realtime] ✗ "+table+" — "+status+". Run in Supabase SQL: ALTER PUBLICATION supabase_realtime ADD TABLE "+table+";"); }catch(e){}
+      } else if(status === "CLOSED") {
+        try{ console.info("[realtime] "+table+" — channel closed"); }catch(e){}
       }
     });
   return ch;
@@ -7491,22 +7493,46 @@ function AdminProducts({products,setProducts,addToast}) {
     setProducts(function(prev){
       return editing ? prev.map(function(p){return p.id===editing.id?data:p;}) : [data].concat(prev);
     });
-    dbSave("crm_products",data.id,data);
-    addToast(editing?"Product updated":"Product added","success");
+    dbSave("crm_products",data.id,data).then(function(r){
+      if(!r.ok){
+        addToast("⚠ Product saved locally but server write failed: "+(r.error&&r.error.message||"unknown error")+". Other browsers won't see this until it's persisted.","warning");
+      } else {
+        addToast(editing?"Product updated":"Product added","success");
+      }
+    });
     setShowForm(false);
   }
 
   function toggle(p) {
     var updated = Object.assign({},p,{active:!p.active});
     setProducts(function(prev){return prev.map(function(x){return x.id===p.id?updated:x;});});
-    dbSave("crm_products",p.id,updated);
-    addToast(p.name+(updated.active?" activated":" deactivated"),"info");
+    dbSave("crm_products",p.id,updated).then(function(r){
+      if(!r.ok){
+        addToast("⚠ Toggle saved locally only — server write failed: "+(r.error&&r.error.message||"unknown error"),"warning");
+      } else {
+        addToast(p.name+(updated.active?" activated":" deactivated"),"info");
+      }
+    });
+  }
+
+  function refreshFromServer(){
+    dbLoad("crm_products").then(function(d){
+      if(d && d.length>=0){
+        setProducts(d);
+        addToast("Refreshed "+d.length+" products from server","success");
+      } else {
+        addToast("Refresh failed — check connection","warning");
+      }
+    });
   }
 
   return (
     <div>
       <PageHeader title="Products" subtitle={products.length+" products in catalog"}
-        action={<Btn onClick={openNew}>+ Add Product</Btn>}/>
+        action={<div style={{display:"flex",gap:8}}>
+          <Btn variant="ghost" small onClick={refreshFromServer} title="Pull latest from server (use if live sync is down)">🔄 Refresh</Btn>
+          <Btn onClick={openNew}>+ Add Product</Btn>
+        </div>}/>
       {products.length===0 ? (
         <EmptyState icon="📦" title="No products" subtitle="Add your PreVasive product catalog." action={<Btn onClick={openNew}>Add First Product</Btn>}/>
       ) : (
@@ -13928,7 +13954,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v47-pending-action</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v48-products-sync</div>
       </div>
     </div>
   );
@@ -15320,7 +15346,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v47-pending-action
+        BUILD: 2026-05-30-v48-products-sync
       </div>
     </div>
   );
