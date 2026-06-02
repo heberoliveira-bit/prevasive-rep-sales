@@ -3578,6 +3578,17 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
   const [collectTarget, setCollectTarget] = useState(null);
+  // Admin overrides on pending terms requests — keyed by request id.
+  // Each entry is { termType: "net_15"|"net_30"|..., creditLimit: number }.
+  // Reads fall back to the request's originally-requested values when no override is set.
+  const [termsOverrides, setTermsOverrides] = useState({});
+  function setOverride(reqId, field, value){
+    setTermsOverrides(function(prev){
+      var cur = prev[reqId] || {};
+      var next = Object.assign({}, cur, { [field]: value });
+      return Object.assign({}, prev, { [reqId]: next });
+    });
+  }
   var pendingW9       = reps.filter(function(r){return r.w9Status==="received"&&r.w9ReviewStatus!=="approved";});
   var submittedOrders = (orders||[]).filter(function(o){return o.status==="Submitted";});
   var historyTerms     = (termsRequests||[]).filter(function(r){return r.status==="approved"||r.status==="denied"||r.status==="approved_awaiting_signature"||r.status==="signed";});
@@ -3960,10 +3971,55 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     <div style={{fontSize:10,color:C.dim,whiteSpace:"nowrap"}}>{fmtDate(req.createdAt||req.submittedAt)}</div>
                   </div>
                   <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",marginTop:4}}>
+                    {req.status==="pending"&&(function(){
+                      var ov = termsOverrides[req.id] || {};
+                      var effTerm  = ov.termType  != null ? ov.termType  : (req.termType  || "net_30");
+                      var effLimit = ov.creditLimit != null ? ov.creditLimit : (req.creditLimit || 0);
+                      var changed  = effTerm !== (req.termType||"net_30") || Number(effLimit) !== Number(req.creditLimit||0);
+                      return (
+                        <div style={{flex:"1 1 100%",padding:"10px 12px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,marginBottom:6}}>
+                          <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>
+                            Approve as {changed && <span style={{color:C.warning}}>· edited from request</span>}
+                          </div>
+                          <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                            <div>
+                              <div style={{fontSize:10,color:C.dim,marginBottom:3}}>Terms</div>
+                              <select value={effTerm} onChange={function(e){setOverride(req.id,"termType",e.target.value);}}
+                                style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:6,fontSize:12,background:C.surface,color:C.text,fontFamily:"inherit"}}>
+                                {["net_15","net_30","net_45","net_60","net_90"].map(function(t){return <option key={t} value={t}>{fmtTerms(t)}</option>;})}
+                              </select>
+                            </div>
+                            <div>
+                              <div style={{fontSize:10,color:C.dim,marginBottom:3}}>Credit limit</div>
+                              <div style={{display:"flex",alignItems:"center",gap:4}}>
+                                <span style={{color:C.muted,fontSize:13}}>$</span>
+                                <input type="number" value={effLimit} min="0" step="100"
+                                  onChange={function(e){setOverride(req.id,"creditLimit",parseFloat(e.target.value)||0);}}
+                                  style={{padding:"6px 10px",border:"1px solid "+C.border,borderRadius:6,fontSize:12,background:C.surface,color:C.text,fontFamily:"inherit",width:120}}/>
+                              </div>
+                            </div>
+                            <div style={{fontSize:10,color:C.dim,marginLeft:"auto",alignSelf:"flex-end"}}>
+                              Rep requested: {fmtTerms(req.termType||"net_30")} · ${(req.creditLimit||0).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <Btn small variant="success" onClick={function(){
-                      var updated=Object.assign({},req,{status:"approved_awaiting_signature",
+                      // Use admin's possibly-overridden values
+                      var ov = termsOverrides[req.id] || {};
+                      var approvedTerms = ov.termType  != null ? ov.termType  : (req.termType  || "net_30");
+                      var approvedLimit = ov.creditLimit != null ? ov.creditLimit : (req.creditLimit || 0);
+                      var wasEdited     = approvedTerms !== (req.termType||"net_30") || Number(approvedLimit) !== Number(req.creditLimit||0);
+                      var updated=Object.assign({},req,{
+                        status:"approved_awaiting_signature",
                         approvedAt:new Date().toISOString(),
-                        approvedLimit:req.requestedLimit,approvedTerms:req.requestedTerms});
+                        approvedLimit:approvedLimit,
+                        approvedTerms:approvedTerms,
+                        wasEditedOnApproval: wasEdited,
+                        originalRequestedTerms: req.termType||null,
+                        originalRequestedLimit: req.creditLimit||null
+                      });
                       setTermsRequests(function(prev){return prev.map(function(r){return r.id===req.id?updated:r;});});
                       dbSave("crm_terms_requests",req.id,updated);
                       if(customers&&setCustomers) {
@@ -3982,16 +4038,31 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                           localStorage.setItem("__pv__sign_"+token,JSON.stringify(sigData));
                           (function(){var _sbS=getSB();if(_sbS){_sbS.from("crm_sign_tokens").upsert({id:token,data:sigData,created_at:sigData.createdAt}).then(function(){});}})();
                           var _signLink=getSiteUrl()+"#sign="+token;
+                          var editedNote = wasEdited
+                            ? "<p style='background:#fff8e1;border:1px solid #fde68a;border-radius:6px;padding:10px;margin:10px 0;font-size:13px;color:#78350f;'><strong>Note:</strong> Your account manager approved this with adjusted terms: <strong>"+fmtTerms(approvedTerms)+"</strong> at a credit limit of <strong>$"+approvedLimit.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</strong>.</p>"
+                            : "";
                           notifyEmail("termsApproved",cust.email||"","Your credit application is approved — "+co,
-                            notifEmailHtml(co,"Credit terms approved","<p>Hi "+(cust.name||"there")+",</p><p>Your request for credit terms has been approved. Please review and sign your agreement to activate your account.</p>","Review &amp; sign agreement",_signLink,"#1ea672"));
+                            notifEmailHtml(co,"Credit terms approved","<p>Hi "+(cust.name||"there")+",</p><p>Your request for credit terms has been approved. Please review and sign your agreement to activate your account.</p>"+editedNote,"Review &amp; sign agreement",_signLink,"#1ea672"));
                           var updCust=Object.assign({},cust,{termsStatus:"awaiting_signature",
-                            termsType:req.requestedTerms,termsLimit:req.requestedLimit,
+                            termsType:approvedTerms,termsLimit:approvedLimit,
                             termsApprovedAt:new Date().toISOString(),termsSigningToken:token});
                           setCustomers(function(prev){return prev.map(function(x){return x.id===cust.id?updCust:x;});});
                           dbSave("crm_customers",cust.id,updCust);
+                          // Also notify the rep so they know the approved terms (might be different from what they requested)
+                          if(_repObj.email){
+                            var repNote = wasEdited
+                              ? "<p>Heads up: the approved terms differ from what was requested.</p>" +
+                                "<table style='border-collapse:collapse;font-size:13px;margin:10px 0;'>" +
+                                "<tr><td style='padding:4px 8px;background:#f6f9fc;'>Requested</td><td style='padding:4px 8px;'>"+fmtTerms(req.termType||"net_30")+" · $"+((req.creditLimit||0)).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</td></tr>" +
+                                "<tr><td style='padding:4px 8px;background:#f6f9fc;font-weight:700;'>Approved</td><td style='padding:4px 8px;font-weight:700;color:#1ea672;'>"+fmtTerms(approvedTerms)+" · $"+approvedLimit.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</td></tr>" +
+                                "</table>"
+                              : "<p>Approved as requested: <strong>"+fmtTerms(approvedTerms)+"</strong> at a credit limit of <strong>$"+approvedLimit.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2})+"</strong>.</p>";
+                            notifyEmail("termsRepNotice",_repObj.email,"Credit terms approved for "+(cust.name||""),
+                              notifEmailHtml(co,"Credit terms approved","<p>Hi "+(_repObj.name||"there")+",</p><p>The credit terms request for <strong>"+(cust.name||"")+"</strong> has been approved. The customer needs to sign the agreement to activate the terms.</p>"+repNote,"Open customer",getSiteUrl()+"#customers","#1ea672"));
+                          }
                         }
                       }
-                      addToast("Approved — send signing link to customer","success");
+                      addToast(wasEdited?"Approved with edits — send signing link to customer":"Approved — send signing link to customer","success");
                     }}>✓ Approve & Generate Agreement</Btn>
                     <Btn small variant="ghost" onClick={function(){
                       var updated=Object.assign({},req,{status:"denied",deniedAt:new Date().toISOString()});
@@ -12660,7 +12731,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v38-terms-request-email</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v39-terms-admin-override</div>
       </div>
     </div>
   );
@@ -13739,7 +13810,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v38-terms-request-email
+        BUILD: 2026-05-30-v39-terms-admin-override
       </div>
     </div>
   );
