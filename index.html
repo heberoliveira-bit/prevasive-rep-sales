@@ -415,18 +415,46 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
   function pickSuggestion(sug){
     setOpen(false); setSuggestions([]);
     var pred = sug.placePrediction;
-    var mainText = pred.mainText ? pred.mainText.toString() : pred.text;
-    onChange(mainText||"");
+    var mainText = pred.mainText ? pred.mainText.toString() : (pred.text || "");
+    var fullPredText = pred.text ? pred.text.toString() : (mainText || "");
+    // Show the user's selection immediately so the click feels responsive,
+    // then we'll refine after fetchFields resolves with the canonical street.
+    onChange(mainText || "");
     if(!onSelect) return;
     var place = pred.toPlace();
-    place.fetchFields({fields:["addressComponents"]}).then(function(){
+    place.fetchFields({fields:["addressComponents","formattedAddress"]}).then(function(){
       var comps = place.addressComponents||[];
       function g(type){
         var match = comps.find(function(a){return a.types&&a.types.indexOf(type)>=0;});
         return match ? (match.shortText||match.longText||"") : "";
       }
+      var streetNum = g("street_number");
+      var route     = g("route");
+      // Build the street defensively. Google's address_components occasionally
+      // omits street_number even when the prediction's display text included
+      // it ("123 Main St" → only "Main St" returned). When that happens, fall
+      // back to mainText / formattedAddress to recover the number.
+      var fullStreet;
+      if(streetNum && route){
+        fullStreet = (streetNum+" "+route).trim();
+      } else if(mainText && /^\d/.test(mainText.trim())){
+        // mainText is something like "123 Main St" — already has number + route
+        fullStreet = mainText.trim();
+      } else if(fullPredText && /^\d/.test(fullPredText.trim())){
+        // Last resort — take the leading number from the full prediction text
+        // and pair with whatever route/mainText we have.
+        var leadingNum = (fullPredText.match(/^\d+\w?/)||[""])[0];
+        fullStreet = leadingNum && route ? (leadingNum+" "+route).trim() : mainText || route || "";
+      } else if(route){
+        fullStreet = route;
+      } else {
+        fullStreet = mainText || "";
+      }
+      // Re-emit onChange with the canonical street so any stale "Main St"
+      // (without number) gets corrected to "123 Main St" in the input.
+      onChange(fullStreet);
       onSelect({
-        street: (g("street_number")+" "+g("route")).trim(),
+        street: fullStreet,
         city:   g("locality")||g("sublocality_level_1")||g("neighborhood"),
         state:  g("administrative_area_level_1"),
         zip:    g("postal_code"),
@@ -12731,7 +12759,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v39-terms-admin-override</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v40-places-street-num</div>
       </div>
     </div>
   );
@@ -13810,7 +13838,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v39-terms-admin-override
+        BUILD: 2026-05-30-v40-places-street-num
       </div>
     </div>
   );
