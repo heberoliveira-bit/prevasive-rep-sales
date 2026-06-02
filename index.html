@@ -158,14 +158,10 @@ function isOrderFreight(items, products, customer, orderGrand){
   var s = computeFreightSummary(items, products);
   if(s.hasFreightLine) return true;
   if(s.totalWeight >= cfg.thresholds.weightLbs) return true;
-  if(s.anyDimsKnown && s.totalVolume >= cfg.thresholds.volumeCuFt) return true;
-  if((orderGrand||0) >= cfg.thresholds.dollarValue) return true;
   return false;
 }
 
-/* Human-readable reason for routing to freight — used in UI and emails.
-   Note: the dollar-value trigger still routes the order, but the reason
-   isn't surfaced to the rep (we don't expose internal thresholds). */
+/* Human-readable reason for routing to freight — used in UI and emails. */
 function freightTriggerReasons(items, products, customer, orderGrand){
   var reasons = [];
   if(customer && customer.forceFreight) reasons.push("Customer is set to always ship freight");
@@ -182,7 +178,6 @@ function freightTriggerReasons(items, products, customer, orderGrand){
     reasons.push("Product"+(freighters.length>1?"s":"")+" requires freight: "+freighters.join(", "));
   }
   if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (above "+cfg.thresholds.weightLbs+" lb parcel limit)");
-  if(s.anyDimsKnown && s.totalVolume >= cfg.thresholds.volumeCuFt) reasons.push("Total volume is "+s.totalVolume+" cu ft (above "+cfg.thresholds.volumeCuFt+" cu ft)");
   return reasons;
 }
 
@@ -9208,34 +9203,14 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                 </div>
 
                 <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
-                  <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Auto-detect triggers</div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
-                    <div>
-                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Weight ≥</div>
-                      <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <input type="number" defaultValue={fcfg.thresholds.weightLbs} min="0" step="10"
-                          onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||0})}));}}
-                          style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
-                        <span style={{color:C.muted,fontSize:11}}>lbs</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Volume ≥</div>
-                      <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <input type="number" defaultValue={fcfg.thresholds.volumeCuFt} min="0" step="1"
-                          onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{volumeCuFt:parseFloat(e.target.value)||0})}));}}
-                          style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
-                        <span style={{color:C.muted,fontSize:11}}>cu ft</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Value ≥</div>
-                      <div style={{display:"flex",alignItems:"center",gap:4}}>
-                        <span style={{color:C.muted,fontSize:11}}>$</span>
-                        <input type="number" defaultValue={fcfg.thresholds.dollarValue} min="0" step="100"
-                          onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{dollarValue:parseFloat(e.target.value)||0})}));}}
-                          style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
-                      </div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Auto-detect trigger</div>
+                  <div style={{maxWidth:280}}>
+                    <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Weight ≥</div>
+                    <div style={{display:"flex",alignItems:"center",gap:6}}>
+                      <input type="number" defaultValue={fcfg.thresholds.weightLbs} min="0" step="10"
+                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||0})}));}}
+                        style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                      <span style={{color:C.muted,fontSize:11}}>lbs</span>
                     </div>
                   </div>
                   <div style={{fontSize:10,color:C.dim,marginTop:10,lineHeight:1.6}}>
@@ -14131,7 +14106,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v51-shipping-toggle</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v52-weight-only-triggers</div>
       </div>
     </div>
   );
@@ -15590,7 +15565,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v51-shipping-toggle
+        BUILD: 2026-05-30-v52-weight-only-triggers
       </div>
     </div>
   );
