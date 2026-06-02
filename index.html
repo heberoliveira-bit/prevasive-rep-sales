@@ -94,7 +94,101 @@ var STATUS_COLOR = {
   Cancelled:          {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
   Refunded:           {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
   Returned:           {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
+  // Freight workflow
+  "Awaiting Freight Quote": {c:"#b45309", bg:"rgba(245,158,11,.18)"},
+  "Quoted":                 {c:"#635bff", bg:"rgba(99,91,255,.12)"},
+  "Quote Expired":          {c:"#df1b41", bg:"rgba(223,27,65,.12)"},
 };
+
+/* ─── Freight (LTL) Helpers ─────────────────────────────────────────────── */
+var DEFAULT_FREIGHT_CFG = {
+  thresholds: { weightLbs: 150, volumeCuFt: 10, dollarValue: 2500 },
+  carriers: ["SAIA","Estes","R+L Carriers","ABF","XPO","Old Dominion","Other"],
+  quoteExpiryHours: 24,
+  showFreightTagInShipStation: true,
+  notifyEmail: ""
+};
+function getFreightCfg(){
+  try{
+    var raw = localStorage.getItem("__pv__freightCfg");
+    if(!raw) return DEFAULT_FREIGHT_CFG;
+    var p = JSON.parse(raw);
+    return Object.assign({}, DEFAULT_FREIGHT_CFG, p, {
+      thresholds: Object.assign({}, DEFAULT_FREIGHT_CFG.thresholds, p.thresholds||{}),
+      carriers: (p.carriers && p.carriers.length) ? p.carriers : DEFAULT_FREIGHT_CFG.carriers,
+    });
+  }catch(e){ return DEFAULT_FREIGHT_CFG; }
+}
+function saveFreightCfg(cfg){
+  try{ localStorage.setItem("__pv__freightCfg", JSON.stringify(cfg)); }catch(e){}
+  try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:cfg, updated_at:new Date().toISOString()}).then(function(){}); }catch(e){}
+}
+
+/* Sum weight (lbs), volume (cu ft), and pallet count from line items. */
+function computeFreightSummary(items, products){
+  var weight = 0, volumeCuIn = 0, pallets = 0, freightLine = false, anyDimsKnown = false;
+  (items||[]).forEach(function(it){
+    if(!it.prodId || !it.qty) return;
+    var p = (products||[]).find(function(px){return px.id===it.prodId;}) || {};
+    var dims = p.freightDimsLbs || p.shipDims || {};
+    var w = parseFloat(dims.weight || p.weight || 0) || 0;
+    weight += w * (parseFloat(it.qty)||0);
+    var L = parseFloat(dims.l||0)||0, W = parseFloat(dims.w||0)||0, H = parseFloat(dims.h||0)||0;
+    if(L>0 && W>0 && H>0){ anyDimsKnown = true; volumeCuIn += L*W*H * (parseFloat(it.qty)||0); }
+    if(p.freightRequired) freightLine = true;
+    if(p.unitsPerPallet && parseInt(p.unitsPerPallet,10) > 0){
+      pallets += Math.ceil((parseFloat(it.qty)||0) / parseInt(p.unitsPerPallet,10));
+    }
+  });
+  var volumeCuFt = volumeCuIn / 1728;
+  return {
+    totalWeight: Math.round(weight*10)/10,
+    totalVolume: anyDimsKnown ? Math.round(volumeCuFt*10)/10 : 0,
+    suggestedPallets: pallets || 0,
+    hasFreightLine: freightLine,
+    anyDimsKnown: anyDimsKnown
+  };
+}
+
+/* Return true if this order should ship freight based on triggers + customer settings. */
+function isOrderFreight(items, products, customer, orderGrand){
+  if(!items || !items.length) return false;
+  if(customer && customer.forceFreight) return true;
+  var cfg = getFreightCfg();
+  var s = computeFreightSummary(items, products);
+  if(s.hasFreightLine) return true;
+  if(s.totalWeight >= cfg.thresholds.weightLbs) return true;
+  if(s.anyDimsKnown && s.totalVolume >= cfg.thresholds.volumeCuFt) return true;
+  if((orderGrand||0) >= cfg.thresholds.dollarValue) return true;
+  return false;
+}
+
+/* Human-readable reason for routing to freight — used in UI and emails. */
+function freightTriggerReasons(items, products, customer, orderGrand){
+  var reasons = [];
+  if(customer && customer.forceFreight) reasons.push("Customer is set to always ship freight");
+  var cfg = getFreightCfg();
+  var s = computeFreightSummary(items, products);
+  if(s.hasFreightLine) {
+    var freighters = (items||[]).filter(function(it){
+      var p = (products||[]).find(function(px){return px.id===it.prodId;});
+      return p && p.freightRequired;
+    }).map(function(it){
+      var p = (products||[]).find(function(px){return px.id===it.prodId;});
+      return (p && p.name) || it.prodId;
+    });
+    reasons.push("Product"+(freighters.length>1?"s":"")+" requires freight: "+freighters.join(", "));
+  }
+  if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (above "+cfg.thresholds.weightLbs+" lb parcel limit)");
+  if(s.anyDimsKnown && s.totalVolume >= cfg.thresholds.volumeCuFt) reasons.push("Total volume is "+s.totalVolume+" cu ft (above "+cfg.thresholds.volumeCuFt+" cu ft)");
+  if((orderGrand||0) >= cfg.thresholds.dollarValue) reasons.push("Order value $"+(orderGrand||0).toFixed(2)+" exceeds $"+cfg.thresholds.dollarValue);
+  return reasons;
+}
+
+function freightQuoteExpired(order){
+  if(!order || !order.freightQuote || !order.freightQuote.expiresAt) return false;
+  return new Date(order.freightQuote.expiresAt).getTime() < Date.now();
+}
 
 /* ─── Supabase ───────────────────────────────────────────────────────────── */
 var SUPABASE_URL      = "https://oafmlvotrhfyffjxjkwy.supabase.co";
@@ -3646,6 +3740,160 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
+/* ─── EnterFreightQuoteModal ─────────────────────────────────────────────── */
+function EnterFreightQuoteModal({order,currentUser,reps,onSave,onClose,addToast}) {
+  var cfg = getFreightCfg();
+  var existing = order.freightQuote || {};
+  const [carrier,        setCarrier]        = useState(existing.carrier || cfg.carriers[0] || "SAIA");
+  const [carrierService, setCarrierService] = useState(existing.carrierService || "Standard LTL");
+  const [proNumber,      setProNumber]      = useState(existing.proNumber || "");
+  const [freightCost,    setFreightCost]    = useState(existing.freightCost!=null ? String(existing.freightCost) : "");
+  const [pickupETA,      setPickupETA]      = useState(existing.pickupETA || "");
+  const [transitDays,    setTransitDays]    = useState(existing.transitDays || "");
+  const [internalNotes,  setInternalNotes]  = useState(existing.internalNotes || "");
+  const [saving,         setSaving]         = useState(false);
+
+  var fd = order.freightDetails || {};
+  var acc = fd.accessorials || {};
+  var accLabels = Object.keys(acc).filter(function(k){return acc[k];}).map(function(k){
+    return {residential:"Residential",liftgate:"Liftgate",inside:"Inside delivery",appointment:"Appointment",limitedAccess:"Limited access"}[k];
+  }).filter(Boolean);
+  var sa = order.shipAddress || {};
+  var addrStr = [sa.address, [sa.city,sa.state].filter(Boolean).join(", "), sa.zip].filter(Boolean).join(", ");
+
+  function save(){
+    var cost = parseFloat(freightCost);
+    if(!Number.isFinite(cost) || cost <= 0) { addToast("Enter a valid freight cost","warning"); return; }
+    if(!carrier) { addToast("Pick a carrier","warning"); return; }
+    setSaving(true);
+    var now = new Date();
+    var expiresAt = new Date(now.getTime() + cfg.quoteExpiryHours * 60 * 60 * 1000);
+    var quote = {
+      carrier: carrier,
+      carrierService: carrierService,
+      proNumber: proNumber.trim(),
+      freightCost: cost,
+      pickupETA: pickupETA,
+      transitDays: transitDays,
+      internalNotes: internalNotes.trim(),
+      quotedAt: now.toISOString(),
+      quotedBy: (currentUser && currentUser.name) || "Admin",
+      expiresAt: expiresAt.toISOString()
+    };
+    // Recompute totals with the freight cost added
+    var newTotals = Object.assign({}, order.totals || {}, { shipping: cost });
+    newTotals.grand = (newTotals.subtotal || 0) - (newTotals.discount || 0) + (newTotals.tax || 0) + cost;
+    var auditEntry = {
+      ts: now.toISOString(),
+      actor: quote.quotedBy,
+      action: existing.carrier ? "Freight quote revised" : "Freight quote entered",
+      detail: carrier + " · $" + cost.toFixed(2) + (existing.carrier ? " (was: "+existing.carrier+" $"+(existing.freightCost||0).toFixed(2)+")" : "")
+    };
+    var updated = Object.assign({}, order, {
+      freightQuote: quote,
+      totals: newTotals,
+      status: "Quoted",
+      updatedAt: now.toISOString(),
+      auditLog: (order.auditLog || []).concat([auditEntry])
+    });
+    onSave(updated);
+    setSaving(false);
+  }
+
+  return (
+    <Modal title={(existing.carrier?"Edit ":"Enter ")+"Freight Quote — "+order.id} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={save} disabled={saving||!freightCost.trim()}>{saving?"Saving…":(existing.carrier?"Save changes":"Save & Send Invoice →")}</Btn>
+      </div>}>
+
+      {/* Header context */}
+      <div style={{padding:"12px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,marginBottom:14,fontSize:12,color:C.muted,lineHeight:1.7}}>
+        <div><strong style={{color:C.text}}>{order.custName}</strong> → {addrStr || "(no address)"}</div>
+        <div>{fd.pallets||"?"} pallet{(fd.pallets===1)?"":"s"} · {fd.totalWeight||0} lbs{fd.totalVolume?" · "+fd.totalVolume+" cu ft":""}</div>
+        {accLabels.length>0 && <div>Accessorials: {accLabels.join(", ")}</div>}
+        {fd.notesForCarrier && <div style={{marginTop:4,padding:"6px 10px",background:C.surface,borderRadius:6,fontStyle:"italic",color:C.text}}>"{fd.notesForCarrier}"</div>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Carrier</div>
+          <select value={carrier} onChange={function(e){setCarrier(e.target.value);}}
+            style={{width:"100%",padding:"9px 12px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}>
+            {cfg.carriers.map(function(c){return <option key={c} value={c}>{c}</option>;})}
+          </select>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Service level</div>
+          <input type="text" value={carrierService} onChange={function(e){setCarrierService(e.target.value);}}
+            placeholder="Standard LTL"
+            style={{width:"100%",padding:"9px 12px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>PRO number <span style={{color:C.dim,fontWeight:500}}>(optional)</span></div>
+          <input type="text" value={proNumber} onChange={function(e){setProNumber(e.target.value);}}
+            placeholder="Often added later"
+            style={{width:"100%",padding:"9px 12px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Freight cost <span style={{color:C.danger,fontWeight:700}}>(customer charge)</span></div>
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"7px 12px",border:"2px solid "+C.accent,borderRadius:7,background:C.bg}}>
+            <span style={{color:C.muted,fontSize:14}}>$</span>
+            <input type="number" value={freightCost} onChange={function(e){setFreightCost(e.target.value);}} min="0" step="0.01"
+              placeholder="0.00"
+              style={{flex:1,background:"none",border:"none",outline:"none",color:C.text,fontSize:15,fontFamily:"monospace",fontWeight:700}}/>
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Pickup ETA <span style={{color:C.dim,fontWeight:500}}>(optional)</span></div>
+          <input type="date" value={pickupETA} onChange={function(e){setPickupETA(e.target.value);}}
+            style={{width:"100%",padding:"9px 12px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+        </div>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Transit days <span style={{color:C.dim,fontWeight:500}}>(optional)</span></div>
+          <input type="text" value={transitDays} onChange={function(e){setTransitDays(e.target.value);}}
+            placeholder="3-5"
+            style={{width:"100%",padding:"9px 12px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+        </div>
+      </div>
+
+      <div style={{marginBottom:10}}>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Internal notes <span style={{color:C.dim,fontWeight:500}}>(not shown to customer)</span></div>
+        <textarea value={internalNotes} onChange={function(e){setInternalNotes(e.target.value);}} rows="2"
+          placeholder="e.g. carrier rep contact, special handling, alternate quotes considered…"
+          style={{width:"100%",padding:"9px 12px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical"}}/>
+      </div>
+
+      {/* Total preview */}
+      <div style={{padding:"12px 14px",background:C.accent+"08",border:"1px solid "+C.accent+"25",borderRadius:8}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Customer will see</div>
+        <table style={{width:"100%",fontSize:12,color:C.text}}>
+          <tbody>
+            <tr><td style={{padding:"3px 0"}}>Subtotal</td><td style={{padding:"3px 0",textAlign:"right",fontFamily:"monospace"}}>${((order.totals&&order.totals.subtotal)||0).toFixed(2)}</td></tr>
+            {(order.totals&&order.totals.tax>0) && <tr><td style={{padding:"3px 0"}}>Tax</td><td style={{padding:"3px 0",textAlign:"right",fontFamily:"monospace"}}>${(order.totals.tax||0).toFixed(2)}</td></tr>}
+            <tr><td style={{padding:"3px 0"}}>Freight ({carrier})</td><td style={{padding:"3px 0",textAlign:"right",fontFamily:"monospace"}}>${(parseFloat(freightCost)||0).toFixed(2)}</td></tr>
+            <tr style={{borderTop:"1px solid "+C.border}}>
+              <td style={{padding:"6px 0",fontWeight:800,fontSize:13}}>Total</td>
+              <td style={{padding:"6px 0",textAlign:"right",fontFamily:"monospace",fontWeight:800,fontSize:14,color:C.accent}}>
+                ${(((order.totals&&order.totals.subtotal)||0) - ((order.totals&&order.totals.discount)||0) + ((order.totals&&order.totals.tax)||0) + (parseFloat(freightCost)||0)).toFixed(2)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div style={{fontSize:10,color:C.muted,marginTop:8,fontStyle:"italic"}}>
+          Quote expires {cfg.quoteExpiryHours}h from now. Customer gets an email link to pay; once paid, order auto-routes to ShipStation.
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult,currentUser}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
@@ -3667,7 +3915,10 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
   var pendingTermsAll  = (termsRequests||[]).filter(function(r){return r.status==="pending"||r.status==="approved_awaiting_signature";});
   var pendingApps = applications.filter(function(a){return !a.status||a.status==="pending";});
   var pendingReps = reps.filter(function(r){return r.status==="pending";});
-  var total = pendingW9.length+pendingApps.length+pendingReps.length+submittedOrders.length;
+  var pendingFreightOrders = (orders||[]).filter(function(o){return o.status==="Awaiting Freight Quote";});
+  var quotedExpired = (orders||[]).filter(function(o){return (o.status==="Quoted" || o.status==="Quote Expired") && freightQuoteExpired(o);});
+  var total = pendingW9.length+pendingApps.length+pendingReps.length+submittedOrders.length+pendingFreightOrders.length;
+  const [freightQuoteTarget, setFreightQuoteTarget] = useState(null);
 
   function approveW9(rep) {
     var updated = Object.assign({},rep,{w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()});
@@ -3841,6 +4092,128 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             addToast("Order "+fulfillTarget.id+" → "+result.status,"success");
           }}
           onClose={function(){setFulfillTarget(null);}}/>
+      )}
+
+      {/* Freight Quote Requests (NEW) */}
+      {tasksTab==="active"&&pendingFreightOrders.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>🚛 Freight Quote Requests</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>{pendingFreightOrders.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {pendingFreightOrders.map(function(o,i){
+              var fd = o.freightDetails || {};
+              var acc = fd.accessorials || {};
+              var accLabels = Object.keys(acc).filter(function(k){return acc[k];}).map(function(k){
+                return {residential:"Residential",liftgate:"Liftgate",inside:"Inside delivery",appointment:"Appointment",limitedAccess:"Limited access"}[k];
+              }).filter(Boolean);
+              var sa = o.shipAddress || {};
+              var addrStr = [sa.address, [sa.city,sa.state].filter(Boolean).join(", "), sa.zip].filter(Boolean).join(", ");
+              return (
+                <div key={o.id} style={{padding:"14px 18px",borderBottom:i<pendingFreightOrders.length-1?"1px solid "+C.border:"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,marginBottom:8}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:3}}>{o.id} · {o.custName||"—"}</div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:6}}>Submitted by {o.repName||"a rep"} · {fmtDate(o.createdAt)}</div>
+                      <div style={{fontSize:11,color:C.text,lineHeight:1.7}}>
+                        <div><strong style={{color:C.muted,fontWeight:600}}>Ship to:</strong> {addrStr||"(no address)"}</div>
+                        <div><strong style={{color:C.muted,fontWeight:600}}>Pallets:</strong> {fd.pallets||"?"} · <strong style={{color:C.muted,fontWeight:600}}>Weight:</strong> {fd.totalWeight||0} lbs{fd.totalVolume>0?(" · "+fd.totalVolume+" cu ft"):""}</div>
+                        {accLabels.length>0 && <div><strong style={{color:C.muted,fontWeight:600}}>Accessorials:</strong> {accLabels.join(", ")}</div>}
+                        {fd.notesForCarrier && <div style={{marginTop:4,padding:"6px 10px",background:C.bg,borderRadius:6,fontSize:11,color:C.muted,fontStyle:"italic"}}>"{fd.notesForCarrier}"</div>}
+                      </div>
+                    </div>
+                    <div style={{textAlign:"right",flexShrink:0}}>
+                      <div style={{fontSize:11,color:C.muted}}>Subtotal</div>
+                      <div style={{fontWeight:700,fontSize:14,color:C.text,fontFamily:"monospace"}}>${((o.totals&&o.totals.subtotal)||0).toFixed(2)}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:8,marginTop:8}}>
+                    <Btn small onClick={function(){setFreightQuoteTarget(o);}}>📋 Enter Quote →</Btn>
+                    <Btn small variant="ghost" onClick={function(){
+                      if(!window.confirm("Cancel this freight order? The rep will be notified.")) return;
+                      var cancelled = Object.assign({},o,{status:"Cancelled",cancelledAt:new Date().toISOString()});
+                      cancelled.auditLog = (o.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:"Cancelled by admin",detail:"Freight order — pre-quote"}]);
+                      setOrders(function(prev){return prev.map(function(x){return x.id===o.id?cancelled:x;});});
+                      dbSave("crm_orders",o.id,cancelled);
+                      addToast("Order "+o.id+" cancelled","warning");
+                    }}>Cancel Order</Btn>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Freight Quote Entry Modal */}
+      {freightQuoteTarget && (
+        <EnterFreightQuoteModal
+          order={freightQuoteTarget}
+          currentUser={currentUser}
+          reps={reps}
+          onSave={function(quoted){
+            setOrders(function(prev){return prev.map(function(x){return x.id===quoted.id?quoted:x;});});
+            dbSave("crm_orders",quoted.id,quoted);
+            // Notify rep + customer
+            var co=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
+            var repObj = (reps||[]).find(function(r){return r.id===quoted.repId;}) || {};
+            var fq = quoted.freightQuote || {};
+            var custObj = (customers||[]).find(function(c){return c.id===quoted.custId;}) || {};
+            var custEmail = custObj.email || quoted.custEmail || "";
+            // Customer invoice — generate a pay token so they can pay online
+            var payTok = "pay_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);
+            var payData = {
+              token: payTok, status: "pending", orderId: quoted.id, order: quoted, customer: custObj,
+              custId: quoted.custId, custName: quoted.custName, custEmail: custEmail, company: co,
+              items: quoted.items, totals: quoted.totals, products: products,
+              createdAt: new Date().toISOString()
+            };
+            try{
+              localStorage.setItem("__pv__pay_"+payTok, JSON.stringify(payData));
+              var sb=getSB(); if(sb) sb.from("crm_pay_tokens").upsert({id:payTok, data:payData, created_at:payData.createdAt}).then(function(){});
+            }catch(e){}
+            var payLink = getSiteUrl()+"#pay="+payTok;
+            // Save the pay token onto the order so subsequent flows can find it
+            var orderWithToken = Object.assign({},quoted,{payToken:payTok});
+            setOrders(function(prev){return prev.map(function(x){return x.id===quoted.id?orderWithToken:x;});});
+            dbSave("crm_orders",quoted.id,orderWithToken);
+            // Customer email
+            if(custEmail){
+              notifyEmail("freightInvoice", custEmail, "Your freight quote is ready — "+quoted.id+" — $"+(quoted.totals.grand||0).toFixed(2),
+                notifEmailHtml(co, "Your freight quote is ready",
+                  "<p>Hi "+(quoted.custName||"there")+",</p>" +
+                  "<p>Your order is ready for payment. Here's the breakdown:</p>" +
+                  "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
+                  "<tr><td style='padding:6px 10px;'>Subtotal</td><td style='padding:6px 10px;text-align:right;'>$"+((quoted.totals.subtotal)||0).toFixed(2)+"</td></tr>" +
+                  (quoted.totals.tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+((quoted.totals.tax)||0).toFixed(2)+"</td></tr>":"") +
+                  "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
+                  "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+((quoted.totals.grand)||0).toFixed(2)+"</td></tr>" +
+                  "</table>" +
+                  "<p style='font-size:12px;color:#6b7c93;'>Carrier: <strong style='color:#1a1a2e;'>"+(fq.carrier||"")+(fq.carrierService?" · "+fq.carrierService:"")+"</strong>" +
+                  (fq.pickupETA?" · Pickup: "+fq.pickupETA:"") + (fq.transitDays?" · Transit: "+fq.transitDays+" business days":"") + "</p>" +
+                  "<p style='font-size:11px;color:#94a3b8;'>This quote is valid until "+(fq.expiresAt?new Date(fq.expiresAt).toLocaleString("en-US",{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"}):"")+".</p>",
+                  "Pay now", payLink, "#1ea672"));
+            }
+            // Rep notification
+            if(repObj.email){
+              notifyEmail("freightQuotedRep", repObj.email, "Freight quote ready — "+quoted.id+" — $"+(quoted.totals.grand||0).toFixed(2),
+                notifEmailHtml(co, "Freight quote confirmed",
+                  "<p>Hi "+(repObj.name||"there")+",</p>" +
+                  "<p>The freight quote for <strong>"+quoted.id+"</strong> has been entered and the invoice was just sent to "+(quoted.custName||"the customer")+".</p>" +
+                  "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
+                  "<tr><td style='padding:6px 10px;background:#f6f9fc;'>Carrier</td><td style='padding:6px 10px;'>"+(fq.carrier||"")+"</td></tr>" +
+                  "<tr><td style='padding:6px 10px;background:#f6f9fc;'>Freight</td><td style='padding:6px 10px;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
+                  "<tr><td style='padding:6px 10px;background:#f6f9fc;'>Order total</td><td style='padding:6px 10px;font-weight:700;'>$"+((quoted.totals.grand)||0).toFixed(2)+"</td></tr>" +
+                  (fq.expiresAt?"<tr><td style='padding:6px 10px;background:#f6f9fc;'>Expires</td><td style='padding:6px 10px;'>"+new Date(fq.expiresAt).toLocaleString("en-US",{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"})+"</td></tr>":"") +
+                  "</table>",
+                  "Open order", getSiteUrl()+"#tab=orders", "#1ea672"));
+            }
+            addToast("Freight quote saved — invoice sent to "+(quoted.custName||"customer"),"success");
+            setFreightQuoteTarget(null);
+          }}
+          onClose={function(){setFreightQuoteTarget(null);}}
+          addToast={addToast}/>
       )}
 
       {/* Submitted Orders Queue */}
@@ -6629,6 +7002,58 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
       {/* Order Detail Modal */}
       {viewOrder&&(
         <Modal title={"Order "+viewOrder.id} wide={true} onClose={function(){setViewOrder(null);}}>
+          {/* Freight callout — shows pre-quote, quoted, or expired state */}
+          {viewOrder.shippingType==="freight" && (function(){
+            if(viewOrder.status==="Awaiting Freight Quote") {
+              var fd = viewOrder.freightDetails || {};
+              var acc = fd.accessorials || {};
+              var accLabels = Object.keys(acc).filter(function(k){return acc[k];}).map(function(k){
+                return {residential:"Residential",liftgate:"Liftgate",inside:"Inside delivery",appointment:"Appointment",limitedAccess:"Limited access"}[k];
+              }).filter(Boolean);
+              return (
+                <div style={{padding:"12px 16px",background:C.warning+"12",border:"2px dashed "+C.warning+"60",borderRadius:10,marginBottom:16}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontSize:18}}>🚛</span>
+                    <div style={{fontWeight:800,fontSize:13,color:C.warning}}>Awaiting Freight Quote</div>
+                  </div>
+                  <div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>
+                    {fd.pallets||"?"} pallet{(fd.pallets===1)?"":"s"} · {fd.totalWeight||0} lbs · Requested {fmtDate(fd.requestedAt)} by {(fd.requestedBy&&fd.requestedBy.repName)||"a rep"}
+                    {accLabels.length>0 && <div>Accessorials: {accLabels.join(", ")}</div>}
+                    <div style={{marginTop:4,fontStyle:"italic"}}>Customer has NOT been invoiced yet. Admin needs to enter carrier quote.</div>
+                  </div>
+                </div>
+              );
+            }
+            if(viewOrder.status==="Quoted" || (viewOrder.freightQuote && !viewOrder.paidAt)) {
+              var fq = viewOrder.freightQuote || {};
+              var expired = freightQuoteExpired(viewOrder);
+              return (
+                <div style={{padding:"12px 16px",background:(expired?C.danger:C.accent)+"10",border:"1px solid "+(expired?C.danger:C.accent)+"30",borderRadius:10,marginBottom:16}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                    <span style={{fontSize:18}}>{expired?"⚠":"✓"}</span>
+                    <div style={{fontWeight:800,fontSize:13,color:expired?C.danger:C.accent}}>
+                      {expired ? "Quote Expired — needs re-quote" : "Freight Quoted — Awaiting Payment"}
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>
+                    Carrier: <strong style={{color:C.text}}>{fq.carrier||""}</strong>{fq.carrierService?" · "+fq.carrierService:""} · ${(fq.freightCost||0).toFixed(2)}
+                    {fq.pickupETA && <div>Pickup ETA: {fq.pickupETA}{fq.transitDays?" · Transit "+fq.transitDays+" days":""}</div>}
+                    <div>Quoted {fmtDate(fq.quotedAt)} by {fq.quotedBy||"admin"}{fq.expiresAt?" · expires "+new Date(fq.expiresAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):""}</div>
+                  </div>
+                </div>
+              );
+            }
+            if(viewOrder.freightQuote && viewOrder.paidAt) {
+              var fq2 = viewOrder.freightQuote;
+              return (
+                <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:8,marginBottom:16,fontSize:11,color:C.success,fontWeight:600,display:"flex",alignItems:"center",gap:8}}>
+                  <span style={{fontSize:14}}>🚛✓</span>
+                  <span>Freight via {fq2.carrier} · ${(fq2.freightCost||0).toFixed(2)}{fq2.proNumber?" · PRO "+fq2.proNumber:""}</span>
+                </div>
+              );
+            }
+            return null;
+          })()}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <div>
               <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:12}}>Order Details</div>
@@ -6812,13 +7237,15 @@ function AdminProducts({products,setProducts,addToast}) {
   const [barcode,  setBarcode]  = useState("");
   const [stock,    setStock]    = useState("");
   const [variants, setVariants] = useState([]);
+  const [freightRequired, setFreightRequired] = useState(false);
+  const [unitsPerPallet,  setUnitsPerPallet]  = useState("");
 
   function addVariant(){ setVariants(function(prev){return prev.concat([{id:genId("var"),name:"",sku:"",price:"",stock:"",weight:"",dimL:"",dimW:"",dimH:""}]);}); }
   function updateVariant(id,field,val){ setVariants(function(prev){return prev.map(function(v){return v.id===id?Object.assign({},v,(function(o){o[field]=val;return o;})({})):v;});}); }
   function removeVariant(id){ setVariants(function(prev){return prev.filter(function(v){return v.id!==id;});}); }
 
-  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setVariants([]);setShowForm(true); }
-  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):"",weight:v.weight!=null?String(v.weight):"",dimL:v.dimL!=null?String(v.dimL):"",dimW:v.dimW!=null?String(v.dimW):"",dimH:v.dimH!=null?String(v.dimH):""};}));setShowForm(true); }
+  function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setVariants([]);setFreightRequired(false);setUnitsPerPallet("");setShowForm(true); }
+  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):"",weight:v.weight!=null?String(v.weight):"",dimL:v.dimL!=null?String(v.dimL):"",dimW:v.dimW!=null?String(v.dimW):"",dimH:v.dimH!=null?String(v.dimH):""};}));setFreightRequired(!!p.freightRequired);setUnitsPerPallet(p.unitsPerPallet!=null?String(p.unitsPerPallet):"");setShowForm(true); }
 
   function save() {
     var anyNamedVariant = (variants||[]).some(function(v){return (v.name||"").trim();});
@@ -6839,6 +7266,8 @@ function AdminProducts({products,setProducts,addToast}) {
                 dimL:parseFloat(dimL)||0,dimW:parseFloat(dimW)||0,dimH:parseFloat(dimH)||0,
                 barcode:barcode.trim(),stock:stock!==""?parseInt(stock):null,
                 variants:cleanVariants,
+                freightRequired:!!freightRequired,
+                unitsPerPallet:unitsPerPallet!==""?(parseInt(unitsPerPallet)||null):null,
                 updatedAt:new Date().toISOString()};
     if(!editing) data.createdAt = new Date().toISOString();
     setProducts(function(prev){
@@ -6927,6 +7356,21 @@ function AdminProducts({products,setProducts,addToast}) {
                 <Field label="Width (in)" value={dimW} onChange={setDimW} type="number" placeholder="10"/>
                 <Field label="Height (in)" value={dimH} onChange={setDimH} type="number" placeholder="6"/>
               </div>
+            </div>
+
+            {/* Freight (LTL) settings */}
+            <div style={{gridColumn:"1/-1",borderTop:"1px solid "+C.border,paddingTop:14,marginTop:2}}>
+              <div style={{fontSize:11,fontWeight:700,color:C.text,marginBottom:10}}>🚛 Freight (LTL) <span style={{fontWeight:400,color:C.dim}}>(for pallet-sized products)</span></div>
+              <label style={{display:"flex",alignItems:"flex-start",gap:8,padding:"10px 12px",background:freightRequired?C.warning+"10":C.bg,border:"1px solid "+(freightRequired?C.warning+"40":C.border),borderRadius:8,cursor:"pointer",marginBottom:10}}>
+                <input type="checkbox" checked={freightRequired} onChange={function(e){setFreightRequired(e.target.checked);}}
+                  style={{accentColor:C.warning,marginTop:2,flexShrink:0,width:14,height:14}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:700,fontSize:12,color:C.text,marginBottom:2}}>Always ships freight</div>
+                  <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>Any order containing this product routes through the freight quote workflow, even if the weight/volume thresholds aren't hit. Use for inherently bulky SKUs (drums, 5-gal buckets, cases-on-pallet).</div>
+                </div>
+              </label>
+              <Field label="Units per pallet (optional)" value={unitsPerPallet} onChange={setUnitsPerPallet} type="number" placeholder="e.g. 48"
+                hint="When set, the freight UI auto-suggests pallet count based on quantity."/>
             </div>
 
             {/* Inventory */}
@@ -8420,6 +8864,104 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
           <Btn onClick={function(){onSaveShippingRules(function(prev){return (prev||[]).concat([{id:"sr"+Date.now(),label:"New Rule",type:"flat",rate:0,maxOrder:999999,active:true}]);});}}>
             + Add Rule
           </Btn>
+
+          {/* Freight (LTL) settings */}
+          {(function(){
+            var fcfg = getFreightCfg();
+            return (
+              <div style={{marginTop:32,paddingTop:24,borderTop:"2px solid "+C.border}}>
+                <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>🚛 Freight (LTL) Settings</div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.6}}>
+                  When an order exceeds these thresholds (or has products flagged as freight-required), it's routed through the freight quote workflow instead of parcel shipping.
+                </div>
+
+                <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Auto-detect triggers</div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Weight ≥</div>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input type="number" defaultValue={fcfg.thresholds.weightLbs} min="0" step="10"
+                          onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||0})}));}}
+                          style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                        <span style={{color:C.muted,fontSize:11}}>lbs</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Volume ≥</div>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <input type="number" defaultValue={fcfg.thresholds.volumeCuFt} min="0" step="1"
+                          onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{volumeCuFt:parseFloat(e.target.value)||0})}));}}
+                          style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                        <span style={{color:C.muted,fontSize:11}}>cu ft</span>
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Value ≥</div>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <span style={{color:C.muted,fontSize:11}}>$</span>
+                        <input type="number" defaultValue={fcfg.thresholds.dollarValue} min="0" step="100"
+                          onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{dollarValue:parseFloat(e.target.value)||0})}));}}
+                          style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:10,color:C.dim,marginTop:10,lineHeight:1.6}}>
+                    Also routes to freight when any product has "always ships freight" flagged, or when a customer has "force freight" enabled.
+                  </div>
+                </div>
+
+                <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",marginBottom:10}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.text}}>Carriers</div>
+                    <div style={{fontSize:10,color:C.dim}}>Shown in the admin's quote-entry dropdown</div>
+                  </div>
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {fcfg.carriers.map(function(carrier,i){
+                      return (
+                        <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 10px",background:C.bg,border:"1px solid "+C.border,borderRadius:20,fontSize:11,color:C.text}}>
+                          <span>{carrier}</span>
+                          <button type="button" onClick={function(){
+                            if(fcfg.carriers.length<=1) { addToast("Keep at least one carrier","warning"); return; }
+                            var next = fcfg.carriers.filter(function(_,j){return j!==i;});
+                            saveFreightCfg(Object.assign({},fcfg,{carriers:next}));
+                          }} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:13,lineHeight:1,padding:0}}>×</button>
+                        </div>
+                      );
+                    })}
+                    <input type="text" placeholder="+ add carrier"
+                      onKeyDown={function(e){
+                        if(e.key==="Enter" && e.target.value.trim()){
+                          var v = e.target.value.trim();
+                          if(fcfg.carriers.indexOf(v) < 0) saveFreightCfg(Object.assign({},fcfg,{carriers:fcfg.carriers.concat([v])}));
+                          e.target.value = "";
+                        }
+                      }}
+                      style={{padding:"5px 10px",border:"1px dashed "+C.border,borderRadius:20,background:"none",color:C.muted,fontSize:11,fontFamily:"inherit",outline:"none",width:120}}/>
+                  </div>
+                </div>
+
+                <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px"}}>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Quote expiry (hours)</div>
+                      <input type="number" defaultValue={fcfg.quoteExpiryHours} min="1" step="1"
+                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{quoteExpiryHours:parseInt(e.target.value)||24}));}}
+                        style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                      <div style={{fontSize:10,color:C.dim,marginTop:4}}>How long the freight quote stays valid after admin saves it</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Notification email <span style={{color:C.dim,fontWeight:500}}>(optional)</span></div>
+                      <input type="email" defaultValue={fcfg.notifyEmail}
+                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{notifyEmail:e.target.value.trim()}));}}
+                        placeholder="ops@example.com (defaults to admin email)"
+                        style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -8918,6 +9460,12 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [discErr,    setDiscErr]    = useState("");
   const [shippingOverride,setShippingOverride] = useState(null);
   var selRateArr = useState(null); var selectedRate = selRateArr[0]; var setSelectedRate = selRateArr[1];
+  // Freight (LTL) state — populated when the order qualifies for freight shipping.
+  const [forceFreight,    setForceFreight]    = useState(false);
+  const [forceParcel,     setForceParcel]     = useState(false); // override: rep forces parcel even if triggers fire
+  const [freightPallets,  setFreightPallets]  = useState(1);
+  const [freightAcc, setFreightAcc] = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
+  const [freightNotes,    setFreightNotes]    = useState("");
   const [cardLast4,    setCardLast4]    = useState("");
   const [cardExpiry,   setCardExpiry]   = useState("");
   const [cardHolder,   setCardHolder]   = useState("");
@@ -9190,6 +9738,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       cid=nid; cname=custName.trim();
     }
     var id = isEdit?editOrder.id:(preId||("ORD-"+String(Date.now()).slice(-6)));
+
+    // Detect freight: rep-toggled OR thresholds OR product/customer flags
+    var calcTotalsTmp = totals;
+    var isFreight = !forceParcel && (forceFreight || isOrderFreight(items, products, selCust||(newCust?{}:null), calcTotalsTmp.grand));
+
     var order = {
       id:id, repId:repId, repName:repName,
       custId:cid, custName:cname,
@@ -9211,11 +9764,30 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
       cardRef:(payMethod==="credit_card"||(payMethod==="due_receipt"&&dorPath==="card"))&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null,
       dorPath:payMethod==="due_receipt"?dorPath:null,
-      notes:notes, status:isEdit?(editOrder.status||"Submitted"):"Submitted",
+      notes:notes,
+      status: isEdit ? (editOrder.status||"Submitted") : (isFreight ? "Awaiting Freight Quote" : "Submitted"),
+      shippingType: isFreight ? "freight" : "parcel",
+      freightDetails: isFreight ? {
+        pallets: freightPallets,
+        totalWeight: computeFreightSummary(items, products).totalWeight,
+        totalVolume: computeFreightSummary(items, products).totalVolume,
+        accessorials: Object.assign({}, freightAcc),
+        notesForCarrier: freightNotes,
+        requestedAt: new Date().toISOString(),
+        requestedBy: { repId: repId, repName: repName }
+      } : null,
+      freightQuote: null,
       createdAt:isEdit?(editOrder.createdAt||new Date().toISOString()):new Date().toISOString(),
       updatedAt:new Date().toISOString(),
     };
-    if(!isEdit) order.auditLog=[{ts:new Date().toISOString(),action:"Order created",actor:repName,detail:""}];
+    if(!isEdit) {
+      order.auditLog = [{
+        ts: new Date().toISOString(),
+        action: isFreight ? "Order placed — freight quote requested" : "Order created",
+        actor: repName,
+        detail: isFreight ? (freightPallets+" pallet"+(freightPallets===1?"":"s")+", "+(order.freightDetails.totalWeight||0)+" lbs") : ""
+      }];
+    }
     setOrders(function(prev){
       return isEdit?prev.map(function(o){return o.id===id?order:o;}): [order].concat(prev);
     });
@@ -9225,10 +9797,64 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       var custEmailN=(selCust&&selCust.email)||custEmail||"";
       var grandN=(totals&&totals.grand)||0;
       var custNm=(selCust&&selCust.name)||custName||"there";
-      notifyEmail("orderConfirm",custEmailN,"Order confirmation — "+id,
-        notifEmailHtml(coN,"Order received","<p>Hi "+custNm+",</p><p>We've received your order <strong>"+id+"</strong> totaling <strong>$"+grandN.toFixed(2)+"</strong>. We'll let you know as it progresses.</p>"));
-      notifyEmail("newOrderAdmin",getAdminNotifyEmail(),"New order "+id+" — "+custNm,
-        notifEmailHtml(coN,"New order placed","<p><strong>"+(repName||"A rep")+"</strong> placed order <strong>"+id+"</strong> for <strong>"+custNm+"</strong>.</p><p>Total: $"+grandN.toFixed(2)+"</p>","#1ea672"));
+      if(isFreight) {
+        // Freight path — admin gets a detailed quote-request email; customer is NOT invoiced yet
+        var accList = Object.keys(freightAcc).filter(function(k){return freightAcc[k];}).map(function(k){
+          return {residential:"Residential delivery",liftgate:"Liftgate at delivery",inside:"Inside delivery",appointment:"Appointment required",limitedAccess:"Limited access location"}[k];
+        }).filter(Boolean);
+        var shipAddrStr = (function(){
+          var sa = order.shipAddress;
+          if(!sa) return "(no address)";
+          return [sa.address, [sa.city,sa.state].filter(Boolean).join(", "), sa.zip].filter(Boolean).join(", ");
+        })();
+        var itemsRows = order.items.map(function(it){
+          var p = (products||[]).find(function(px){return px.id===it.prodId;}) || {};
+          return "<tr><td style='padding:5px 10px;border:1px solid #e8ecef;'>"+(p.name||it.prodId)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>"+(it.qty||0)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)).toFixed(2)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)*(it.qty||0)).toFixed(2)+"</td></tr>";
+        }).join("");
+        var freightCfg = getFreightCfg();
+        var freightAdminEmail = freightCfg.notifyEmail || getAdminNotifyEmail();
+        var bodyHtml =
+          "<p>A new freight order needs your quote. The customer has NOT been invoiced yet — they'll get the invoice once you enter the carrier rate.</p>" +
+          "<table style='border-collapse:collapse;width:100%;margin:14px 0;font-size:13px;'>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Order</td><td style='padding:6px 10px;'>"+id+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Customer</td><td style='padding:6px 10px;'>"+custNm+(custEmailN?" &lt;"+custEmailN+"&gt;":"")+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Submitted by</td><td style='padding:6px 10px;'>"+(repName||"a rep")+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Ship to</td><td style='padding:6px 10px;'>"+shipAddrStr+"</td></tr>" +
+          "</table>" +
+          "<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>Freight details</h3>" +
+          "<table style='border-collapse:collapse;width:100%;font-size:13px;'>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Pallets</td><td style='padding:6px 10px;'>"+freightPallets+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Total weight</td><td style='padding:6px 10px;'>"+(order.freightDetails.totalWeight||0)+" lbs</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Accessorials</td><td style='padding:6px 10px;'>"+(accList.length?accList.join(", "):"None")+"</td></tr>" +
+          "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Carrier notes</td><td style='padding:6px 10px;'>"+(freightNotes?freightNotes.replace(/</g,"&lt;").replace(/\n/g,"<br>"):"<em style='color:#94a3b8;'>none</em>")+"</td></tr>" +
+          "</table>" +
+          "<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>Line items</h3>" +
+          "<table style='border-collapse:collapse;width:100%;font-size:12px;'>" +
+          "<thead><tr><th style='padding:6px 8px;background:#f6f9fc;text-align:left;'>Product</th><th style='padding:6px 8px;background:#f6f9fc;text-align:right;'>Qty</th><th style='padding:6px 8px;background:#f6f9fc;text-align:right;'>Unit</th><th style='padding:6px 8px;background:#f6f9fc;text-align:right;'>Total</th></tr></thead>" +
+          "<tbody>"+itemsRows+"</tbody>" +
+          "<tfoot><tr><td colspan='3' style='padding:6px 10px;text-align:right;font-weight:700;'>Subtotal (before freight)</td><td style='padding:6px 10px;text-align:right;font-weight:700;'>$"+(totals.subtotal||0).toFixed(2)+"</td></tr>" +
+          (totals.tax>0?"<tr><td colspan='3' style='padding:6px 10px;text-align:right;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+(totals.tax||0).toFixed(2)+"</td></tr>":"") +
+          "<tr><td colspan='3' style='padding:6px 10px;text-align:right;'>Freight</td><td style='padding:6px 10px;text-align:right;font-style:italic;color:#b45309;'>pending quote</td></tr>" +
+          "</tfoot></table>" +
+          "<p style='margin-top:18px;'>Click below to enter the freight quote. Once saved, the customer will receive their invoice automatically.</p>";
+        notifyEmail("freightQuoteReq", freightAdminEmail, "🚛 Freight quote needed — "+id+" — "+custNm,
+          notifEmailHtml(coN, "Freight quote needed", bodyHtml, "Enter quote", getSiteUrl()+"#tab=tasks", "#b45309"));
+      } else {
+        // Parcel path — existing behavior
+        notifyEmail("orderConfirm",custEmailN,"Order confirmation — "+id,
+          notifEmailHtml(coN,"Order received","<p>Hi "+custNm+",</p><p>We've received your order <strong>"+id+"</strong> totaling <strong>$"+grandN.toFixed(2)+"</strong>. We'll let you know as it progresses.</p>"));
+        notifyEmail("newOrderAdmin",getAdminNotifyEmail(),"New order "+id+" — "+custNm,
+          notifEmailHtml(coN,"New order placed","<p><strong>"+(repName||"A rep")+"</strong> placed order <strong>"+id+"</strong> for <strong>"+custNm+"</strong>.</p><p>Total: $"+grandN.toFixed(2)+"</p>","#1ea672"));
+      }
+    }
+
+    // Skip the rest of the DOR/Send Invoice logic on freight orders — customer is not invoiced yet
+    if(isFreight && !isEdit){
+      setPlacing(false);
+      setStep(1);
+      if(typeof onClose === "function") onClose();
+      addToast("Freight quote requested — admin will reach out with carrier rate","success");
+      return;
     }
 
     // ── DOR: Send Invoice Link — email customer immediately ──
@@ -9748,9 +10374,80 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 })()}
               </div>
 
-              {/* Shipping */}
-              <div style={{marginBottom:16}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Shipping</div>
+              {/* Shipping — freight or parcel based on order triggers */}
+              {(function(){
+                var calcTotalsTmp = calcTotals();
+                var freightDetected = !forceParcel && (forceFreight || isOrderFreight(items, products, selCust||(newCust?{}:null), calcTotalsTmp.grand));
+                if(!freightDetected) {
+                  return null; // fall through to parcel UI below
+                }
+                var summary = computeFreightSummary(items, products);
+                var reasons = freightTriggerReasons(items, products, selCust, calcTotalsTmp.grand);
+                var cfg = getFreightCfg();
+                return (
+                  <div style={{marginBottom:16,padding:"14px 16px",background:C.warning+"10",border:"2px dashed "+C.warning+"50",borderRadius:10}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <span style={{fontSize:20}}>🚛</span>
+                      <div style={{fontWeight:800,fontSize:14,color:C.warning}}>Freight Shipping Required</div>
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>
+                      This order needs LTL/pallet shipping. The customer's invoice will be sent once admin confirms the carrier rate (typically within {cfg.quoteExpiryHours} hours during business days). No shipping cost shows on the invoice yet.
+                    </div>
+                    {reasons.length>0 && (
+                      <ul style={{fontSize:11,color:C.muted,margin:"0 0 12px 18px",padding:0,lineHeight:1.7}}>
+                        {reasons.map(function(r,i){return <li key={i}>{r}</li>;})}
+                      </ul>
+                    )}
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                      <div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:".06em"}}>Pallets</div>
+                        <input type="number" value={freightPallets} min="1" step="1"
+                          onChange={function(e){setFreightPallets(parseInt(e.target.value)||1);}}
+                          style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
+                        {summary.suggestedPallets>0 && summary.suggestedPallets!==freightPallets && (
+                          <div style={{fontSize:10,color:C.dim,marginTop:3}}>Suggested: {summary.suggestedPallets} <button type="button" onClick={function(){setFreightPallets(summary.suggestedPallets);}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:10,padding:0,textDecoration:"underline"}}>use</button></div>
+                        )}
+                      </div>
+                      <div>
+                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:".06em"}}>Total weight</div>
+                        <div style={{padding:"8px 10px",background:C.surface,border:"1px solid "+C.border,borderRadius:7,fontSize:13,color:C.text,fontFamily:"monospace"}}>
+                          {summary.totalWeight>0 ? summary.totalWeight+" lbs" : "—"}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{marginBottom:10}}>
+                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements <span style={{textTransform:"none",letterSpacing:0,color:C.dim,fontWeight:500}}>(admin uses this when quoting)</span></div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                        {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access (school/farm/etc.)"]].map(function(opt){
+                          return (
+                            <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.text,cursor:"pointer",padding:"3px 0"}}>
+                              <input type="checkbox" checked={!!freightAcc[opt[0]]}
+                                onChange={function(e){setFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
+                                style={{accentColor:C.accent,width:14,height:14}}/>
+                              <span>{opt[1]}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div style={{marginBottom:6}}>
+                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier (loading dock, hours, etc.)</div>
+                      <textarea value={freightNotes} onChange={function(e){setFreightNotes(e.target.value);}} rows="2"
+                        style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical"}}/>
+                    </div>
+                    <div style={{marginTop:10,paddingTop:8,borderTop:"1px solid "+C.warning+"30",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                      <div style={{fontSize:11,color:C.muted}}>Shipping cost: <strong style={{color:C.warning}}>pending admin quote</strong></div>
+                      <button type="button" onClick={function(){setForceParcel(true);}} style={{background:"none",border:"1px solid "+C.border,borderRadius:6,padding:"4px 10px",fontSize:10,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>
+                        Override and use parcel shipping instead
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Parcel rates — hidden when freight detected */}
+              {!(forceFreight || (!forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), calcTotals().grand))) && <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Shipping {forceParcel && <span style={{color:C.warning,fontWeight:500,fontSize:10}}>· parcel-forced (override)</span>}</div>
 
                 {/* Live ShipStation rates */}
                 {(function(){
@@ -9853,7 +10550,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     </div>
                   );
                 })()}
-              </div>
+              </div>}
 
               {/* Totals */}
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",border:"1px solid "+C.border}}>
@@ -12803,7 +13500,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v41-realtime-sync</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v42-freight-workflow</div>
       </div>
     </div>
   );
@@ -13882,7 +14579,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v41-realtime-sync
+        BUILD: 2026-05-30-v42-freight-workflow
       </div>
     </div>
   );
