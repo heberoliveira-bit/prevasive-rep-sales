@@ -3573,7 +3573,7 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
 }
 
 
-function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult}) {
+function AdminTasks({reps,setReps,applications,setApplications,termsRequests,setTermsRequests,customers,setCustomers,orders,setOrders,products,addToast,showResult,currentUser}) {
   const [tasksTab,      setTasksTab]      = useState("active");
   const [fulfillTarget, setFulfillTarget] = useState(null);
   const [collectTarget, setCollectTarget] = useState(null);
@@ -3695,6 +3695,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
       {/* CollectPaymentModal */}
       {collectTarget&&(
         <CollectPaymentModal order={collectTarget} addToast={addToast}
+          currentUser={currentUser} customers={customers} products={products}
           onCollect={function(payRef){
             var co3=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
             var cust3=customers.find(function(x){return x.id===collectTarget.custId;})||{name:collectTarget.custName||""};
@@ -5971,18 +5972,27 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
   const [err,        setErr]        = useState("");
   const [markDate,   setMarkDate]   = useState(new Date().toISOString().slice(0,10));
   const [markMethod, setMarkMethod] = useState("check");
+  const [cardComplete, setCardComplete] = useState(false); // Stripe Element reports when all fields are valid
   var srArr = useState({stripe:null,card:null});
   var sr = srArr[0];
 
+  // Admin-only actions — reps see Charge Card and Send Link only.
+  // Detect role broadly: currentUser.role/userType being "admin" OR no rep linkage means admin.
+  var isAdmin = !!(currentUser && (currentUser.role==="admin" || currentUser.userType==="admin" || currentUser.isAdmin));
+
   useEffect(function(){
     if(mode!=="card"||!pubKey||!window.Stripe) return;
+    setCardComplete(false); // reset when (re)mounting the card element
     var s=window.Stripe(pubKey);
     sr.stripe=s;
     var el=s.elements();
     var card=el.create("card",{style:{base:{fontFamily:"Inter,system-ui,sans-serif",fontSize:"14px",color:"#1a1a2e","::placeholder":{color:"#a0aec0"}}}});
     card.mount("#cpm-card-el");
     sr.card=card;
-    card.on("change",function(e){setErr(e.error?e.error.message:"");});
+    card.on("change",function(e){
+      setErr(e.error?e.error.message:"");
+      setCardComplete(!!e.complete);
+    });
     return function(){card.destroy();};
   },[mode,pubKey]);
 
@@ -6043,10 +6053,10 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
     <Modal title={"Collect Payment — "+order.id} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        {mode==="card"&&<Btn onClick={chargeCard} disabled={charging||!pubKey}>
+        {mode==="card"&&<Btn onClick={chargeCard} disabled={charging||!pubKey||!cardComplete||!cardHolder.trim()}>
           {charging?"Charging…":"Charge $"+grand.toFixed(2)+" →"}
         </Btn>}
-        {mode==="manual"&&<Btn variant="success" onClick={markPaid}>✓ Mark as Paid</Btn>}
+        {mode==="manual"&&isAdmin&&<Btn variant="success" onClick={markPaid}>✓ Mark as Paid</Btn>}
       </div>}>
 
       {/* Header */}
@@ -6055,9 +6065,12 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
         <div style={{fontWeight:800,fontSize:18,color:"#635bff"}}>${grand.toFixed(2)}</div>
       </div>
 
-      {/* Mode tabs */}
+      {/* Mode tabs — Mark Paid is admin-only (cash/check reconciliation belongs to admin) */}
       <div style={{display:"flex",gap:8,marginBottom:16}}>
-        {[["card","💳 Charge Card"],["link","📧 Send Link"],["manual","✓ Mark Paid"]].map(function(m){
+        {(isAdmin
+          ? [["card","💳 Charge Card"],["link","📧 Send Link"],["manual","✓ Mark Paid"]]
+          : [["card","💳 Charge Card"],["link","📧 Send Link"]]
+        ).map(function(m){
           return <button key={m[0]} onClick={function(){setMode(m[0]);setErr("");}}
             style={{flex:1,padding:"9px 6px",borderRadius:8,border:"2px solid "+(mode===m[0]?"#635bff":"#e2e8f0"),
               background:mode===m[0]?"#635bff10":"#fff",color:mode===m[0]?"#635bff":"#6b7280",
@@ -12578,7 +12591,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v36-payment-terms-display</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v37-collect-rep-gating</div>
       </div>
     </div>
   );
@@ -13657,7 +13670,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v36-payment-terms-display
+        BUILD: 2026-05-30-v37-collect-rep-gating
       </div>
     </div>
   );
@@ -14519,6 +14532,7 @@ function App() {
             termsRequests={termsRequests} setTermsRequests={setTermsRequests}
             customers={customers} setCustomers={setCustomers}
             orders={orders} setOrders={setOrders} products={products}
+            currentUser={currentUser}
             addToast={addToast} showResult={showResult}/>
         )}
         {isAdmin&&activeTab==="settings"&&(
