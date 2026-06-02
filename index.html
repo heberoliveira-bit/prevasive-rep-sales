@@ -191,6 +191,20 @@ function freightQuoteExpired(order){
   return new Date(order.freightQuote.expiresAt).getTime() < Date.now();
 }
 
+/* Hard-lock: when freight is REQUIRED (not just suggested), the rep can't
+   pick parcel. Locks fire when admin has explicitly said "this always ships
+   freight" via product flag or customer flag. Soft triggers (weight, volume,
+   value) leave the choice with the rep. */
+function isOrderFreightLocked(items, products, customer){
+  if(customer && customer.forceFreight) return true;
+  var hasFreightLine = (items||[]).some(function(it){
+    if(!it.prodId) return false;
+    var p = (products||[]).find(function(px){return px.id===it.prodId;});
+    return p && p.freightRequired;
+  });
+  return hasFreightLine;
+}
+
 /* ─── Supabase ───────────────────────────────────────────────────────────── */
 var SUPABASE_URL      = "https://oafmlvotrhfyffjxjkwy.supabase.co";
 var SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hZm1sdm90cmhmeWZmanhqa3d5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgwODU4NTQsImV4cCI6MjA5MzY2MTg1NH0.sp7W84ywF_E8kRXUdweO9E1If27Aks-Yzyx5GVQvuIk";
@@ -5038,6 +5052,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   // Freight on quotes — same triggers as orders
   const [quoteFreightAcc,   setQuoteFreightAcc]   = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
   const [quoteFreightNotes, setQuoteFreightNotes] = useState("");
+  const [quoteShippingChoice, setQuoteShippingChoice] = useState(null); // null = auto, "parcel" or "freight"
 
   var myQuotes = isAdmin ? quotes : quotes.filter(function(q){
     return q.repId===(currentUser&&(currentUser.rep_id||currentUser.id));
@@ -5066,11 +5081,13 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var rate3 = parseFloat(commRate)||0;
     var productBase = calcTotal();
     var productCustomer = Math.round(productBase*(1+rate3/100)*100)/100;
-    // Freight detection
+    // Freight detection — honor rep's explicit choice
     var ti = (selCust&&selCust.zip) ? getGaTaxRate(selCust.zip) : null;
     var taxRate = ti ? ti.rate : 0;
     var tax = Math.round(productCustomer*taxRate*100)/100;
-    var quoteIsFreight = isOrderFreight(items, products, selCust, productCustomer+tax);
+    var quoteQualifies = isOrderFreight(items, products, selCust, productCustomer+tax);
+    var quoteLocked = quoteQualifies && isOrderFreightLocked(items, products, selCust);
+    var quoteIsFreight = quoteQualifies && ((quoteShippingChoice || (quoteLocked?"freight":"parcel"))==="freight");
     var ship = quoteIsFreight ? 0 : (parseFloat(quoteShip)||0);
     var grand = Math.round((productCustomer+ship+tax)*100)/100;
     var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
@@ -5108,6 +5125,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     setQuoteRate(null); setQuoteShip(0);
     setQuoteFreightAcc({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
     setQuoteFreightNotes("");
+    setQuoteShippingChoice(null);
   }
 
   function convertToOrder(quote) {
@@ -5308,58 +5326,124 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 opts={[{v:"",label:"Select customer…"}].concat(customers.filter(function(c2){return !isAdmin?c2.repId===(currentUser&&(currentUser.rep_id||currentUser.id)):true;}).map(function(c2){return {v:c2.id,label:c2.name+(c2.company?" — "+c2.company:"")};}))}/>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <Field label="Valid For (days)" value={validDays} onChange={setValidDays} type="number"/>
-              {/* Live shipping rates OR Freight UI */}
+              {/* Live shipping rates OR Freight UI — toggleable when order qualifies */}
               {(function(){
                 var ss=null; try{ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");}catch(e){}
                 var cust = customers&&customers.find(function(cx){return cx.id===custId;});
                 var toZip = cust&&(cust.zip||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].zip))||"";
                 var toState = cust&&(cust.state||(cust.addresses&&cust.addresses[0]&&cust.addresses[0].state))||"";
 
-                // Freight detection — independent of ShipStation config
+                // Freight detection
                 var quoteGrandForFreight = calcCustomerSub() + calcTax();
-                var quoteIsFreight = items.some(function(it){return it.prodId;}) && isOrderFreight(items, products, cust, quoteGrandForFreight);
-                if(quoteIsFreight){
+                var hasItems = items.some(function(it){return it.prodId;});
+                var quoteQualifies = hasItems && isOrderFreight(items, products, cust, quoteGrandForFreight);
+                var quoteLocked = quoteQualifies && isOrderFreightLocked(items, products, cust);
+                var quoteEffChoice = !quoteQualifies ? "parcel" : (quoteShippingChoice || (quoteLocked ? "freight" : "parcel"));
+
+                if(quoteQualifies){
                   var reasons = freightTriggerReasons(items, products, cust, quoteGrandForFreight);
                   return (
-                    <div style={{marginTop:12,padding:"14px 16px",background:C.warning+"10",border:"2px dashed "+C.warning+"50",borderRadius:10}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                        <span style={{fontSize:18}}>🚛</span>
-                        <div style={{fontWeight:800,fontSize:13,color:C.warning}}>Freight Shipping Required</div>
-                      </div>
-                      <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
-                        This quote needs LTL/pallet shipping. The customer will see "Shipping: TBD" on the quote. The carrier rate is added by admin after the customer accepts.
-                      </div>
-                      {reasons.length>0 && (
-                        <ul style={{fontSize:11,color:C.muted,margin:"0 0 10px 18px",padding:0,lineHeight:1.7}}>
-                          {reasons.map(function(r,i){return <li key={i}>{r}</li>;})}
-                        </ul>
-                      )}
-                      <div style={{marginBottom:8}}>
-                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements <span style={{textTransform:"none",letterSpacing:0,color:C.dim,fontWeight:500}}>(admin uses this when quoting)</span></div>
-                        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-                          {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access"]].map(function(opt){
-                            return (
-                              <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.text,cursor:"pointer",padding:"3px 0"}}>
-                                <input type="checkbox" checked={!!quoteFreightAcc[opt[0]]}
-                                  onChange={function(e){setQuoteFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
-                                  style={{accentColor:C.accent,width:14,height:14}}/>
-                                <span>{opt[1]}</span>
-                              </label>
-                            );
-                          })}
+                    <div style={{marginTop:12}}>
+                      {/* Banner */}
+                      <div style={{padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10,marginBottom:10}}>
+                        <div style={{fontSize:13,fontWeight:800,color:C.warning,marginBottom:4}}>
+                          🚛 {quoteLocked ? "Freight required" : "Big order — pick shipping mode"}
                         </div>
+                        <div style={{fontSize:11,color:C.muted,marginBottom:6,lineHeight:1.6}}>
+                          {quoteLocked ? "This customer or product is always-freight." : "Either option is fine — pick whichever fits."}
+                        </div>
+                        {reasons.length>0 && (
+                          <ul style={{fontSize:11,color:C.muted,margin:"0 0 0 18px",padding:0,lineHeight:1.7}}>
+                            {reasons.map(function(r,i){return <li key={i}>{r}</li>;})}
+                          </ul>
+                        )}
                       </div>
-                      <div>
-                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier</div>
-                        <textarea value={quoteFreightNotes} onChange={function(e){setQuoteFreightNotes(e.target.value);}} rows="2"
-                          placeholder="Loading dock hours, special instructions…"
-                          style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical"}}/>
+                      {/* Toggle */}
+                      <div style={{display:"flex",gap:4,background:C.bg,borderRadius:10,padding:4,marginBottom:10}}>
+                        <button type="button" onClick={function(){if(!quoteLocked)setQuoteShippingChoice("parcel");}}
+                          disabled={quoteLocked}
+                          style={{flex:1,padding:"9px 12px",border:"none",borderRadius:8,
+                            background: quoteEffChoice==="parcel" ? C.surface : "transparent",
+                            color: quoteEffChoice==="parcel" ? C.text : (quoteLocked?C.dim:C.muted),
+                            fontWeight: quoteEffChoice==="parcel" ? 700 : 500,
+                            cursor: quoteLocked ? "not-allowed" : "pointer",
+                            opacity: quoteLocked ? 0.4 : 1,
+                            fontSize:12, fontFamily:"inherit",
+                            boxShadow: quoteEffChoice==="parcel" ? "0 1px 3px rgba(0,0,0,.15)" : "none",
+                            textAlign:"center"}}>
+                          📦 Try parcel rates
+                        </button>
+                        <button type="button" onClick={function(){setQuoteShippingChoice("freight");}}
+                          style={{flex:1,padding:"9px 12px",border:"none",borderRadius:8,
+                            background: quoteEffChoice==="freight" ? C.surface : "transparent",
+                            color: quoteEffChoice==="freight" ? C.text : C.muted,
+                            fontWeight: quoteEffChoice==="freight" ? 700 : 500,
+                            cursor:"pointer",
+                            fontSize:12, fontFamily:"inherit",
+                            boxShadow: quoteEffChoice==="freight" ? "0 1px 3px rgba(0,0,0,.15)" : "none",
+                            textAlign:"center"}}>
+                          🚛 Request freight quote
+                        </button>
                       </div>
+                      {/* Active content */}
+                      {quoteEffChoice === "freight" ? (
+                        <div style={{padding:"12px 14px",background:C.warning+"08",border:"2px dashed "+C.warning+"50",borderRadius:10}}>
+                          <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+                            Customer will see <strong>"Shipping: TBD"</strong> on the quote. Admin enters the carrier rate after the customer accepts.
+                          </div>
+                          <div style={{marginBottom:8}}>
+                            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements <span style={{textTransform:"none",letterSpacing:0,color:C.dim,fontWeight:500}}>(admin uses this when quoting)</span></div>
+                            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                              {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access"]].map(function(opt){
+                                return (
+                                  <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,color:C.text,cursor:"pointer",padding:"3px 0"}}>
+                                    <input type="checkbox" checked={!!quoteFreightAcc[opt[0]]}
+                                      onChange={function(e){setQuoteFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
+                                      style={{accentColor:C.accent,width:14,height:14}}/>
+                                    <span>{opt[1]}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:4,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier</div>
+                            <textarea value={quoteFreightNotes} onChange={function(e){setQuoteFreightNotes(e.target.value);}} rows="2"
+                              placeholder="Loading dock hours, special instructions…"
+                              style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical"}}/>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          {(!ss||!(ss.ratesFnUrl||ss.edgeFnUrl)) ? <div style={{fontSize:10,color:C.dim,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div> :
+                           (!toZip) ? <div style={{fontSize:10,color:C.dim,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: select a customer with a zip code to see carrier rates.</div> :
+                          <div>
+                            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Shipping to {toZip}</div>
+                            <ShippingRatePicker toZip={toZip} toState={toState}
+                              totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products.find(function(px){return px.id===it.prodId;});var w=p?lineWeight(p,it):0;return s+((w||1)*it.qty);},0)||1;})()}
+                              {...(function(){
+                                var dom=null,domW=-1;
+                                items.filter(function(it){return it.prodId;}).forEach(function(it){var p=products.find(function(px){return px.id===it.prodId;});if(!p)return;var w=lineWeight(p,it)*it.qty;if(w>domW){domW=w;dom={l:lineDim(p,it,"dimL"),wd:lineDim(p,it,"dimW"),h:lineDim(p,it,"dimH")};}});
+                                return dom?{pkgDimL:dom.l,pkgDimW:dom.wd,pkgDimH:dom.h}:{};
+                              })()}
+                              selected={quoteRate}
+                              onSelect={function(r){setQuoteRate(r);setQuoteShip(r.shipmentCost||0);}}/>
+                            {!quoteRate && (
+                              <div style={{marginTop:8,padding:"8px 10px",background:C.warning+"08",border:"1px solid "+C.warning+"25",borderRadius:6,fontSize:11,color:C.muted,lineHeight:1.6}}>
+                                ⚠ If no rates come back, this order is probably truly freight-sized. <button type="button" onClick={function(){setQuoteShippingChoice("freight");}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,padding:0,textDecoration:"underline"}}>Switch to freight quote →</button>
+                              </div>
+                            )}
+                            {quoteRate&&<div style={{fontSize:11,color:C.accent,marginTop:6,fontWeight:600}}>
+                              + ${(quoteShip||0).toFixed(2)} shipping included in total
+                            </div>}
+                          </div>}
+                        </div>
+                      )}
                     </div>
                   );
                 }
 
-                // Parcel rate picker (existing)
+                // Parcel only — order doesn't qualify for freight
                 if(!ss||!(ss.ratesFnUrl||ss.edgeFnUrl)) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: shipping endpoint not configured in Settings → Shipping.</div>;
                 if(!toZip) return <div style={{fontSize:10,color:C.dim,marginTop:8,padding:"6px 10px",border:"1px dashed "+C.border,borderRadius:6}}>Live rates: select a customer with a zip code to see carrier rates.</div>;
                 return (
@@ -9711,6 +9795,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   // Freight (LTL) state — populated when the order qualifies for freight shipping.
   const [forceFreight,    setForceFreight]    = useState(false);
   const [forceParcel,     setForceParcel]     = useState(false); // override: rep forces parcel even if triggers fire
+  const [shippingChoice,  setShippingChoice]  = useState(null); // null = auto, "parcel" or "freight" = explicit
   const [freightPallets,  setFreightPallets]  = useState(1);
   const [freightAcc, setFreightAcc] = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
   const [freightNotes,    setFreightNotes]    = useState("");
@@ -9987,9 +10072,16 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     }
     var id = isEdit?editOrder.id:(preId||("ORD-"+String(Date.now()).slice(-6)));
 
-    // Detect freight: rep-toggled OR thresholds OR product/customer flags
+    // Detect freight using the rep's effective shipping choice
     var calcTotalsTmp = totals;
-    var isFreight = !forceParcel && (forceFreight || isOrderFreight(items, products, selCust||(newCust?{}:null), calcTotalsTmp.grand));
+    var customer4 = selCust||(newCust?{}:null);
+    var freightQualifies = isOrderFreight(items, products, customer4, calcTotalsTmp.grand);
+    var freightLocked = freightQualifies && isOrderFreightLocked(items, products, customer4);
+    var effectiveChoice = !freightQualifies ? "parcel" : (shippingChoice || (freightLocked ? "freight" : "parcel"));
+    var isFreight = effectiveChoice === "freight";
+    // Track if rep diverged from the auto-default (for audit log)
+    var autoDefault = !freightQualifies ? "parcel" : (freightLocked ? "freight" : "parcel");
+    var repElectedDifferently = freightQualifies && shippingChoice && shippingChoice !== autoDefault;
 
     var order = {
       id:id, repId:repId, repName:repName,
@@ -10029,11 +10121,15 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       updatedAt:new Date().toISOString(),
     };
     if(!isEdit) {
+      var auditDetail = isFreight ? (freightPallets+" pallet"+(freightPallets===1?"":"s")+", "+(order.freightDetails.totalWeight||0)+" lbs") : "";
+      if(repElectedDifferently) {
+        auditDetail += (auditDetail?" — ":"")+"Rep chose "+effectiveChoice+" over auto-default "+autoDefault;
+      }
       order.auditLog = [{
         ts: new Date().toISOString(),
         action: isFreight ? "Order placed — freight quote requested" : "Order created",
         actor: repName,
-        detail: isFreight ? (freightPallets+" pallet"+(freightPallets===1?"":"s")+", "+(order.freightDetails.totalWeight||0)+" lbs") : ""
+        detail: auditDetail
       }];
     }
     setOrders(function(prev){
@@ -10622,32 +10718,84 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 })()}
               </div>
 
-              {/* Shipping — freight or parcel based on order triggers */}
+              {/* Toggle: parcel vs freight — only shown when order qualifies for freight */}
               {(function(){
+                var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
-                var freightDetected = !forceParcel && (forceFreight || isOrderFreight(items, products, selCust||(newCust?{}:null), calcTotalsTmp.grand));
-                if(!freightDetected) {
-                  return null; // fall through to parcel UI below
-                }
-                var summary = computeFreightSummary(items, products);
-                var reasons = freightTriggerReasons(items, products, selCust, calcTotalsTmp.grand);
-                var cfg = getFreightCfg();
+                var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
+                if(!freightQualifies) return null;
+                var freightLocked = isOrderFreightLocked(items, products, customer);
+                var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
+                var reasons = freightTriggerReasons(items, products, customer, calcTotalsTmp.grand);
                 return (
-                  <div style={{marginBottom:16,padding:"14px 16px",background:C.warning+"10",border:"2px dashed "+C.warning+"50",borderRadius:10}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                      <span style={{fontSize:20}}>🚛</span>
-                      <div style={{fontWeight:800,fontSize:14,color:C.warning}}>Freight Shipping Required</div>
+                  <div style={{marginBottom:14,padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10}}>
+                    <div style={{fontSize:13,fontWeight:800,color:C.warning,marginBottom:4}}>
+                      🚛 {freightLocked ? "Freight shipping required" : "This order is big enough for freight shipping"}
                     </div>
-                    <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>
-                      This order needs LTL/pallet shipping. The customer's invoice will be sent once admin confirms the carrier rate (typically within {cfg.quoteExpiryHours} hours during business days). No shipping cost shows on the invoice yet.
+                    <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+                      {freightLocked ? "Admin flagged this customer or product as always-freight. Freight is required." : "Either option is fine — pick whichever fits the customer best."}
                     </div>
                     {reasons.length>0 && (
-                      <ul style={{fontSize:11,color:C.muted,margin:"0 0 12px 18px",padding:0,lineHeight:1.7}}>
+                      <ul style={{fontSize:11,color:C.muted,margin:"0 0 10px 18px",padding:0,lineHeight:1.7}}>
                         {reasons.map(function(r,i){return <li key={i}>{r}</li>;})}
                       </ul>
                     )}
+                    <div style={{display:"flex",gap:4,background:C.bg,borderRadius:10,padding:4}}>
+                      <button type="button" onClick={function(){if(!freightLocked)setShippingChoice("parcel");}}
+                        disabled={freightLocked}
+                        style={{
+                          flex:1, padding:"10px 12px", border:"none", borderRadius:8,
+                          background: effectiveChoice==="parcel" ? C.surface : "transparent",
+                          color: effectiveChoice==="parcel" ? C.text : (freightLocked?C.dim:C.muted),
+                          fontWeight: effectiveChoice==="parcel" ? 700 : 500,
+                          cursor: freightLocked ? "not-allowed" : "pointer",
+                          opacity: freightLocked ? 0.4 : 1,
+                          fontSize:13, fontFamily:"inherit",
+                          boxShadow: effectiveChoice==="parcel" ? "0 1px 3px rgba(0,0,0,.15)" : "none",
+                          textAlign:"center", transition:"all .15s"
+                        }}>
+                        📦 Try parcel rates
+                        <div style={{fontSize:10,fontWeight:500,marginTop:2,color:effectiveChoice==="parcel"?C.muted:C.dim}}>UPS, FedEx, etc.</div>
+                      </button>
+                      <button type="button" onClick={function(){setShippingChoice("freight");}}
+                        style={{
+                          flex:1, padding:"10px 12px", border:"none", borderRadius:8,
+                          background: effectiveChoice==="freight" ? C.surface : "transparent",
+                          color: effectiveChoice==="freight" ? C.text : C.muted,
+                          fontWeight: effectiveChoice==="freight" ? 700 : 500,
+                          cursor:"pointer",
+                          fontSize:13, fontFamily:"inherit",
+                          boxShadow: effectiveChoice==="freight" ? "0 1px 3px rgba(0,0,0,.15)" : "none",
+                          textAlign:"center", transition:"all .15s"
+                        }}>
+                        🚛 Request freight quote
+                        <div style={{fontSize:10,fontWeight:500,marginTop:2,color:effectiveChoice==="freight"?C.muted:C.dim}}>LTL · pallet · accessorials</div>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Freight setup — shown when rep chose freight (or it's locked) */}
+              {(function(){
+                var customer = selCust||(newCust?{}:null);
+                var calcTotalsTmp = calcTotals();
+                var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
+                if(!freightQualifies) return null;
+                var freightLocked = isOrderFreightLocked(items, products, customer);
+                var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
+                if(effectiveChoice !== "freight") return null;
+                var cfg = getFreightCfg();
+                return (
+                  <div style={{marginBottom:16,padding:"14px 16px",background:C.warning+"08",border:"2px dashed "+C.warning+"50",borderRadius:10}}>
+                    <div style={{fontSize:12,fontWeight:700,color:C.warning,marginBottom:10}}>
+                      🚛 Freight setup — info admin uses when quoting the carrier
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,marginBottom:12,lineHeight:1.6}}>
+                      The customer's invoice is sent once admin confirms the carrier rate (typically within {cfg.quoteExpiryHours}h during business days). No shipping cost shows on the invoice until then.
+                    </div>
                     <div style={{marginBottom:10}}>
-                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements <span style={{textTransform:"none",letterSpacing:0,color:C.dim,fontWeight:500}}>(admin uses this when quoting)</span></div>
+                      <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements</div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
                         {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access (school/farm/etc.)"]].map(function(opt){
                           return (
@@ -10673,9 +10821,19 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 );
               })()}
 
-              {/* Parcel rates — hidden when freight detected */}
-              {!(forceFreight || (!forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), calcTotals().grand))) && <div style={{marginBottom:16}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Shipping {forceParcel && <span style={{color:C.warning,fontWeight:500,fontSize:10}}>· parcel-forced (override)</span>}</div>
+              {/* Parcel rates — shown when order doesn't qualify for freight, OR rep chose parcel */}
+              {(function(){
+                var customer = selCust||(newCust?{}:null);
+                var calcTotalsTmp = calcTotals();
+                var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
+                if(freightQualifies){
+                  var freightLocked = isOrderFreightLocked(items, products, customer);
+                  var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
+                  if(effectiveChoice !== "parcel") return null;
+                }
+                return true; // continue to render below
+              })() && <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:8}}>Shipping</div>
 
                 {/* Live ShipStation rates */}
                 {(function(){
@@ -10783,7 +10941,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               {/* Totals */}
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",border:"1px solid "+C.border}}>
                 {(function(){
-                  var _isFreightTotals = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  var _custT = selCust||(newCust?{}:null);
+                  var _qualT = isOrderFreight(items, products, _custT, totals.grand);
+                  var _lockT = _qualT && isOrderFreightLocked(items, products, _custT);
+                  var _isFreightTotals = _qualT && ((shippingChoice||(_lockT?"freight":"parcel"))==="freight");
                   // Only call shipping "Free ✓" when the rep made an active choice (picked a rate or set a manual value).
                   // If the value is $0 because nothing was selected/entered, show "TBD" so the rep knows it's unset.
                   var _shippingActivelyChosen = !!selectedRate || shippingOverride !== null;
@@ -10846,7 +11007,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",marginBottom:14,border:"1px solid "+C.border}}>
                 <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Order Summary</div>
                 {(function(){
-                  var _isFreightConf = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  var _custC = selCust||(newCust?{}:null);
+                  var _qualC = isOrderFreight(items, products, _custC, totals.grand);
+                  var _lockC = _qualC && isOrderFreightLocked(items, products, _custC);
+                  var _isFreightConf = _qualC && ((shippingChoice||(_lockC?"freight":"parcel"))==="freight");
                   var _confShippingChosen = !!selectedRate || shippingOverride !== null;
                   var _confFreeLabel = _confShippingChosen ? "Free ✓" : "TBD";
                   return [["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
@@ -10997,8 +11161,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     return "Placing…";
                   }
                   if(isEdit) return "Save Changes";
-                  // Freight detected: rep is requesting an estimate, not closing the sale
-                  var _btnIsFreight = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  // Freight: rep is requesting an estimate, not closing the sale
+                  var _custBtn = selCust||(newCust?{}:null);
+                  var _qualBtn = isOrderFreight(items, products, _custBtn, totals.grand);
+                  var _lockBtn = _qualBtn && isOrderFreightLocked(items, products, _custBtn);
+                  var _btnIsFreight = _qualBtn && ((shippingChoice||(_lockBtn?"freight":"parcel"))==="freight");
                   if(_btnIsFreight) return "📨 Send for Estimate →";
                   if(dorPath==="card"&&cardMode==="online") return "💳 Charge & Place Order";
                   if(dorPath==="link"&&sendOnPlace) return "✉ Send Invoice & Place Order →";
@@ -13964,7 +14131,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v50-shipping-tbd-fallback</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v51-shipping-toggle</div>
       </div>
     </div>
   );
@@ -14125,6 +14292,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [freightAcc, setFreightAcc] = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
   const [freightNotes, setFreightNotes] = useState("");
   const [forceParcel, setForceParcel] = useState(false);
+  const [shippingChoice, setShippingChoice] = useState(null); // null = auto, "parcel" or "freight"
 
   useEffect(function(){
     if(!custId){
@@ -14252,10 +14420,11 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var hasLines = lines.length>0;
   var cardOk = payMethod!=="card" || (cardComplete && !cardError);
   // Freight detection — affects whether selectedRate is required
-  var _mobileIsFreight = !forceParcel && hasLines && isOrderFreight(
-    lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
-    products, selCust, total
-  );
+  var _mobileItemsArr = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
+  var _mobileCustomer = selCust;
+  var _mobileQualifies = hasLines && isOrderFreight(_mobileItemsArr, products, _mobileCustomer, total);
+  var _mobileLocked = _mobileQualifies && isOrderFreightLocked(_mobileItemsArr, products, _mobileCustomer);
+  var _mobileIsFreight = _mobileQualifies && ((shippingChoice || (_mobileLocked ? "freight" : "parcel"))==="freight");
   var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && (_mobileIsFreight || !!selectedRate);
 
   function place(){
@@ -14282,11 +14451,13 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
 
     var orderId = "ORD-" + String(Date.now()).slice(-6);
 
-    // Detect freight in the running scope (cId now resolved)
-    var _placeIsFreight = !forceParcel && isOrderFreight(
-      lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
-      products, cRecord, total
-    );
+    // Detect freight in the running scope using rep's effective choice (cId now resolved)
+    var _pItemsArr = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
+    var _pQualifies = isOrderFreight(_pItemsArr, products, cRecord, total);
+    var _pLocked = _pQualifies && isOrderFreightLocked(_pItemsArr, products, cRecord);
+    var _placeIsFreight = _pQualifies && ((shippingChoice || (_pLocked ? "freight" : "parcel"))==="freight");
+    var _placeAutoDefault = !_pQualifies ? "parcel" : (_pLocked ? "freight" : "parcel");
+    var _placeRepDeviated = _pQualifies && shippingChoice && shippingChoice !== _placeAutoDefault;
 
     function buildOrder(extra){
       return Object.assign({
@@ -14337,7 +14508,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         },
         freightQuote: null,
         paid: false,
-        auditLog: [{ts:new Date().toISOString(),actor:(repData&&repData.name)||"Rep",action:"Order placed (mobile) — freight quote requested",detail:(fSummary.suggestedPallets||1)+" pallet"+((fSummary.suggestedPallets||1)===1?"":"s")+", "+(fSummary.totalWeight||0)+" lbs"}]
+        auditLog: [{ts:new Date().toISOString(),actor:(repData&&repData.name)||"Rep",action:"Order placed (mobile) — freight quote requested",detail:(fSummary.suggestedPallets||1)+" pallet"+((fSummary.suggestedPallets||1)===1?"":"s")+", "+(fSummary.totalWeight||0)+" lbs"+(_placeRepDeviated?" — Rep chose freight over auto-default parcel":"")}]
       });
       setOrders(function(prev){return [freightOrder].concat(prev);});
       dbSave("crm_orders", orderId, freightOrder);
@@ -14660,62 +14831,124 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         )}
       </div>
 
-      {/* Live Shipping rates OR Freight UI */}
+      {/* Live Shipping rates OR Freight UI — toggleable when order qualifies */}
       {(function(){
         var mobileTotal = total;
-        var mobileFreight = !forceParcel && hasLines && isOrderFreight(
-          lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
-          products, selCust, mobileTotal
-        );
-        if(mobileFreight){
-          var mobileReasons = freightTriggerReasons(
-            lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
-            products, selCust, mobileTotal
-          );
+        var mobileItems = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
+        var mobileQualifies = hasLines && isOrderFreight(mobileItems, products, selCust, mobileTotal);
+        var mobileLocked = mobileQualifies && isOrderFreightLocked(mobileItems, products, selCust);
+        var mobileChoice = !mobileQualifies ? "parcel" : (shippingChoice || (mobileLocked ? "freight" : "parcel"));
+
+        if(mobileQualifies){
+          var mobileReasons = freightTriggerReasons(mobileItems, products, selCust, mobileTotal);
           var mobileCfg = getFreightCfg();
           return (
             <div style={{marginBottom:20}}>
-              <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Freight Shipping</div>
-              <div style={{padding:16,background:C.warning+"10",border:"2px dashed "+C.warning+"50",borderRadius:12}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <span style={{fontSize:22}}>🚛</span>
-                  <div style={{fontWeight:800,fontSize:14,color:C.warning}}>Freight Required</div>
+              <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
+              {/* Banner */}
+              <div style={{padding:14,background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10,marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:800,color:C.warning,marginBottom:4}}>
+                  🚛 {mobileLocked ? "Freight required" : "Big order — pick how to ship"}
                 </div>
-                <div style={{fontSize:12,color:C.muted,marginBottom:10,lineHeight:1.6}}>
-                  This order needs LTL/pallet shipping. The customer's invoice will be sent after admin confirms the carrier rate (typically within {mobileCfg.quoteExpiryHours}h).
+                <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+                  {mobileLocked ? "Admin flagged this as always-freight." : "Either works — your call."}
                 </div>
                 {mobileReasons.length>0 && (
-                  <ul style={{fontSize:11,color:C.muted,margin:"0 0 12px 18px",padding:0,lineHeight:1.7}}>
+                  <ul style={{fontSize:11,color:C.muted,margin:"6px 0 0 18px",padding:0,lineHeight:1.7}}>
                     {mobileReasons.map(function(r,i){return <li key={i}>{r}</li>;})}
                   </ul>
                 )}
-                <div style={{marginBottom:12}}>
-                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements</div>
-                  {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access"]].map(function(opt){
-                    return (
-                      <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:freightAcc[opt[0]]?C.warning+"15":C.bg,border:"1px solid "+(freightAcc[opt[0]]?C.warning+"40":C.border),borderRadius:8,fontSize:13,color:C.text,marginBottom:6,cursor:"pointer"}}>
-                        <input type="checkbox" checked={!!freightAcc[opt[0]]}
-                          onChange={function(e){setFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
-                          style={{accentColor:C.warning,width:18,height:18}}/>
-                        <span>{opt[1]}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-                <div style={{marginBottom:6}}>
-                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier</div>
-                  <textarea value={freightNotes} onChange={function(e){setFreightNotes(e.target.value);}} rows="3"
-                    placeholder="Loading dock hours, special instructions…"
-                    style={{width:"100%",padding:"12px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box",resize:"vertical"}}/>
-                </div>
               </div>
+              {/* Toggle (stacked tiles on mobile) */}
+              <div style={{display:"flex",gap:6,marginBottom:12}}>
+                <button type="button" onClick={function(){if(!mobileLocked)setShippingChoice("parcel");}}
+                  disabled={mobileLocked}
+                  style={{
+                    flex:1, padding:"14px 10px", borderRadius:10,
+                    border:"2px solid "+(mobileChoice==="parcel"?C.accent:C.border),
+                    background: mobileChoice==="parcel" ? C.accent+"12" : C.surface,
+                    color: mobileChoice==="parcel" ? C.text : (mobileLocked?C.dim:C.muted),
+                    fontWeight: mobileChoice==="parcel" ? 700 : 600,
+                    fontSize:13, fontFamily:"inherit",
+                    cursor: mobileLocked ? "not-allowed" : "pointer",
+                    opacity: mobileLocked ? 0.4 : 1,
+                    textAlign:"center"
+                  }}>
+                  📦 Parcel rates
+                  <div style={{fontSize:10,fontWeight:500,marginTop:3,color:C.dim}}>UPS / FedEx</div>
+                </button>
+                <button type="button" onClick={function(){setShippingChoice("freight");}}
+                  style={{
+                    flex:1, padding:"14px 10px", borderRadius:10,
+                    border:"2px solid "+(mobileChoice==="freight"?C.accent:C.border),
+                    background: mobileChoice==="freight" ? C.accent+"12" : C.surface,
+                    color: mobileChoice==="freight" ? C.text : C.muted,
+                    fontWeight: mobileChoice==="freight" ? 700 : 600,
+                    fontSize:13, fontFamily:"inherit",
+                    cursor:"pointer",
+                    textAlign:"center"
+                  }}>
+                  🚛 Freight quote
+                  <div style={{fontSize:10,fontWeight:500,marginTop:3,color:C.dim}}>LTL · pallet</div>
+                </button>
+              </div>
+              {/* Active content */}
+              {mobileChoice === "freight" ? (
+                <div style={{padding:16,background:C.warning+"08",border:"2px dashed "+C.warning+"50",borderRadius:12}}>
+                  <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+                    Customer's invoice is sent after admin confirms the carrier rate (typically within {mobileCfg.quoteExpiryHours}h).
+                  </div>
+                  <div style={{marginBottom:12}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements</div>
+                    {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access"]].map(function(opt){
+                      return (
+                        <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:freightAcc[opt[0]]?C.warning+"15":C.bg,border:"1px solid "+(freightAcc[opt[0]]?C.warning+"40":C.border),borderRadius:8,fontSize:13,color:C.text,marginBottom:6,cursor:"pointer"}}>
+                          <input type="checkbox" checked={!!freightAcc[opt[0]]}
+                            onChange={function(e){setFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
+                            style={{accentColor:C.warning,width:18,height:18}}/>
+                          <span>{opt[1]}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div>
+                    <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier</div>
+                    <textarea value={freightNotes} onChange={function(e){setFreightNotes(e.target.value);}} rows="3"
+                      placeholder="Loading dock hours, special instructions…"
+                      style={{width:"100%",padding:"12px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box",resize:"vertical"}}/>
+                  </div>
+                </div>
+              ) : (
+                <div style={{padding:hasLines&&hasShipAddr?12:22,background:C.surface,border:(hasLines&&hasShipAddr?"1px solid ":"1px dashed ")+C.border,borderRadius:12,opacity:hasLines&&hasShipAddr?1:0.65}}>
+                  {hasLines && hasShipAddr ? (
+                    <div>
+                      <ShippingRatePicker
+                        key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
+                        toZip={shipAddr.zip} toState={shipAddr.state}
+                        totalWeight={totalWeight}
+                        pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
+                        onSelect={setSelectedRate}
+                        selected={selectedRate}/>
+                      {!selectedRate && (
+                        <div style={{marginTop:10,padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.6}}>
+                          ⚠ If no rates come back, this order is probably truly freight-sized. <button type="button" onClick={function(){setShippingChoice("freight");}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,padding:0,textDecoration:"underline"}}>Switch to freight quote →</button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{textAlign:"center",color:C.dim,fontSize:13,lineHeight:1.6}}>
+                      {!hasLines ? "📦 Add a product first." : "📍 Set a shipping address first."}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         }
-        // Parcel (existing)
+        // Parcel only — order doesn't qualify for freight
         return (
           <div style={{marginBottom:20}}>
-            <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping {forceParcel && <span style={{color:C.warning,textTransform:"none",letterSpacing:0,fontSize:10}}>(parcel forced)</span>}</div>
+            <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
             <div style={{padding:hasLines&&hasShipAddr?12:22,background:C.surface,border:(hasLines&&hasShipAddr?"1px solid ":"1px dashed ")+C.border,borderRadius:12,opacity:hasLines&&hasShipAddr?1:0.65}}>
               {hasLines && hasShipAddr ? (
                 <ShippingRatePicker
@@ -15357,7 +15590,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v50-shipping-tbd-fallback
+        BUILD: 2026-05-30-v51-shipping-toggle
       </div>
     </div>
   );
