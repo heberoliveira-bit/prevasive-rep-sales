@@ -163,7 +163,9 @@ function isOrderFreight(items, products, customer, orderGrand){
   return false;
 }
 
-/* Human-readable reason for routing to freight — used in UI and emails. */
+/* Human-readable reason for routing to freight — used in UI and emails.
+   Note: the dollar-value trigger still routes the order, but the reason
+   isn't surfaced to the rep (we don't expose internal thresholds). */
 function freightTriggerReasons(items, products, customer, orderGrand){
   var reasons = [];
   if(customer && customer.forceFreight) reasons.push("Customer is set to always ship freight");
@@ -181,7 +183,6 @@ function freightTriggerReasons(items, products, customer, orderGrand){
   }
   if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (above "+cfg.thresholds.weightLbs+" lb parcel limit)");
   if(s.anyDimsKnown && s.totalVolume >= cfg.thresholds.volumeCuFt) reasons.push("Total volume is "+s.totalVolume+" cu ft (above "+cfg.thresholds.volumeCuFt+" cu ft)");
-  if((orderGrand||0) >= cfg.thresholds.dollarValue) reasons.push("Order value $"+(orderGrand||0).toFixed(2)+" exceeds $"+cfg.thresholds.dollarValue);
   return reasons;
 }
 
@@ -4155,13 +4156,13 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
           onSave={function(quoted){
             setOrders(function(prev){return prev.map(function(x){return x.id===quoted.id?quoted:x;});});
             dbSave("crm_orders",quoted.id,quoted);
-            // Notify rep + customer
             var co=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";
             var repObj = (reps||[]).find(function(r){return r.id===quoted.repId;}) || {};
             var fq = quoted.freightQuote || {};
+            // Generate a pay token + persist with order — so when rep clicks "Send Invoice" later
+            // we have a valid pay link without re-creating the snapshot.
             var custObj = (customers||[]).find(function(c){return c.id===quoted.custId;}) || {};
             var custEmail = custObj.email || quoted.custEmail || "";
-            // Customer invoice — generate a pay token so they can pay online
             var payTok = "pay_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);
             var payData = {
               token: payTok, status: "pending", orderId: quoted.id, order: quoted, customer: custObj,
@@ -4173,43 +4174,44 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
               localStorage.setItem("__pv__pay_"+payTok, JSON.stringify(payData));
               var sb=getSB(); if(sb) sb.from("crm_pay_tokens").upsert({id:payTok, data:payData, created_at:payData.createdAt}).then(function(){});
             }catch(e){}
-            var payLink = getSiteUrl()+"#pay="+payTok;
-            // Save the pay token onto the order so subsequent flows can find it
             var orderWithToken = Object.assign({},quoted,{payToken:payTok});
             setOrders(function(prev){return prev.map(function(x){return x.id===quoted.id?orderWithToken:x;});});
             dbSave("crm_orders",quoted.id,orderWithToken);
-            // Customer email
-            if(custEmail){
-              notifyEmail("freightInvoice", custEmail, "Your freight quote is ready — "+quoted.id+" — $"+(quoted.totals.grand||0).toFixed(2),
-                notifEmailHtml(co, "Your freight quote is ready",
-                  "<p>Hi "+(quoted.custName||"there")+",</p>" +
-                  "<p>Your order is ready for payment. Here's the breakdown:</p>" +
-                  "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
-                  "<tr><td style='padding:6px 10px;'>Subtotal</td><td style='padding:6px 10px;text-align:right;'>$"+((quoted.totals.subtotal)||0).toFixed(2)+"</td></tr>" +
-                  (quoted.totals.tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+((quoted.totals.tax)||0).toFixed(2)+"</td></tr>":"") +
-                  "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
-                  "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+((quoted.totals.grand)||0).toFixed(2)+"</td></tr>" +
-                  "</table>" +
-                  "<p style='font-size:12px;color:#6b7c93;'>Carrier: <strong style='color:#1a1a2e;'>"+(fq.carrier||"")+(fq.carrierService?" · "+fq.carrierService:"")+"</strong>" +
-                  (fq.pickupETA?" · Pickup: "+fq.pickupETA:"") + (fq.transitDays?" · Transit: "+fq.transitDays+" business days":"") + "</p>" +
-                  "<p style='font-size:11px;color:#94a3b8;'>This quote is valid until "+(fq.expiresAt?new Date(fq.expiresAt).toLocaleString("en-US",{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"}):"")+".</p>",
-                  "Pay now", payLink, "#1ea672"));
-            }
-            // Rep notification
+
+            // Alert the rep — they finish the order (charge card / send invoice link / etc.)
             if(repObj.email){
-              notifyEmail("freightQuotedRep", repObj.email, "Freight quote ready — "+quoted.id+" — $"+(quoted.totals.grand||0).toFixed(2),
-                notifEmailHtml(co, "Freight quote confirmed",
+              notifyEmail("freightQuotedRep", repObj.email,
+                "🚛 Freight quote ready — "+quoted.id+" — your order is ready to close",
+                notifEmailHtml(co, "Freight quote is ready",
                   "<p>Hi "+(repObj.name||"there")+",</p>" +
-                  "<p>The freight quote for <strong>"+quoted.id+"</strong> has been entered and the invoice was just sent to "+(quoted.custName||"the customer")+".</p>" +
-                  "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
-                  "<tr><td style='padding:6px 10px;background:#f6f9fc;'>Carrier</td><td style='padding:6px 10px;'>"+(fq.carrier||"")+"</td></tr>" +
-                  "<tr><td style='padding:6px 10px;background:#f6f9fc;'>Freight</td><td style='padding:6px 10px;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
-                  "<tr><td style='padding:6px 10px;background:#f6f9fc;'>Order total</td><td style='padding:6px 10px;font-weight:700;'>$"+((quoted.totals.grand)||0).toFixed(2)+"</td></tr>" +
-                  (fq.expiresAt?"<tr><td style='padding:6px 10px;background:#f6f9fc;'>Expires</td><td style='padding:6px 10px;'>"+new Date(fq.expiresAt).toLocaleString("en-US",{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"})+"</td></tr>":"") +
-                  "</table>",
+                  "<p>The freight quote for <strong>"+quoted.id+"</strong> ("+(quoted.custName||"customer")+") is in. Open the order to send the invoice to your customer and finish the sale.</p>" +
+                  "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:14px 0;'>" +
+                  "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Carrier</td><td style='padding:6px 10px;'>"+(fq.carrier||"")+(fq.carrierService?" — "+fq.carrierService:"")+"</td></tr>" +
+                  "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Freight cost</td><td style='padding:6px 10px;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
+                  "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Order total</td><td style='padding:6px 10px;font-weight:700;color:#635bff;'>$"+((quoted.totals.grand)||0).toFixed(2)+"</td></tr>" +
+                  (fq.expiresAt?"<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Quote expires</td><td style='padding:6px 10px;'>"+new Date(fq.expiresAt).toLocaleString("en-US",{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"})+"</td></tr>":"") +
+                  "</table>" +
+                  "<p style='padding:12px 14px;background:#fff8e1;border-left:4px solid #f6ab2f;border-radius:4px;font-size:13px;'>" +
+                  "<strong>Next step:</strong> open the order, then click <strong>📨 Send Invoice to Customer</strong> (or 💳 charge their card if you have it on file) to finish the sale.</p>",
                   "Open order", getSiteUrl()+"#tab=orders", "#1ea672"));
             }
-            addToast("Freight quote saved — invoice sent to "+(quoted.custName||"customer"),"success");
+            // Also push an in-app notification so the rep sees it without checking email
+            try{
+              var notif = {
+                id: "ntf_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,6),
+                repId: quoted.repId,
+                ts: new Date().toISOString(),
+                kind: "freight_quote_ready",
+                title: "🚛 Freight quote ready — "+quoted.id,
+                body: "Freight: $"+((fq.freightCost)||0).toFixed(2)+" via "+(fq.carrier||"")+". Total $"+((quoted.totals.grand)||0).toFixed(2)+". Open the order and send the invoice to "+(quoted.custName||"customer")+".",
+                orderId: quoted.id,
+                seen: false
+              };
+              var sbN = getSB();
+              if(sbN) sbN.from("crm_notifications").upsert({id:notif.id, data:notif, created_at:notif.ts}).then(function(){});
+            }catch(e){}
+
+            addToast("Freight quote saved — rep notified to send invoice to "+(quoted.custName||"customer"),"success");
             setFreightQuoteTarget(null);
           }}
           onClose={function(){setFreightQuoteTarget(null);}}
@@ -7027,19 +7029,71 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
             if(viewOrder.status==="Quoted" || (viewOrder.freightQuote && !viewOrder.paidAt)) {
               var fq = viewOrder.freightQuote || {};
               var expired = freightQuoteExpired(viewOrder);
+              var invoiceAlreadySent = !!viewOrder.invoiceSentAt;
               return (
                 <div style={{padding:"12px 16px",background:(expired?C.danger:C.accent)+"10",border:"1px solid "+(expired?C.danger:C.accent)+"30",borderRadius:10,marginBottom:16}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                     <span style={{fontSize:18}}>{expired?"⚠":"✓"}</span>
                     <div style={{fontWeight:800,fontSize:13,color:expired?C.danger:C.accent}}>
-                      {expired ? "Quote Expired — needs re-quote" : "Freight Quoted — Awaiting Payment"}
+                      {expired ? "Quote Expired — needs re-quote" :
+                       invoiceAlreadySent ? "Freight Quoted — Invoice Sent to Customer" :
+                       "Freight Quoted — Ready to Send to Customer"}
                     </div>
                   </div>
-                  <div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>
+                  <div style={{fontSize:11,color:C.muted,lineHeight:1.7,marginBottom:invoiceAlreadySent||expired?0:10}}>
                     Carrier: <strong style={{color:C.text}}>{fq.carrier||""}</strong>{fq.carrierService?" · "+fq.carrierService:""} · ${(fq.freightCost||0).toFixed(2)}
                     {fq.pickupETA && <div>Pickup ETA: {fq.pickupETA}{fq.transitDays?" · Transit "+fq.transitDays+" days":""}</div>}
                     <div>Quoted {fmtDate(fq.quotedAt)} by {fq.quotedBy||"admin"}{fq.expiresAt?" · expires "+new Date(fq.expiresAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):""}</div>
+                    {invoiceAlreadySent && <div style={{color:C.success}}>📨 Invoice sent {fmtDate(viewOrder.invoiceSentAt)}</div>}
                   </div>
+                  {!expired && !invoiceAlreadySent && (
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",paddingTop:8,borderTop:"1px solid "+C.border}}>
+                      <Btn small onClick={function(){
+                        var custObjN = (customers||[]).find(function(c){return c.id===viewOrder.custId;}) || {};
+                        var custEmailN = custObjN.email || viewOrder.custEmail || "";
+                        if(!custEmailN){ addToast("Customer has no email on file — add one first","warning"); return; }
+                        var coN = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+                        var payLink = viewOrder.payToken ? (getSiteUrl()+"#pay="+viewOrder.payToken) : null;
+                        if(!payLink){ addToast("No pay token on this order — re-save the quote to regenerate","warning"); return; }
+                        notifyEmail("freightInvoice", custEmailN,
+                          "Your freight quote is ready — "+viewOrder.id+" — $"+((viewOrder.totals&&viewOrder.totals.grand)||0).toFixed(2),
+                          notifEmailHtml(coN, "Your freight quote is ready",
+                            "<p>Hi "+(viewOrder.custName||"there")+",</p>" +
+                            "<p>Your order is ready for payment. Here's the breakdown:</p>" +
+                            "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
+                            "<tr><td style='padding:6px 10px;'>Subtotal</td><td style='padding:6px 10px;text-align:right;'>$"+(((viewOrder.totals||{}).subtotal)||0).toFixed(2)+"</td></tr>" +
+                            ((viewOrder.totals||{}).tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+(((viewOrder.totals||{}).tax)||0).toFixed(2)+"</td></tr>":"") +
+                            "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
+                            "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+(((viewOrder.totals||{}).grand)||0).toFixed(2)+"</td></tr>" +
+                            "</table>" +
+                            "<p style='font-size:12px;color:#6b7c93;'>Carrier: <strong style='color:#1a1a2e;'>"+(fq.carrier||"")+(fq.carrierService?" · "+fq.carrierService:"")+"</strong>" +
+                            (fq.pickupETA?" · Pickup: "+fq.pickupETA:"") + (fq.transitDays?" · Transit: "+fq.transitDays+" business days":"") + "</p>" +
+                            "<p style='font-size:11px;color:#94a3b8;'>This quote is valid until "+(fq.expiresAt?new Date(fq.expiresAt).toLocaleString("en-US",{month:"long",day:"numeric",hour:"numeric",minute:"2-digit"}):"")+".</p>",
+                            "Pay now", payLink, "#1ea672"));
+                        // Mark the order as invoice-sent
+                        var sentOrd = Object.assign({},viewOrder,{
+                          invoiceSentAt: new Date().toISOString(),
+                          auditLog: (viewOrder.auditLog||[]).concat([{ts:new Date().toISOString(),actor:"Rep",action:"Invoice sent to customer",detail:custEmailN}])
+                        });
+                        setOrders(function(prev){return prev.map(function(o){return o.id===viewOrder.id?sentOrd:o;});});
+                        dbSave("crm_orders",viewOrder.id,sentOrd);
+                        setViewOrder(sentOrd);
+                        addToast("Invoice sent to "+custEmailN,"success");
+                      }}>📨 Send Invoice to Customer</Btn>
+                      {viewOrder.payToken && <Btn small variant="ghost" onClick={function(){
+                        var link = getSiteUrl()+"#pay="+viewOrder.payToken;
+                        navigator.clipboard.writeText(link).then(function(){addToast("Pay link copied — paste anywhere","success");});
+                      }}>📋 Copy Pay Link</Btn>}
+                    </div>
+                  )}
+                  {!expired && invoiceAlreadySent && viewOrder.payToken && (
+                    <div style={{paddingTop:8,borderTop:"1px solid "+C.border}}>
+                      <Btn small variant="ghost" onClick={function(){
+                        var link = getSiteUrl()+"#pay="+viewOrder.payToken;
+                        navigator.clipboard.writeText(link).then(function(){addToast("Pay link copied","success");});
+                      }}>📋 Copy Pay Link</Btn>
+                    </div>
+                  )}
                 </div>
               );
             }
@@ -10398,23 +10452,6 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                         {reasons.map(function(r,i){return <li key={i}>{r}</li>;})}
                       </ul>
                     )}
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-                      <div>
-                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:".06em"}}>Pallets</div>
-                        <input type="number" value={freightPallets} min="1" step="1"
-                          onChange={function(e){setFreightPallets(parseInt(e.target.value)||1);}}
-                          style={{width:"100%",padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.surface,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
-                        {summary.suggestedPallets>0 && summary.suggestedPallets!==freightPallets && (
-                          <div style={{fontSize:10,color:C.dim,marginTop:3}}>Suggested: {summary.suggestedPallets} <button type="button" onClick={function(){setFreightPallets(summary.suggestedPallets);}} style={{background:"none",border:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:10,padding:0,textDecoration:"underline"}}>use</button></div>
-                        )}
-                      </div>
-                      <div>
-                        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:3,textTransform:"uppercase",letterSpacing:".06em"}}>Total weight</div>
-                        <div style={{padding:"8px 10px",background:C.surface,border:"1px solid "+C.border,borderRadius:7,fontSize:13,color:C.text,fontFamily:"monospace"}}>
-                          {summary.totalWeight>0 ? summary.totalWeight+" lbs" : "—"}
-                        </div>
-                      </div>
-                    </div>
                     <div style={{marginBottom:10}}>
                       <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements <span style={{textTransform:"none",letterSpacing:0,color:C.dim,fontWeight:500}}>(admin uses this when quoting)</span></div>
                       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
@@ -13500,7 +13537,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v42-freight-workflow</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v44-mobile-freight</div>
       </div>
     </div>
   );
@@ -13657,6 +13694,10 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const stripeRef = useState({stripe:null, card:null, el:null})[0];
   const [editAddr, setEditAddr] = useState(null); // null | "ship" | "bill"
   const [editForm, setEditForm] = useState({address:"",city:"",state:"",zip:""});
+  // Freight (mobile) — same triggers as desktop
+  const [freightAcc, setFreightAcc] = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
+  const [freightNotes, setFreightNotes] = useState("");
+  const [forceParcel, setForceParcel] = useState(false);
 
   useEffect(function(){
     if(!custId){
@@ -13783,7 +13824,12 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var hasShipAddr = !!(shipAddr && shipAddr.address && shipAddr.zip);
   var hasLines = lines.length>0;
   var cardOk = payMethod!=="card" || (cardComplete && !cardError);
-  var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && !!selectedRate;
+  // Freight detection — affects whether selectedRate is required
+  var _mobileIsFreight = !forceParcel && hasLines && isOrderFreight(
+    lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
+    products, selCust, total
+  );
+  var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && (_mobileIsFreight || !!selectedRate);
 
   function place(){
     if(!canPlace || placing) return;
@@ -13808,6 +13854,13 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     if(!cId){ setPlacing(false); addToast("Pick or create a customer","warning"); return; }
 
     var orderId = "ORD-" + String(Date.now()).slice(-6);
+
+    // Detect freight in the running scope (cId now resolved)
+    var _placeIsFreight = !forceParcel && isOrderFreight(
+      lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
+      products, cRecord, total
+    );
+
     function buildOrder(extra){
       return Object.assign({
         id: orderId, repId: repData.id, custId: cId, custName: cRecord&&cRecord.name||"",
@@ -13836,6 +13889,75 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         terms: payMethod==="due" && selCust && selCust.termsStatus==="active",
         createdAt: new Date().toISOString(),
       }, extra||{});
+    }
+
+    if(_placeIsFreight){
+      var fSummary = computeFreightSummary(
+        lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
+        products
+      );
+      var freightOrder = buildOrder({
+        status: "Awaiting Freight Quote",
+        shippingType: "freight",
+        freightDetails: {
+          pallets: fSummary.suggestedPallets || 1,
+          totalWeight: fSummary.totalWeight || 0,
+          totalVolume: fSummary.totalVolume || 0,
+          accessorials: Object.assign({}, freightAcc),
+          notesForCarrier: freightNotes,
+          requestedAt: new Date().toISOString(),
+          requestedBy: { repId: repData.id, repName: (repData&&repData.name)||"Rep" }
+        },
+        freightQuote: null,
+        paid: false,
+        auditLog: [{ts:new Date().toISOString(),actor:(repData&&repData.name)||"Rep",action:"Order placed (mobile) — freight quote requested",detail:(fSummary.suggestedPallets||1)+" pallet"+((fSummary.suggestedPallets||1)===1?"":"s")+", "+(fSummary.totalWeight||0)+" lbs"}]
+      });
+      setOrders(function(prev){return [freightOrder].concat(prev);});
+      dbSave("crm_orders", orderId, freightOrder);
+
+      // Admin notification — same template as desktop
+      var coM = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+      var custEmailM = (cRecord && cRecord.email) || "";
+      var custNmM = (cRecord && cRecord.name) || "(customer)";
+      var accListM = Object.keys(freightAcc).filter(function(k){return freightAcc[k];}).map(function(k){
+        return {residential:"Residential delivery",liftgate:"Liftgate at delivery",inside:"Inside delivery",appointment:"Appointment required",limitedAccess:"Limited access location"}[k];
+      }).filter(Boolean);
+      var shipAddrStrM = shipAddr ? [shipAddr.address, [shipAddr.city,shipAddr.state].filter(Boolean).join(", "), shipAddr.zip].filter(Boolean).join(", ") : "(no address)";
+      var itemsRowsM = freightOrder.items.map(function(it){
+        var p = (products||[]).find(function(px){return px.id===it.prodId;}) || {};
+        return "<tr><td style='padding:5px 10px;border:1px solid #e8ecef;'>"+(p.name||it.prodId)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>"+(it.qty||0)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)).toFixed(2)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)*(it.qty||0)).toFixed(2)+"</td></tr>";
+      }).join("");
+      var freightAdminEmail = getFreightCfg().notifyEmail || getAdminNotifyEmail();
+      var bodyHtmlM =
+        "<p>A new freight order needs your quote (submitted from mobile). The customer has NOT been invoiced yet — they'll get the invoice after the rep sends it once you enter the carrier rate.</p>" +
+        "<table style='border-collapse:collapse;width:100%;margin:14px 0;font-size:13px;'>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Order</td><td style='padding:6px 10px;'>"+orderId+"</td></tr>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Customer</td><td style='padding:6px 10px;'>"+custNmM+(custEmailM?" &lt;"+custEmailM+"&gt;":"")+"</td></tr>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Submitted by</td><td style='padding:6px 10px;'>"+((repData&&repData.name)||"a rep")+"</td></tr>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Ship to</td><td style='padding:6px 10px;'>"+shipAddrStrM+"</td></tr>" +
+        "</table>" +
+        "<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>Freight details</h3>" +
+        "<table style='border-collapse:collapse;width:100%;font-size:13px;'>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;width:160px;'>Pallets</td><td style='padding:6px 10px;'>"+(fSummary.suggestedPallets||1)+"</td></tr>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Total weight</td><td style='padding:6px 10px;'>"+(fSummary.totalWeight||0)+" lbs</td></tr>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Accessorials</td><td style='padding:6px 10px;'>"+(accListM.length?accListM.join(", "):"None")+"</td></tr>" +
+        "<tr><td style='padding:6px 10px;background:#f6f9fc;font-weight:700;'>Carrier notes</td><td style='padding:6px 10px;'>"+(freightNotes?freightNotes.replace(/</g,"&lt;").replace(/\n/g,"<br>"):"<em style='color:#94a3b8;'>none</em>")+"</td></tr>" +
+        "</table>" +
+        "<h3 style='font-size:14px;margin:18px 0 6px;color:#1a1a2e;'>Line items</h3>" +
+        "<table style='border-collapse:collapse;width:100%;font-size:12px;'>" +
+        "<thead><tr><th style='padding:6px 8px;background:#f6f9fc;text-align:left;'>Product</th><th style='padding:6px 8px;background:#f6f9fc;text-align:right;'>Qty</th><th style='padding:6px 8px;background:#f6f9fc;text-align:right;'>Unit</th><th style='padding:6px 8px;background:#f6f9fc;text-align:right;'>Total</th></tr></thead>" +
+        "<tbody>"+itemsRowsM+"</tbody>" +
+        "<tfoot><tr><td colspan='3' style='padding:6px 10px;text-align:right;font-weight:700;'>Subtotal (before freight)</td><td style='padding:6px 10px;text-align:right;font-weight:700;'>$"+(subtotal||0).toFixed(2)+"</td></tr>" +
+        (tax>0?"<tr><td colspan='3' style='padding:6px 10px;text-align:right;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+(tax||0).toFixed(2)+"</td></tr>":"") +
+        "<tr><td colspan='3' style='padding:6px 10px;text-align:right;'>Freight</td><td style='padding:6px 10px;text-align:right;font-style:italic;color:#b45309;'>pending quote</td></tr>" +
+        "</tfoot></table>";
+      notifyEmail("freightQuoteReq", freightAdminEmail, "🚛 Freight quote needed — "+orderId+" — "+custNmM,
+        notifEmailHtml(coM, "Freight quote needed", bodyHtmlM, "Enter quote", getSiteUrl()+"#tab=tasks", "#b45309"));
+
+      setPlacing(false);
+      addToast("Freight quote requested — admin will reach out with carrier rate","success");
+      onPlaced();
+      return;
     }
 
     if(payMethod==="card"){
@@ -14111,25 +14233,84 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         )}
       </div>
 
-      {/* Live Shipping rates */}
-      <div style={{marginBottom:20}}>
-        <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping</div>
-        <div style={{padding:hasLines&&hasShipAddr?12:22,background:C.surface,border:(hasLines&&hasShipAddr?"1px solid ":"1px dashed ")+C.border,borderRadius:12,opacity:hasLines&&hasShipAddr?1:0.65}}>
-          {hasLines && hasShipAddr ? (
-            <ShippingRatePicker
-              key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
-              toZip={shipAddr.zip} toState={shipAddr.state}
-              totalWeight={totalWeight}
-              pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
-              onSelect={setSelectedRate}
-              selected={selectedRate}/>
-          ) : (
-            <div style={{textAlign:"center",color:C.dim,fontSize:13,lineHeight:1.6}}>
-              {!hasLines ? "📦 Add a product first — rates load here automatically." : "📍 Set a shipping address first."}
+      {/* Live Shipping rates OR Freight UI */}
+      {(function(){
+        var mobileTotal = total;
+        var mobileFreight = !forceParcel && hasLines && isOrderFreight(
+          lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
+          products, selCust, mobileTotal
+        );
+        if(mobileFreight){
+          var mobileReasons = freightTriggerReasons(
+            lines.map(function(it){return Object.assign({},it,{prodId:it.productId});}),
+            products, selCust, mobileTotal
+          );
+          var mobileCfg = getFreightCfg();
+          return (
+            <div style={{marginBottom:20}}>
+              <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Freight Shipping</div>
+              <div style={{padding:16,background:C.warning+"10",border:"2px dashed "+C.warning+"50",borderRadius:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <span style={{fontSize:22}}>🚛</span>
+                  <div style={{fontWeight:800,fontSize:14,color:C.warning}}>Freight Required</div>
+                </div>
+                <div style={{fontSize:12,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+                  This order needs LTL/pallet shipping. The customer's invoice will be sent after admin confirms the carrier rate (typically within {mobileCfg.quoteExpiryHours}h).
+                </div>
+                {mobileReasons.length>0 && (
+                  <ul style={{fontSize:11,color:C.muted,margin:"0 0 12px 18px",padding:0,lineHeight:1.7}}>
+                    {mobileReasons.map(function(r,i){return <li key={i}>{r}</li>;})}
+                  </ul>
+                )}
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Delivery requirements</div>
+                  {[["residential","Residential delivery"],["liftgate","Liftgate at delivery"],["inside","Inside delivery"],["appointment","Appointment required"],["limitedAccess","Limited access"]].map(function(opt){
+                    return (
+                      <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",background:freightAcc[opt[0]]?C.warning+"15":C.bg,border:"1px solid "+(freightAcc[opt[0]]?C.warning+"40":C.border),borderRadius:8,fontSize:13,color:C.text,marginBottom:6,cursor:"pointer"}}>
+                        <input type="checkbox" checked={!!freightAcc[opt[0]]}
+                          onChange={function(e){setFreightAcc(function(prev){return Object.assign({},prev,{[opt[0]]:e.target.checked});});}}
+                          style={{accentColor:C.warning,width:18,height:18}}/>
+                        <span>{opt[1]}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div style={{marginBottom:6}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:6,textTransform:"uppercase",letterSpacing:".06em"}}>Notes for carrier</div>
+                  <textarea value={freightNotes} onChange={function(e){setFreightNotes(e.target.value);}} rows="3"
+                    placeholder="Loading dock hours, special instructions…"
+                    style={{width:"100%",padding:"12px",fontSize:14,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.text,fontFamily:"inherit",boxSizing:"border-box",resize:"vertical"}}/>
+                </div>
+                <button type="button" onClick={function(){setForceParcel(true);}}
+                  style={{marginTop:8,width:"100%",padding:"10px",background:"none",border:"1px solid "+C.border,borderRadius:8,fontSize:11,color:C.muted,fontFamily:"inherit",cursor:"pointer"}}>
+                  Override and use parcel shipping
+                </button>
+              </div>
             </div>
-          )}
-        </div>
-      </div>
+          );
+        }
+        // Parcel (existing)
+        return (
+          <div style={{marginBottom:20}}>
+            <div style={{fontWeight:700,fontSize:11,color:C.muted,marginBottom:8,letterSpacing:".07em",textTransform:"uppercase"}}>3 · Shipping {forceParcel && <span style={{color:C.warning,textTransform:"none",letterSpacing:0,fontSize:10}}>(parcel forced)</span>}</div>
+            <div style={{padding:hasLines&&hasShipAddr?12:22,background:C.surface,border:(hasLines&&hasShipAddr?"1px solid ":"1px dashed ")+C.border,borderRadius:12,opacity:hasLines&&hasShipAddr?1:0.65}}>
+              {hasLines && hasShipAddr ? (
+                <ShippingRatePicker
+                  key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
+                  toZip={shipAddr.zip} toState={shipAddr.state}
+                  totalWeight={totalWeight}
+                  pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
+                  onSelect={setSelectedRate}
+                  selected={selectedRate}/>
+              ) : (
+                <div style={{textAlign:"center",color:C.dim,fontSize:13,lineHeight:1.6}}>
+                  {!hasLines ? "📦 Add a product first — rates load here automatically." : "📍 Set a shipping address first."}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Commission */}
       <div style={{marginBottom:20}}>
@@ -14305,8 +14486,99 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:20,background:sc.bg||C.surface2,color:sc.c||C.muted}}>{selectedOrder.status||"—"}</span>
             {selectedOrder.paid && <span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:20,background:C.success+"18",color:C.success}}>✓ Paid</span>}
+            {selectedOrder.shippingType==="freight" && <span style={{padding:"4px 10px",fontSize:11,fontWeight:700,borderRadius:20,background:C.warning+"18",color:C.warning}}>🚛 Freight</span>}
           </div>
         </div>
+
+        {/* Freight callout (mobile) */}
+        {selectedOrder.shippingType==="freight" && (function(){
+          if(selectedOrder.status==="Awaiting Freight Quote"){
+            var fd = selectedOrder.freightDetails || {};
+            var accLabels = Object.keys(fd.accessorials||{}).filter(function(k){return fd.accessorials[k];}).map(function(k){
+              return {residential:"Residential",liftgate:"Liftgate",inside:"Inside",appointment:"Appointment",limitedAccess:"Limited access"}[k];
+            }).filter(Boolean);
+            return (
+              <div style={{padding:16,background:C.warning+"12",border:"2px dashed "+C.warning+"60",borderRadius:12,marginBottom:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontSize:20}}>🚛</span>
+                  <div style={{fontWeight:800,fontSize:14,color:C.warning}}>Awaiting Freight Quote</div>
+                </div>
+                <div style={{fontSize:12,color:C.muted,lineHeight:1.7}}>
+                  {fd.pallets||"?"} pallet{(fd.pallets===1)?"":"s"} · {fd.totalWeight||0} lbs
+                  {accLabels.length>0 && <div>Accessorials: {accLabels.join(", ")}</div>}
+                  <div style={{marginTop:4,fontStyle:"italic"}}>Admin is getting the carrier quote. You'll be notified when it's ready to send to the customer.</div>
+                </div>
+              </div>
+            );
+          }
+          if(selectedOrder.status==="Quoted" || (selectedOrder.freightQuote && !selectedOrder.paid)){
+            var fq = selectedOrder.freightQuote || {};
+            var expired = freightQuoteExpired(selectedOrder);
+            var invoiceSent = !!selectedOrder.invoiceSentAt;
+            return (
+              <div style={{padding:16,background:(expired?C.danger:C.accent)+"10",border:"1px solid "+(expired?C.danger:C.accent)+"30",borderRadius:12,marginBottom:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <span style={{fontSize:20}}>{expired?"⚠":"✓"}</span>
+                  <div style={{fontWeight:800,fontSize:14,color:expired?C.danger:C.accent}}>
+                    {expired ? "Quote Expired" : invoiceSent ? "Invoice Sent — Awaiting Payment" : "Ready to Send Invoice"}
+                  </div>
+                </div>
+                <div style={{fontSize:12,color:C.muted,lineHeight:1.7,marginBottom:invoiceSent||expired?0:12}}>
+                  Carrier: <strong style={{color:C.text}}>{fq.carrier||""}</strong>{fq.carrierService?" · "+fq.carrierService:""}
+                  <div>Freight: <strong style={{color:C.text}}>${(fq.freightCost||0).toFixed(2)}</strong></div>
+                  {fq.pickupETA && <div>Pickup: {fq.pickupETA}{fq.transitDays?" · Transit "+fq.transitDays+" days":""}</div>}
+                  {fq.expiresAt && <div>Expires: {new Date(fq.expiresAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>}
+                  {invoiceSent && <div style={{color:C.success,marginTop:4}}>📨 Invoice sent {fmtDate(selectedOrder.invoiceSentAt)}</div>}
+                </div>
+                {!expired && !invoiceSent && (
+                  <button onClick={function(){
+                    var custObjM = (customers||[]).find(function(x){return x.id===selectedOrder.custId;}) || {};
+                    var custEmailMm = custObjM.email || "";
+                    if(!custEmailMm){ addToast("Customer has no email","warning"); return; }
+                    var coMm = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+                    var payLink = selectedOrder.payToken ? (getSiteUrl()+"#pay="+selectedOrder.payToken) : null;
+                    if(!payLink){ addToast("No pay token — ask admin to re-save quote","warning"); return; }
+                    notifyEmail("freightInvoice", custEmailMm,
+                      "Your freight quote is ready — "+selectedOrder.id+" — $"+((selectedOrder.totals&&selectedOrder.totals.grand)||selectedOrder.total||0).toFixed(2),
+                      notifEmailHtml(coMm, "Your freight quote is ready",
+                        "<p>Hi "+(selectedOrder.custName||"there")+",</p>" +
+                        "<p>Your order is ready for payment.</p>" +
+                        "<p style='font-size:24px;font-weight:800;color:#635bff;text-align:center;margin:20px 0;'>$"+((selectedOrder.totals&&selectedOrder.totals.grand)||selectedOrder.total||0).toFixed(2)+"</p>" +
+                        "<p style='font-size:12px;color:#6b7c93;'>Includes freight via <strong style='color:#1a1a2e;'>"+(fq.carrier||"")+"</strong> ($"+((fq.freightCost)||0).toFixed(2)+")</p>",
+                        "Pay now", payLink, "#1ea672"));
+                    var sentOrd = Object.assign({},selectedOrder,{
+                      invoiceSentAt: new Date().toISOString(),
+                      auditLog: (selectedOrder.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Rep",action:"Invoice sent to customer (mobile)",detail:custEmailMm}])
+                    });
+                    setOrders(function(prev){return prev.map(function(o){return o.id===selectedOrder.id?sentOrd:o;});});
+                    dbSave("crm_orders",selectedOrder.id,sentOrd);
+                    addToast("Invoice sent to "+custEmailMm,"success");
+                  }} style={{width:"100%",padding:"14px",background:C.accent,border:"none",borderRadius:10,fontSize:15,fontWeight:700,color:"#fff",fontFamily:"inherit",cursor:"pointer",marginBottom:8}}>
+                    📨 Send Invoice to Customer
+                  </button>
+                )}
+                {!expired && selectedOrder.payToken && (
+                  <button onClick={function(){
+                    var link = getSiteUrl()+"#pay="+selectedOrder.payToken;
+                    navigator.clipboard.writeText(link).then(function(){addToast("Pay link copied","success");});
+                  }} style={{width:"100%",padding:"12px",background:"none",border:"1px solid "+C.border,borderRadius:10,fontSize:13,fontWeight:600,color:C.muted,fontFamily:"inherit",cursor:"pointer"}}>
+                    📋 Copy Pay Link
+                  </button>
+                )}
+              </div>
+            );
+          }
+          if(selectedOrder.freightQuote && selectedOrder.paid){
+            var fq2 = selectedOrder.freightQuote;
+            return (
+              <div style={{padding:"10px 14px",background:C.success+"10",border:"1px solid "+C.success+"25",borderRadius:10,marginBottom:12,fontSize:12,color:C.success,fontWeight:600,display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:16}}>🚛✓</span>
+                <span>{fq2.carrier} · ${(fq2.freightCost||0).toFixed(2)}{fq2.proNumber?" · PRO "+fq2.proNumber:""}</span>
+              </div>
+            );
+          }
+          return null;
+        })()}
 
         <div style={{padding:16,background:C.surface,border:"1px solid "+C.border,borderRadius:12,marginBottom:12}}>
           <div style={{fontSize:11,color:C.muted,marginBottom:4}}>Customer</div>
@@ -14579,7 +14851,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v42-freight-workflow
+        BUILD: 2026-05-30-v44-mobile-freight
       </div>
     </div>
   );
