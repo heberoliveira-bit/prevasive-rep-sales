@@ -10784,10 +10784,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               <div style={{background:C.surface2,borderRadius:12,padding:"16px",border:"1px solid "+C.border}}>
                 {(function(){
                   var _isFreightTotals = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  // Only call shipping "Free ✓" when the rep made an active choice (picked a rate or set a manual value).
+                  // If the value is $0 because nothing was selected/entered, show "TBD" so the rep knows it's unset.
+                  var _shippingActivelyChosen = !!selectedRate || shippingOverride !== null;
+                  var _shippingFreeLabel = _shippingActivelyChosen ? "Free ✓" : "TBD";
                   return [["Subtotal",fmtMoney(totals.subtotal)],
                     totals.discount>0&&["Discount ("+(discApplied&&discApplied.code)+")","-"+fmtMoney(totals.discount)],
                     totals.shipping>0&&["Shipping",fmtMoney(totals.shipping)],
-                    totals.shipping===0&&["Shipping", _isFreightTotals ? "TBD" : "Free ✓"],
+                    totals.shipping===0&&["Shipping", _isFreightTotals ? "TBD" : _shippingFreeLabel],
                     totals.tax>0&&["Tax ("+(totals.taxInfo&&totals.taxInfo.county?totals.taxInfo.county+" ":"")+(((totals.taxRate||0)*100).toFixed(1))+"%)","+ "+fmtMoney(totals.tax)],
                     ["Commission ("+commRate+"%)",fmtMoney(totals.commission)],
                   ].filter(Boolean).map(function(row,i){
@@ -10843,8 +10847,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Order Summary</div>
                 {(function(){
                   var _isFreightConf = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  var _confShippingChosen = !!selectedRate || shippingOverride !== null;
+                  var _confFreeLabel = _confShippingChosen ? "Free ✓" : "TBD";
                   return [["Customer",selCust?selCust.name:custName],["Products",items.filter(function(it){return it.prodId;}).length+" item(s)"],
-                    ["Shipping", totals.shipping===0 ? (_isFreightConf?"TBD":"Free ✓") : "$"+totals.shipping.toFixed(2)],
+                    ["Shipping", totals.shipping===0 ? (_isFreightConf?"TBD":_confFreeLabel) : "$"+totals.shipping.toFixed(2)],
                     totals.tax>0&&["Tax",(((totals.taxRate||0)*100).toFixed(1))+"% = "+fmtMoney(totals.tax)],
                     ["Payment",fmtTerms(payMethod)+(dorPath==="card"?" — Collect Card":dorPath==="link"?" — Send Invoice Link":"")],["Commission",commRate+"% = "+fmtMoney(totals.commission)],
                     ["Grand Total",fmtMoney(totals.grand)]];
@@ -13958,7 +13964,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v49-rt-debug</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v50-shipping-tbd-fallback</div>
       </div>
     </div>
   );
@@ -14792,6 +14798,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
             {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax{taxInfo&&taxInfo.county?(" · "+taxInfo.county):""} ({(taxRate*100).toFixed(2).replace(/\.?0+$/,"")}%)</span><span>{fmtMoney(tax)}</span></div>}
             {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
             {shipping===0 && _mobileIsFreight && <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.warning,fontWeight:700}}><span>Shipping</span><span>TBD</span></div>}
+            {shipping===0 && !_mobileIsFreight && !selectedRate && hasLines && <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.warning,fontWeight:700}}><span>Shipping</span><span>TBD — pick a rate</span></div>}
             <div style={{display:"flex",justifyContent:"space-between",fontSize:16,fontWeight:800,paddingTop:8,marginTop:4,borderTop:"1px solid "+C.border,color:C.text}}>
               <span>Customer pays</span><span>{fmtMoney(total)}</span>
             </div>
@@ -15350,7 +15357,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v49-rt-debug
+        BUILD: 2026-05-30-v50-shipping-tbd-fallback
       </div>
     </div>
   );
