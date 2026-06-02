@@ -295,16 +295,20 @@ function subscribeTable(table, setState){
     .on("postgres_changes", { event:"*", schema:"public", table:table }, function(payload){
       try{
         var ev = payload.eventType || payload.type;
+        try{ console.info("[realtime] ⚡ "+table+" "+ev, payload); }catch(e){}
         if(ev === "DELETE"){
           var oldId = payload.old && payload.old.id;
-          if(!oldId) return;
+          if(!oldId) { try{ console.warn("[realtime] "+table+" DELETE had no payload.old.id — try: ALTER TABLE "+table+" REPLICA IDENTITY FULL;"); }catch(e){} return; }
           setState(function(prev){ return (prev||[]).filter(function(p){return p.id!==oldId;}); });
           return;
         }
         // INSERT or UPDATE — upsert by id (replace existing or prepend new)
         var row = payload.new || {};
         var rec = row.data;
-        if(!rec) return;
+        if(!rec) {
+          try{ console.warn("[realtime] "+table+" "+ev+" had no row.data — got keys:", Object.keys(row||{})); }catch(e){}
+          return;
+        }
         if(rec.id == null) rec.id = row.id;
         setState(function(prev){
           var found = false;
@@ -315,15 +319,15 @@ function subscribeTable(table, setState){
           if(!found) arr = [rec].concat(arr);
           return arr;
         });
-      }catch(e){ console.warn("realtime "+table+" handler error:", e); }
+      }catch(e){ try{ console.warn("[realtime] "+table+" handler error:", e); }catch(_){} }
     })
     .subscribe(function(status){
       if(status === "SUBSCRIBED") {
-        try{ console.info("[realtime] ✓ "+table+" — live updates connected"); }catch(e){}
+        try{ console.info("[realtime] ✓ "+table+" — connected"); }catch(e){}
       } else if(status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        try{ console.warn("[realtime] ✗ "+table+" — "+status+". Run in Supabase SQL: ALTER PUBLICATION supabase_realtime ADD TABLE "+table+";"); }catch(e){}
+        try{ console.warn("[realtime] ✗ "+table+" — "+status+". If repeated, check: (1) ALTER PUBLICATION supabase_realtime ADD TABLE "+table+";  (2) RLS SELECT policy allows the current user;  (3) Supabase Realtime is enabled in project settings."); }catch(e){}
       } else if(status === "CLOSED") {
-        try{ console.info("[realtime] "+table+" — channel closed"); }catch(e){}
+        try{ console.info("[realtime] "+table+" — closed"); }catch(e){}
       }
     });
   return ch;
@@ -13954,7 +13958,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v48-products-sync</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v49-rt-debug</div>
       </div>
     </div>
   );
@@ -15346,7 +15350,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v48-products-sync
+        BUILD: 2026-05-30-v49-rt-debug
       </div>
     </div>
   );
