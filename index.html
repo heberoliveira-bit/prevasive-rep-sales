@@ -3918,6 +3918,10 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
   var pendingReps = reps.filter(function(r){return r.status==="pending";});
   var pendingFreightOrders = (orders||[]).filter(function(o){return o.status==="Awaiting Freight Quote";});
   var quotedExpired = (orders||[]).filter(function(o){return (o.status==="Quoted" || o.status==="Quote Expired") && freightQuoteExpired(o);});
+  // Freight orders where rep has sent the invoice but customer hasn't paid yet
+  var awaitingCustomerPayment = (orders||[]).filter(function(o){
+    return o.shippingType==="freight" && o.invoiceSentAt && !o.paid && o.status!=="Cancelled" && !freightQuoteExpired(o);
+  });
   var total = pendingW9.length+pendingApps.length+pendingReps.length+submittedOrders.length+pendingFreightOrders.length;
   const [freightQuoteTarget, setFreightQuoteTarget] = useState(null);
 
@@ -4216,6 +4220,44 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
           }}
           onClose={function(){setFreightQuoteTarget(null);}}
           addToast={addToast}/>
+      )}
+
+      {/* Awaiting Customer Payment — freight orders sent to customer, not yet paid */}
+      {tasksTab==="active"&&awaitingCustomerPayment.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>📨 Awaiting Customer Payment <span style={{fontWeight:400,color:C.dim,fontSize:11}}>(freight invoices sent)</span></span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.accent+"18",color:C.accent,fontSize:11,fontWeight:700}}>{awaitingCustomerPayment.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {awaitingCustomerPayment.map(function(o,i){
+              var fq = o.freightQuote || {};
+              var sentAgo = (function(){
+                var ms = Date.now() - new Date(o.invoiceSentAt).getTime();
+                var h = Math.floor(ms/3600000);
+                if(h<1) return "just now";
+                if(h<24) return h+"h ago";
+                return Math.floor(h/24)+"d ago";
+              })();
+              return (
+                <div key={o.id} style={{padding:"12px 18px",borderBottom:i<awaitingCustomerPayment.length-1?"1px solid "+C.border:"none",display:"flex",justifyContent:"space-between",alignItems:"center",gap:12}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:3}}>
+                      <span style={{fontWeight:700,fontSize:13,color:C.text}}>{o.id}</span>
+                      <span style={{fontSize:11,color:C.muted}}>· {o.custName||"—"}</span>
+                      {fq.carrier && <span style={{padding:"1px 7px",borderRadius:20,background:C.warning+"15",color:C.warning,fontSize:10,fontWeight:700}}>🚛 {fq.carrier}</span>}
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+                      Invoice sent {sentAgo} · rep {o.repName||"—"}
+                      {fmtTerms(o.payMethod)!==fmtTerms("pay_later")&&fmtTerms(o.payMethod)!==fmtTerms("invoice_link")&& <span> · <strong style={{color:C.warning}}>{fmtTerms(o.payMethod)}</strong></span>}
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right",fontFamily:"monospace",fontWeight:700,fontSize:13,color:C.accent}}>${((o.totals&&o.totals.grand)||0).toFixed(2)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
 
       {/* Submitted Orders Queue */}
@@ -10029,7 +10071,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       setPlacing(false);
       setStep(1);
       if(typeof onClose === "function") onClose();
-      addToast("Freight quote requested — admin will reach out with carrier rate","success");
+      addToast("Estimate sent — you'll be notified when the freight quote is ready to send to customer","success");
       return;
     }
 
@@ -10919,6 +10961,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     return "Placing…";
                   }
                   if(isEdit) return "Save Changes";
+                  // Freight detected: rep is requesting an estimate, not closing the sale
+                  var _btnIsFreight = !forceParcel && isOrderFreight(items, products, selCust||(newCust?{}:null), totals.grand);
+                  if(_btnIsFreight) return "📨 Send for Estimate →";
                   if(dorPath==="card"&&cardMode==="online") return "💳 Charge & Place Order";
                   if(dorPath==="link"&&sendOnPlace) return "✉ Send Invoice & Place Order →";
                   return "Place Order";
@@ -11095,18 +11140,151 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 }
 
 /* ─── Rep Orders ─────────────────────────────────────────────────────────── */
+/* ─── FinishFreightOrderModal ─────────────────────────────────────────────
+   Shown after admin enters a freight quote. Rep picks the payment method
+   the customer will use, then we either email the pay link or move the
+   order onto the customer's net terms. */
+function FinishFreightOrderModal({order, customer, repName, onFinish, onClose, addToast}) {
+  // Available payment methods depend on the customer's account state.
+  // Always available: pay link (Stripe). Available if customer has approved terms: net.
+  var hasApprovedTerms = !!(customer && customer.termsType && (customer.termsStatus==="active" || customer.termsStatus==="signed"));
+  var defaultMethod = "invoice_link";
+  const [method,  setMethod]  = useState(defaultMethod);
+  const [sending, setSending] = useState(false);
+
+  var fq = order.freightQuote || {};
+  var totals = order.totals || {};
+
+  function submit(){
+    var custEmail = customer.email || "";
+    if(method==="invoice_link" && !custEmail){ addToast("Customer has no email on file — add one first","warning"); return; }
+    setSending(true);
+    var now = new Date().toISOString();
+    var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+
+    if(method==="invoice_link") {
+      var payLink = order.payToken ? (getSiteUrl()+"#pay="+order.payToken) : null;
+      if(!payLink){ setSending(false); addToast("No pay token on this order — ask admin to re-save the quote","warning"); return; }
+      notifyEmail("freightInvoice", custEmail,
+        "Your freight quote is ready — "+order.id+" — $"+(totals.grand||0).toFixed(2),
+        notifEmailHtml(co, "Your freight quote is ready",
+          "<p>Hi "+(order.custName||"there")+",</p>" +
+          "<p>Your order is ready for payment. Here's the breakdown:</p>" +
+          "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
+          "<tr><td style='padding:6px 10px;'>Subtotal</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.subtotal)||0).toFixed(2)+"</td></tr>" +
+          (totals.tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.tax)||0).toFixed(2)+"</td></tr>":"") +
+          "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
+          "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+((totals.grand)||0).toFixed(2)+"</td></tr>" +
+          "</table>" +
+          "<p style='font-size:12px;color:#6b7c93;'>Carrier: <strong style='color:#1a1a2e;'>"+(fq.carrier||"")+(fq.carrierService?" · "+fq.carrierService:"")+"</strong>" +
+          (fq.pickupETA?" · Pickup: "+fq.pickupETA:"") + (fq.transitDays?" · Transit: "+fq.transitDays+" business days":"") + "</p>",
+          "Pay now", payLink, "#1ea672"));
+      var updated = Object.assign({}, order, {
+        payMethod: "invoice_link",
+        invoiceSentAt: now,
+        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Invoice sent to customer", detail:custEmail}])
+      });
+      onFinish(updated);
+    } else {
+      // Net terms — flag the order with the customer's term + send the customer an info email
+      var termCode = customer.termsType || "net_30";
+      if(custEmail){
+        notifyEmail("freightInvoice", custEmail,
+          "Your order is confirmed — "+order.id+" — "+fmtTerms(termCode),
+          notifEmailHtml(co, "Your order is confirmed",
+            "<p>Hi "+(order.custName||"there")+",</p>" +
+            "<p>Your order has been confirmed under your <strong>"+fmtTerms(termCode)+"</strong> credit terms. Here's the breakdown:</p>" +
+            "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
+            "<tr><td style='padding:6px 10px;'>Subtotal</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.subtotal)||0).toFixed(2)+"</td></tr>" +
+            (totals.tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.tax)||0).toFixed(2)+"</td></tr>":"") +
+            "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
+            "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+((totals.grand)||0).toFixed(2)+"</td></tr>" +
+            "</table>" +
+            "<p style='padding:10px 12px;background:#f6f9fc;border-radius:6px;color:#1a1a2e;font-size:13px;'>Payment per your <strong>"+fmtTerms(termCode)+"</strong> terms. We'll include an invoice with the shipment.</p>",
+            null, null, "#1ea672"));
+      }
+      var updated2 = Object.assign({}, order, {
+        payMethod: termCode,
+        invoiceSentAt: now,
+        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Order finalized under "+fmtTerms(termCode), detail:custEmail||"(no email)"}])
+      });
+      onFinish(updated2);
+    }
+  }
+
+  return (
+    <Modal title={"Finish Order — "+order.id} onClose={onClose}
+      footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+        <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
+        <Btn onClick={submit} disabled={sending}>{sending?"Sending…":"Submit & Send →"}</Btn>
+      </div>}>
+
+      {/* Order recap */}
+      <div style={{padding:"12px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,marginBottom:14}}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:4}}>{order.custName||"—"}</div>
+        <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+          Freight: <strong style={{color:C.text}}>{fq.carrier||"—"}</strong>{fq.carrierService?" · "+fq.carrierService:""} · ${(fq.freightCost||0).toFixed(2)}
+          {fq.expiresAt && <div>⏱ Quote expires {new Date(fq.expiresAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>}
+        </div>
+        <div style={{fontSize:11,color:C.muted,marginTop:6,paddingTop:6,borderTop:"1px dashed "+C.border,display:"flex",justifyContent:"space-between"}}>
+          <span>Order total</span><span style={{fontWeight:700,color:C.accent,fontSize:13}}>${(totals.grand||0).toFixed(2)}</span>
+        </div>
+      </div>
+
+      {/* Payment method picker */}
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:8}}>How should the customer pay?</div>
+
+      <label style={{display:"flex",gap:10,padding:"12px 14px",background:method==="invoice_link"?C.accent+"10":C.surface2,border:"2px solid "+(method==="invoice_link"?C.accent:C.border),borderRadius:10,cursor:"pointer",marginBottom:8}}>
+        <input type="radio" name="payMethod" value="invoice_link" checked={method==="invoice_link"}
+          onChange={function(){setMethod("invoice_link");}}
+          style={{accentColor:C.accent,marginTop:2,flexShrink:0}}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2}}>📨 Send invoice link by email</div>
+          <div style={{fontSize:11,color:C.muted}}>Customer pays online via Stripe. They get an email with a pay button.</div>
+          {!customer.email && <div style={{fontSize:10,color:C.warning,marginTop:4}}>⚠ No email on file — add one to the customer record first</div>}
+        </div>
+      </label>
+
+      {hasApprovedTerms ? (
+        <label style={{display:"flex",gap:10,padding:"12px 14px",background:method==="net_terms"?C.accent+"10":C.surface2,border:"2px solid "+(method==="net_terms"?C.accent:C.border),borderRadius:10,cursor:"pointer"}}>
+          <input type="radio" name="payMethod" value="net_terms" checked={method==="net_terms"}
+            onChange={function(){setMethod("net_terms");}}
+            style={{accentColor:C.accent,marginTop:2,flexShrink:0}}/>
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2}}>📋 Use <strong>{fmtTerms(customer.termsType)}</strong> (on file)</div>
+            <div style={{fontSize:11,color:C.muted}}>Customer pays per their approved terms. Invoice ships with the order. Credit limit: ${(customer.termsLimit||0).toLocaleString("en-US",{minimumFractionDigits:2})}.</div>
+          </div>
+        </label>
+      ) : (
+        <div style={{padding:"10px 12px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:8,fontSize:11,color:C.dim,lineHeight:1.6}}>
+          <strong>Net terms not available</strong> — this customer doesn't have approved credit terms on file. To enable terms, have them apply via Customers → Request Credit Terms.
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,returns,setReturns,autoOpen}) {
-  const [showReturn,  setShowReturn]  = useState(false);
-  const [showForm,    setShowForm]    = useState(false);
-  const [filter,      setFilter]      = useState("all");
-  const [viewOrd,     setViewOrd]     = useState(null);
-  const [showSendInv, setShowSendInv] = useState(false);
+  const [showReturn,    setShowReturn]    = useState(false);
+  const [showForm,      setShowForm]      = useState(false);
+  const [filter,        setFilter]        = useState("all");
+  const [viewOrd,       setViewOrd]       = useState(null);
+  const [showSendInv,   setShowSendInv]   = useState(false);
+  // Finish-order modal target — the order the rep is finalizing after admin's freight quote
+  const [finishTarget,  setFinishTarget]  = useState(null);
 
   useEffect(function(){
     if(autoOpen) setShowForm(true);
   }, [autoOpen]);
   var myOrds = orders.filter(function(o){return o.repId===repId;});
   var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
+
+  // Pending Your Action — freight orders where rep still has work
+  var pendingAction = myOrds.filter(function(o){
+    if(o.status==="Awaiting Freight Quote") return true;
+    if(o.status==="Quoted" && !o.invoiceSentAt && !freightQuoteExpired(o)) return true;
+    return false;
+  });
 
   function requestReturn(order, ret){
     var now=new Date().toISOString();
@@ -11125,6 +11303,72 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
     <div>
       <PageHeader title="My Orders" subtitle={myOrds.length+" orders"}
         action={<Btn onClick={function(){setShowForm(true);}}>+ New Order</Btn>}/>
+
+      {/* Pending Your Action — freight workflow surface */}
+      {pendingAction.length>0 && (
+        <div style={{marginBottom:20}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>📋 Pending Your Action</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>{pendingAction.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {pendingAction.map(function(o,i){
+              var ready = o.status==="Quoted" && !o.invoiceSentAt;
+              var fq = o.freightQuote || {};
+              var fd = o.freightDetails || {};
+              return (
+                <div key={o.id} style={{
+                  padding:"14px 18px",
+                  borderBottom:i<pendingAction.length-1?"1px solid "+C.border:"none",
+                  background: ready ? C.success+"08" : "transparent",
+                  borderLeft: ready ? "4px solid "+C.success : "4px solid "+C.warning,
+                  cursor: ready ? "default" : "pointer"
+                }} onClick={ready?null:function(){setViewOrd(o);}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontWeight:700,fontSize:13,color:C.text}}>{ready?"🟢":"🟡"} {o.id} · {o.custName||"—"}</span>
+                        {ready && <span style={{padding:"1px 7px",borderRadius:20,background:C.success+"20",color:C.success,fontSize:10,fontWeight:700}}>Quote Ready</span>}
+                      </div>
+                      {ready ? (
+                        <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+                          ✓ Quote in — <strong style={{color:C.text}}>{fq.carrier||"LTL"}</strong> · <strong style={{color:C.text}}>${(fq.freightCost||0).toFixed(2)}</strong> freight · order total <strong style={{color:C.accent}}>${((o.totals&&o.totals.grand)||0).toFixed(2)}</strong>
+                          {fq.expiresAt && <div style={{color:C.warning}}>⏱ Quote expires {new Date(fq.expiresAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>}
+                        </div>
+                      ) : (
+                        <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+                          Awaiting admin freight quote · submitted {fmtDate(o.createdAt)}
+                          <div>{(fd.pallets||"?")} pallet{(fd.pallets===1)?"":"s"} · {fd.totalWeight||0} lbs · subtotal ${((o.totals&&o.totals.subtotal)||0).toFixed(2)}</div>
+                        </div>
+                      )}
+                    </div>
+                    {ready && (
+                      <Btn small onClick={function(){setFinishTarget(o);}}>📨 Continue & Send Invoice →</Btn>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Finish Order modal — Option B: rep picks payment method */}
+      {finishTarget && (
+        <FinishFreightOrderModal
+          order={finishTarget}
+          customer={customers.find(function(c){return c.id===finishTarget.custId;})||{}}
+          repName={repName}
+          onFinish={function(updated){
+            setOrders(function(prev){return prev.map(function(x){return x.id===updated.id?updated:x;});});
+            dbSave("crm_orders",updated.id,updated);
+            setFinishTarget(null);
+            addToast("Order finalized — "+(updated.payMethod==="invoice_link"||updated.payMethod==="pay_later"?"invoice sent to customer":"customer is on "+fmtTerms(updated.payMethod)),"success");
+          }}
+          onClose={function(){setFinishTarget(null);}}
+          addToast={addToast}/>
+      )}
+
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18,borderBottom:"1px solid "+C.border,paddingBottom:12}}>
         {["all"].concat(["Submitted","Processing","Shipped","Delivered","Paid","Cancelled"]).map(function(s){
           var act=filter===s;
@@ -13684,7 +13928,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v46-quotes-freight</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v47-pending-action</div>
       </div>
     </div>
   );
@@ -14102,7 +14346,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         notifEmailHtml(coM, "Freight quote needed", bodyHtmlM, "Enter quote", getSiteUrl()+"#tab=tasks", "#b45309"));
 
       setPlacing(false);
-      addToast("Freight quote requested — admin will reach out with carrier rate","success");
+      addToast("Estimate sent — you'll be notified when the freight quote is ready to send to customer","success");
       onPlaced();
       return;
     }
@@ -14594,7 +14838,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                 fontSize:16,fontWeight:800,fontFamily:"inherit",
                 boxShadow:canPlace?"0 4px 14px rgba(99,91,255,.35)":"none"}}>
         {(function(){
-          if(placing) return payMethod==="card"?"Charging…":(payMethod==="invoice"?"Sending…":"Placing…");
+          if(placing) return payMethod==="card"?"Charging…":(payMethod==="invoice"?"Sending…":(_mobileIsFreight?"Sending estimate…":"Placing…"));
+          if(_mobileIsFreight) return "📨 Send for Estimate →";
           var label = payMethod==="card" ? "Charge & Place Order"
                     : payMethod==="invoice" ? "Send Invoice Link"
                     : "Place Order";
@@ -14607,6 +14852,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
 
 function MobileOrders({myOrders, customers, products, selectedOrderId, setSelectedOrderId, setOrders, currentUser, addToast}){
   const [filter, setFilter] = useState("all");
+  // Finish-order modal target (for freight orders after admin quotes)
+  const [finishTarget, setFinishTarget] = useState(null);
 
   var filtered = myOrders.slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);});
   if(filter==="open") filtered = filtered.filter(function(o){return !o.paid && o.status!=="Paid" && o.status!=="Delivered" && o.status!=="Cancelled" && o.status!=="Refunded";});
@@ -14788,6 +15035,84 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
 
   return (
     <div>
+      {/* Pending Your Action — mobile freight surface */}
+      {(function(){
+        var pending = myOrders.filter(function(o){
+          if(o.status==="Awaiting Freight Quote") return true;
+          if(o.status==="Quoted" && !o.invoiceSentAt && !freightQuoteExpired(o)) return true;
+          return false;
+        });
+        if(!pending.length) return null;
+        return (
+          <div style={{marginBottom:16}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <span style={{fontSize:14,fontWeight:800,color:C.text}}>📋 Pending Your Action</span>
+              <span style={{padding:"2px 8px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>{pending.length}</span>
+            </div>
+            {pending.map(function(o){
+              var ready = o.status==="Quoted" && !o.invoiceSentAt;
+              var fq = o.freightQuote || {};
+              var fd = o.freightDetails || {};
+              return (
+                <div key={o.id} style={{
+                  padding:14,
+                  background: ready ? C.success+"08" : C.surface,
+                  borderLeft: "4px solid "+(ready?C.success:C.warning),
+                  border: "1px solid "+C.border,
+                  borderLeftWidth: 4,
+                  borderRadius:10,
+                  marginBottom:8
+                }}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <span style={{fontWeight:700,fontSize:13,color:C.text}}>{ready?"🟢":"🟡"} {o.id}</span>
+                    {ready && <span style={{padding:"1px 7px",borderRadius:20,background:C.success+"20",color:C.success,fontSize:10,fontWeight:700}}>Ready</span>}
+                  </div>
+                  <div style={{fontWeight:600,fontSize:13,color:C.text,marginBottom:6}}>{o.custName||"—"}</div>
+                  {ready ? (
+                    <div style={{fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:10}}>
+                      ✓ <strong style={{color:C.text}}>{fq.carrier||"LTL"}</strong> · ${(fq.freightCost||0).toFixed(2)} freight · total <strong style={{color:C.accent}}>${((o.totals&&o.totals.grand)||0).toFixed(2)}</strong>
+                      {fq.expiresAt && <div style={{color:C.warning,marginTop:2}}>⏱ Expires {new Date(fq.expiresAt).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>}
+                    </div>
+                  ) : (
+                    <div style={{fontSize:11,color:C.muted,lineHeight:1.6}}>
+                      Awaiting admin freight quote · {fmtDate(o.createdAt)}
+                      <div>{(fd.pallets||"?")} pallet{(fd.pallets===1)?"":"s"} · {fd.totalWeight||0} lbs · subtotal ${((o.totals&&o.totals.subtotal)||0).toFixed(2)}</div>
+                    </div>
+                  )}
+                  {ready ? (
+                    <button onClick={function(){setFinishTarget(o);}}
+                      style={{width:"100%",padding:"12px",background:C.accent,border:"none",borderRadius:10,fontSize:14,fontWeight:700,color:"#fff",fontFamily:"inherit",cursor:"pointer"}}>
+                      📨 Continue & Send Invoice →
+                    </button>
+                  ) : (
+                    <button onClick={function(){setSelectedOrderId(o.id);}}
+                      style={{width:"100%",padding:"10px",background:"none",border:"1px solid "+C.border,borderRadius:10,fontSize:12,fontWeight:600,color:C.muted,fontFamily:"inherit",cursor:"pointer"}}>
+                      View Details
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
+      {/* Finish-Order modal (shared component) */}
+      {finishTarget && (
+        <FinishFreightOrderModal
+          order={finishTarget}
+          customer={(customers||[]).find(function(c){return c.id===finishTarget.custId;})||{}}
+          repName={(currentUser&&currentUser.name)||"Rep"}
+          onFinish={function(updated){
+            setOrders(function(prev){return prev.map(function(x){return x.id===updated.id?updated:x;});});
+            dbSave("crm_orders",updated.id,updated);
+            setFinishTarget(null);
+            addToast("Order finalized","success");
+          }}
+          onClose={function(){setFinishTarget(null);}}
+          addToast={addToast}/>
+      )}
+
       <div style={{display:"flex",gap:6,marginBottom:14,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
         {[{id:"all",label:"All"},{id:"open",label:"Open"},{id:"paid",label:"Paid"},{id:"shipped",label:"Shipped"}].map(function(f){
           var sel = filter===f.id;
@@ -14995,7 +15320,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v46-quotes-freight
+        BUILD: 2026-05-30-v47-pending-action
       </div>
     </div>
   );
