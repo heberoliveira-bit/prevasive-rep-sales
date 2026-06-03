@@ -9776,6 +9776,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [discApplied,setDiscApplied]= useState(null);
   const [discErr,    setDiscErr]    = useState("");
   const [shippingOverride,setShippingOverride] = useState(null);
+  // How shippingOverride got its value — informs the label below the input
+  // null  | "manual" (rep typed) | "rule" (shipping-rule auto-applied) | "rate" (rep picked from rate picker)
+  const [shippingOverrideSource, setShippingOverrideSource] = useState(null);
   var selRateArr = useState(null); var selectedRate = selRateArr[0]; var setSelectedRate = selRateArr[1];
   // Freight (LTL) state — populated when the order qualifies for freight shipping.
   const [forceFreight,    setForceFreight]    = useState(false);
@@ -10845,7 +10848,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           return dom?{pkgDimL:dom.l,pkgDimW:dom.wd,pkgDimH:dom.h}:{};
                         })()}
                         selected={selectedRate}
-                        onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);}}/>
+                        onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);setShippingOverrideSource("rate");}}/>
                     </div>
                   );
                 })()}
@@ -10870,6 +10873,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                             return (
                               <div key={r.id} onClick={function(){
                                 setShippingOverride(r.type==="pickup"||r.type==="free"?0:(r.rate||0));
+                                setShippingOverrideSource("rule");
                               }} style={{padding:"10px 14px",borderRadius:8,fontSize:12,marginBottom:6,cursor:"pointer",
                                 display:"flex",justifyContent:"space-between",alignItems:"center",
                                 background:isSel?C.accent+"12":C.surface2,
@@ -10894,13 +10898,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           <span style={{fontSize:12,color:C.dim}}>$</span>
                           <input type="number" min="0" step="0.01"
                             value={shippingOverride!==null?shippingOverride:totals.shipping}
-                            onChange={function(e){setShippingOverride(e.target.value);}}
+                            onChange={function(e){setShippingOverride(e.target.value);setShippingOverrideSource("manual");}}
                             placeholder={String(totals.shipping)}
                             style={{flex:1,background:"none",border:"none",color:C.text,fontSize:13,
                                     fontFamily:"monospace",outline:"none"}}/>
                         </div>
                         {shippingOverride!==null&&(
-                          <button onClick={function(){setShippingOverride(null);}}
+                          <button onClick={function(){setShippingOverride(null);setShippingOverrideSource(null);}}
                             style={{padding:"7px 10px",borderRadius:7,border:"1px solid "+C.border,
                                     background:"none",color:C.accent,cursor:"pointer",
                                     fontFamily:"inherit",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
@@ -10908,9 +10912,19 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           </button>
                         )}
                       </div>
-                      {shippingOverride!==null&&(
+                      {shippingOverride!==null && shippingOverrideSource==="manual" && (
                         <div style={{fontSize:10,color:C.accent,marginTop:4}}>
-                          ✎ Manual override — click Auto to restore rule-based rate
+                          ✎ Manual override — click Auto to clear
+                        </div>
+                      )}
+                      {shippingOverride!==null && shippingOverrideSource==="rule" && (
+                        <div style={{fontSize:10,color:C.muted,marginTop:4}}>
+                          ⚙ Rule-based rate auto-applied — click Auto to clear, or type to override
+                        </div>
+                      )}
+                      {shippingOverride!==null && shippingOverrideSource==="rate" && (
+                        <div style={{fontSize:10,color:C.muted,marginTop:4}}>
+                          📦 Selected live rate — click Auto to clear, or type to override
                         </div>
                       )}
                       {shippingOverride===null&&autoRule&&autoRule.rate===0&&(
