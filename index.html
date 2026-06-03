@@ -9225,9 +9225,19 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                     <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Weight ≥</div>
                     <div style={{display:"flex",alignItems:"center",gap:6}}>
                       <input type="number" defaultValue={fcfg.thresholds.weightLbs} min="0" step="50"
-                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||500})}));}}
+                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||300})}));}}
                         style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
                       <span style={{color:C.muted,fontSize:11}}>lbs</span>
+                      <button onClick={function(){
+                        var fresh=Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:300, maxParcelUnits:0, volumeCuFt:10, dollarValue:2500})});
+                        saveFreightCfg(fresh);
+                        addToast("Freight threshold reset to default 300 lbs","success");
+                        setTimeout(function(){location.reload();},400);
+                      }}
+                        title="Reset to default 300 lbs"
+                        style={{padding:"7px 9px",borderRadius:7,border:"1px solid "+C.border,background:"none",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+                        ↺ Reset
+                      </button>
                     </div>
                   </div>
                   <div style={{fontSize:10,color:C.dim,marginTop:10,lineHeight:1.6}}>
