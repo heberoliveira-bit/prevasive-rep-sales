@@ -16474,6 +16474,12 @@ function App() {
   },[]);
 
   // Publish shared settings whenever an admin changes them (never from rep/customer sessions).
+  // Guards against the load→publish echo loop: each effect run JSON.stringifies the row and only
+  // writes when the content has actually changed from the last write. Without this, the load
+  // effect's setters above trigger a publish on first render with stale localStorage state, then
+  // the loaded values trigger a second publish 70-100ms later — visible as duplicate UPDATE
+  // events in the realtime log on every page load.
+  var publicSettingsLastWritten = useRef(null);
   useEffect(function(){
     if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
     var sb=getSB(); if(!sb) return;
@@ -16492,6 +16498,10 @@ function App() {
                 } : null,
                 shippingRules: Array.isArray(shippingRules) ? shippingRules : [],
                 twoFAEnabled: !!twoFAEnabled };
+    var serialized;
+    try{ serialized = JSON.stringify(row); }catch(e){ return; }
+    if(serialized === publicSettingsLastWritten.current) return; // no actual change — skip the write
+    publicSettingsLastWritten.current = serialized;
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
   },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
@@ -16605,8 +16615,8 @@ function App() {
       var ch = sbS.channel("rt_crm_settings_"+Math.random().toString(36).slice(2,8))
         .on("postgres_changes", {event:"*", schema:"public", table:"crm_settings"}, function(payload){
           try{
-            try{ console.info("[realtime] ⚡ crm_settings "+(payload.eventType||payload.type), payload); }catch(e){}
             var row = payload.new || payload.old || {};
+            try{ console.info("[realtime] ⚡ crm_settings "+(payload.eventType||payload.type)+" id="+row.id, payload); }catch(e){}
             var key = SETTINGS_KEY_MAP[row.id];
             if(key && row.data) {
               try{ localStorage.setItem(key, JSON.stringify(row.data)); }catch(e){}
