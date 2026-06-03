@@ -9997,6 +9997,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   var selCust = customers.find(function(c2){return c2.id===custId;})||null;
 
   function calcShipping(subtotal) {
+    // Freight: shipping cost is TBD until admin enters the carrier rate, so totals show $0
+    var _customer = selCust||(newCust?{}:null);
+    var _qualifies = isOrderFreight(items, products, _customer, subtotal);
+    var _locked = _qualifies && isOrderFreightLocked(items, products, _customer);
+    var _isFreightMode = (shippingChoice === "freight") || (shippingChoice == null && _locked);
+    if(_isFreightMode) return 0;
+
     if(shippingOverride!==null) return parseFloat(shippingOverride)||0;
     if(!shippingRules||!shippingRules.length) return 0;
     var active = (shippingRules||[]).filter(function(r){return r.active!==false;})
@@ -11236,33 +11243,61 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
 
 
-              {/* Invoice auto-send for net terms */}
               {(function(){
-                var isNet = selCust&&selCust.termsStatus==="active"&&selCust.termsType&&selCust.termsType!=="due_receipt";
-                return isNet ? (
-                  <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:12}}>
-                    <div style={{fontWeight:700,fontSize:12,color:C.accent,marginBottom:6}}>📧 Invoice Ready to Send</div>
-                    <div style={{fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:8}}>
-                      Customer has approved <strong style={{color:C.text}}>{fmtTerms(selCust.termsType)}</strong> terms. 
-                      After placing, you can send the invoice with a payment link directly to <strong style={{color:C.text}}>{selCust.email||"customer"}</strong>.
+                // Determine effective shipping choice for Step 3 context-aware rendering
+                var _cust = selCust||(newCust?{}:null);
+                var _qual = isOrderFreight(items, products, _cust, totals.grand);
+                var _lock = _qual && isOrderFreightLocked(items, products, _cust);
+                var _isFreightStep3 = (shippingChoice === "freight") || (shippingChoice == null && _qual && _lock);
+                if(_isFreightStep3) {
+                  // Freight workflow: no invoice yet, no payment terms to confirm.
+                  // Admin quotes the carrier, then rep finalizes via the "Pending Your Action" surface.
+                  return (
+                    <div style={{padding:"12px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"35",borderRadius:8,marginBottom:12}}>
+                      <div style={{fontWeight:700,fontSize:12,color:C.warning,marginBottom:6}}>🚛 Freight quote will be requested</div>
+                      <div style={{fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:10}}>
+                        The customer is <strong style={{color:C.text}}>not invoiced yet</strong>. After you submit, admin will quote the carrier rate (typically within {(getFreightCfg().quoteExpiryHours||24)}h). You'll be notified when it's ready, then you finish the order from <strong style={{color:C.text}}>Orders → 📋 Pending Your Action</strong> and send the invoice to the customer.
+                      </div>
+                      <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                        <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{accentColor:C.accent}}/>
+                        I confirm and want to send for freight estimate
+                      </label>
                     </div>
-                    <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
-                      <input type="checkbox" checked={sendInvAuto} onChange={function(e){setSendInvAuto(e.target.checked);}} style={{accentColor:C.accent}}/>
-                      Show invoice send dialog after placing order
-                    </label>
-                  </div>
-                ) : null;
+                  );
+                }
+                // Parcel workflow (existing UI): net-terms invoice prompt + confirm checkboxes
+                return (
+                  <React.Fragment>
+                    {/* Invoice auto-send for net terms */}
+                    {(function(){
+                      var isNet = selCust&&selCust.termsStatus==="active"&&selCust.termsType&&selCust.termsType!=="due_receipt";
+                      return isNet ? (
+                        <div style={{padding:"10px 14px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:8,marginBottom:12}}>
+                          <div style={{fontWeight:700,fontSize:12,color:C.accent,marginBottom:6}}>📧 Invoice Ready to Send</div>
+                          <div style={{fontSize:11,color:C.muted,lineHeight:1.6,marginBottom:8}}>
+                            Customer has approved <strong style={{color:C.text}}>{fmtTerms(selCust.termsType)}</strong> terms.
+                            After placing, you can send the invoice with a payment link directly to <strong style={{color:C.text}}>{selCust.email||"customer"}</strong>.
+                          </div>
+                          <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                            <input type="checkbox" checked={sendInvAuto} onChange={function(e){setSendInvAuto(e.target.checked);}} style={{accentColor:C.accent}}/>
+                            Show invoice send dialog after placing order
+                          </label>
+                        </div>
+                      ) : null;
+                    })()}
+                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                      <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                        <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{accentColor:C.accent}}/>
+                        I confirm this order and payment terms
+                      </label>
+                      <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
+                        <input type="checkbox" checked={sendConfirm} onChange={function(e){setSendConfirm(e.target.checked);}} style={{accentColor:C.accent}}/>
+                        Send confirmation email to customer
+                      </label>
+                    </div>
+                  </React.Fragment>
+                );
               })()}
-              <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
-                  <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}} style={{accentColor:C.accent}}/>
-                  I confirm this order and payment terms
-                </label>
-                <label style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:C.muted,cursor:"pointer"}}>
-                  <input type="checkbox" checked={sendConfirm} onChange={function(e){setSendConfirm(e.target.checked);}} style={{accentColor:C.accent}}/>
-                  Send confirmation email to customer
-                </label>
-              </div>
             </div>
           )}
         </div>
