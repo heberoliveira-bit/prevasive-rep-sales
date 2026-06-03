@@ -138,18 +138,22 @@ function saveFreightCfg(cfg){
   try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:cfg, updated_at:new Date().toISOString()}).then(function(){}); }catch(e){}
 }
 
-/* Sum weight (lbs), volume (cu ft), unit count, and pallet count from line items. */
+/* Sum weight (lbs), volume (cu ft), unit count, and pallet count from line items.
+   Uses lineWeight() to honor per-variant weights when the parent product is unweighted. */
 function computeFreightSummary(items, products){
   var weight = 0, volumeCuIn = 0, pallets = 0, units = 0, freightLine = false, anyDimsKnown = false;
   (items||[]).forEach(function(it){
     if(!it.prodId || !it.qty) return;
     var p = (products||[]).find(function(px){return px.id===it.prodId;}) || {};
-    var dims = p.freightDimsLbs || p.shipDims || {};
-    var w = parseFloat(dims.weight || p.weight || 0) || 0;
+    var w = (typeof lineWeight==="function") ? lineWeight(p, it) : 0;
+    // Fallback: legacy callers that don't have lineWeight in scope
+    if(!w){ var dims=p.freightDimsLbs||p.shipDims||{}; w = parseFloat(dims.weight || p.weight || 0) || 0; }
     var q = parseFloat(it.qty)||0;
     weight += w * q;
     units  += q;
-    var L = parseFloat(dims.l||0)||0, W = parseFloat(dims.w||0)||0, H = parseFloat(dims.h||0)||0;
+    var L = (typeof lineDim==="function") ? lineDim(p, it, "dimL") : 0;
+    var W = (typeof lineDim==="function") ? lineDim(p, it, "dimW") : 0;
+    var H = (typeof lineDim==="function") ? lineDim(p, it, "dimH") : 0;
     if(L>0 && W>0 && H>0){ anyDimsKnown = true; volumeCuIn += L*W*H * q; }
     if(p.freightRequired) freightLine = true;
     if(p.unitsPerPallet && parseInt(p.unitsPerPallet,10) > 0){
@@ -686,7 +690,7 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
 
 
 /* ─── ShippingRatePicker ─────────────────────────────────────────── */
-function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgDimH, onSelect, selected, onSwitchToFreight}) {
+function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgDimH, onSelect, selected, onSwitchToFreight, packages}) {
   const [rates,    setRates]    = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
@@ -704,56 +708,101 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
     if(!rfn||!ss.warehouseZip) return;
     setLoading(true); setError(""); setFetched(toZip);
 
-    // Multi-package handling: UPS Ground caps single parcels at 150 lbs. For heavy
-    // orders we split into N boxes ≤ 140 lbs each and aggregate rates per service.
-    var MAX_LBS_PER_PKG = 140;
-    var MAX_PACKAGES = 10; // ~1,400 lbs ceiling; anything heavier should be freight
-    var totalW = parseFloat(totalWeight||ss.defaultWeight)||1;
-    var numPackages = totalW > MAX_LBS_PER_PKG ? Math.min(MAX_PACKAGES, Math.ceil(totalW / MAX_LBS_PER_PKG)) : 1;
-    var weightPerPkg = Math.round((totalW / numPackages) * 100) / 100;
-
     var carrierCodes = ss.carrierFilter ? ss.carrierFilter.split(",").map(function(x){return x.trim();}).filter(Boolean) : null;
+
+    // ─── Path 1: per-line packages supplied (preferred) ─────────────────
+    // Each line item becomes ONE rate request (with that item's per-unit weight/dim);
+    // returned rates get multiplied by the line's qty and summed across all lines per service.
+    // For 10 cases × 37 lbs each: send 1 request weight=37, multiply rates ×10.
+    if(packages && packages.length > 0) {
+      var totalPkgCount = packages.reduce(function(s, p){return s + (p.qty||0);}, 0);
+      // If everything is one box of one unit, fall through to single-package path
+      if(totalPkgCount > 1) {
+        var requests = packages.map(function(line){
+          return fetch(rfn,{
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({
+              apiKey:ss.apiKey, apiSecret:ss.apiSecret,
+              fromZip:ss.warehouseZip,
+              toZip:toZip, toState:toState||"",
+              weight: line.weight,
+              weightUnit:ss.weightUnit||"pounds",
+              dimL: parseFloat(line.dimL)||parseFloat(ss.dimL||ss.defaultL)||12,
+              dimW: parseFloat(line.dimW)||parseFloat(ss.dimW||ss.defaultW)||10,
+              dimH: parseFloat(line.dimH)||parseFloat(ss.dimH||ss.defaultH)||6,
+              carrierCodes: carrierCodes,
+            }),
+          }).then(function(r){return r.json();})
+           .then(function(d){return {response:d, qty:line.qty, weight:line.weight};})
+           .catch(function(e){return {response:{ok:false,error:"Could not reach shipping server: "+e.message}, qty:line.qty, weight:line.weight};});
+        });
+
+        Promise.all(requests).then(function(results){
+          setLoading(false);
+          var first = (results[0]&&results[0].response) || {};
+          setDebug(Object.assign({}, first, {packageCount: totalPkgCount, lineCount: packages.length}));
+
+          // If every line failed, surface the error
+          var allFailed = results.every(function(r){return !r.response || !r.response.ok;});
+          if(allFailed){
+            var firstErr = (results[0] && results[0].response && results[0].response.error) || "Failed to get rates";
+            setError(firstErr);
+            return;
+          }
+
+          // Aggregate per carrier|service across lines. Each line's rate × line.qty.
+          // Only services that returned for every line survive.
+          var byKey = {};
+          results.forEach(function(r){
+            if(!r.response || !r.response.ok || !Array.isArray(r.response.rates)) return;
+            // Dedupe within a single line's response by service+cost
+            var seenInLine = {};
+            r.response.rates.forEach(function(rate){
+              var lk = (rate.serviceCode||"")+"_"+rate.shipmentCost;
+              if(seenInLine[lk]) return; seenInLine[lk] = true;
+              var key = (rate.carrierCode||"")+"|"+(rate.serviceCode||"");
+              if(!byKey[key]) byKey[key] = Object.assign({}, rate, {shipmentCost: 0, linesReturned: 0});
+              byKey[key].shipmentCost += (rate.shipmentCost || 0) * r.qty;
+              byKey[key].linesReturned += 1;
+            });
+          });
+          var combined = Object.keys(byKey).map(function(k){return byKey[k];})
+            .filter(function(rate){return rate.linesReturned === packages.length;})
+            .map(function(rate){
+              return Object.assign({}, rate, {
+                packageCount: totalPkgCount,
+                // Show the dominant-line weight as the per-box label (not the avg, which would mislead in mixed orders)
+                weightPerPackage: packages.length === 1 ? packages[0].weight : Math.round((packages.reduce(function(s,p){return s+p.weight*p.qty;},0)/totalPkgCount)*10)/10,
+              });
+            });
+          combined.sort(function(a,b){return (a.shipmentCost||0) - (b.shipmentCost||0);});
+          setRates(combined);
+          if(combined.length>0 && !selected) onSelect(combined[0]);
+        });
+        return; // multi-package path complete
+      }
+    }
+
+    // ─── Path 2: single-package fallback (no packages prop, or only 1 unit total) ───
+    var totalW = parseFloat(totalWeight||ss.defaultWeight)||1;
     var dimL = parseFloat(pkgDimL)||parseFloat(ss.dimL||ss.defaultL)||12;
     var dimW = parseFloat(pkgDimW)||parseFloat(ss.dimW||ss.defaultW)||10;
     var dimH = parseFloat(pkgDimH)||parseFloat(ss.dimH||ss.defaultH)||6;
-
-    function fetchPkg(){
-      return fetch(rfn,{
-        method:"POST", headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          apiKey:ss.apiKey, apiSecret:ss.apiSecret,
-          fromZip:ss.warehouseZip,
-          toZip:toZip, toState:toState||"",
-          weight: weightPerPkg,
-          weightUnit:ss.weightUnit||"pounds",
-          dimL: dimL, dimW: dimW, dimH: dimH,
-          carrierCodes: carrierCodes,
-        }),
-      }).then(function(r){return r.json();})
-       .catch(function(e){return {ok:false, error:"Could not reach shipping server: "+e.message};});
-    }
-
-    var requests = [];
-    for(var i=0; i<numPackages; i++) requests.push(fetchPkg());
-
-    Promise.all(requests).then(function(responses){
+    fetch(rfn,{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        apiKey:ss.apiKey, apiSecret:ss.apiSecret,
+        fromZip:ss.warehouseZip,
+        toZip:toZip, toState:toState||"",
+        weight: totalW, weightUnit:ss.weightUnit||"pounds",
+        dimL: dimL, dimW: dimW, dimH: dimH,
+        carrierCodes: carrierCodes,
+      }),
+    }).then(function(r){return r.json();}).then(function(d){
       setLoading(false);
-      // Use the first response for debug/error display
-      var first = responses[0] || {};
-      setDebug(Object.assign({}, first, {numPackages: numPackages, weightPerPkg: weightPerPkg}));
-
-      // Any total failure
-      var failed = responses.filter(function(d){return !d || !d.ok;});
-      if(failed.length === numPackages) {
-        var err = (failed[0] && failed[0].error) || "Failed to get rates";
-        setError(err);
-        return;
-      }
-
-      if(numPackages === 1) {
-        // Single-package path: existing behavior, dedupe by service+cost
-        var d = responses[0];
-        var allRates = (d && d.rates) || [];
+      setDebug(d);
+      if(d.ok){
+        var allRates = d.rates||[];
         var seen = {};
         var deduped = allRates.filter(function(r){
           var key = r.serviceCode+"_"+r.shipmentCost;
@@ -763,39 +812,8 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
         });
         setRates(deduped);
         if(deduped.length>0 && !selected) onSelect(deduped[0]);
-        return;
-      }
-
-      // Multi-package: aggregate by carrier|service. Only keep services that
-      // returned a rate for ALL N packages (otherwise we can't quote it cleanly).
-      var byKey = {};
-      responses.forEach(function(d){
-        if(!d || !d.ok || !Array.isArray(d.rates)) return;
-        // Dedupe within a single package response first
-        var seenInPkg = {};
-        d.rates.forEach(function(r){
-          var k = r.serviceCode+"_"+r.shipmentCost;
-          if(seenInPkg[k]) return; seenInPkg[k] = true;
-          var key = (r.carrierCode||"")+"|"+(r.serviceCode||"");
-          if(!byKey[key]) byKey[key] = Object.assign({}, r, {shipmentCost: 0, packagesReturned: 0});
-          byKey[key].shipmentCost += (r.shipmentCost || 0);
-          byKey[key].packagesReturned += 1;
-        });
-      });
-      var combined = Object.keys(byKey).map(function(k){return byKey[k];})
-        .filter(function(r){return r.packagesReturned === numPackages;})
-        .map(function(r){
-          return Object.assign({}, r, {
-            packageCount: numPackages,
-            weightPerPackage: weightPerPkg,
-            // The displayed cost stays raw; the picker UI shows "× N packages" inline
-          });
-        });
-      // Sort cheapest first
-      combined.sort(function(a,b){return (a.shipmentCost||0) - (b.shipmentCost||0);});
-      setRates(combined);
-      if(combined.length>0 && !selected) onSelect(combined[0]);
-    });
+      } else { setError(d.error||"Failed to get rates"); }
+    }).catch(function(e){setLoading(false);setError("Could not reach shipping server: "+e.message);});
   }, [toZip]);
 
   if(loading) return (
@@ -951,6 +969,28 @@ function lineSku(p, it){ var v=prodVariant(p,it); return (v&&v.sku)?v.sku:((p&&p
 function lineLabel(p, it){ var v=prodVariant(p,it); return (p?p.name:"")+(v?(" — "+v.name):""); }
 // Per-line shipping packing: variant overrides product when set.
 function lineWeight(p, it){ var v=prodVariant(p,it); if(v&&v.weight!=null&&v.weight!=="") return parseFloat(v.weight)||0; return (p&&p.weight)?(parseFloat(p.weight)||0):0; }
+
+/* Build a list of per-line shipping packages from order items. Each entry represents
+   one product line — sent as a single rate request whose result is then multiplied
+   by qty. This handles multi-piece UPS shipments (10 cases × 37 lbs each = 10 boxes)
+   without the rate request ever exceeding UPS's 150 lb per-package limit. */
+function computeShippingPackages(items, products) {
+  var pkgs = [];
+  (items||[]).forEach(function(it){
+    if(!it.prodId || !it.qty) return;
+    var p = (products||[]).find(function(px){return px.id===it.prodId;});
+    if(!p) return;
+    var w = lineWeight(p, it);
+    var L = (typeof lineDim==="function") ? lineDim(p, it, "dimL") : 0;
+    var W = (typeof lineDim==="function") ? lineDim(p, it, "dimW") : 0;
+    var H = (typeof lineDim==="function") ? lineDim(p, it, "dimH") : 0;
+    var q = parseFloat(it.qty)||0;
+    if(w > 0 && q > 0) {
+      pkgs.push({ weight: w, qty: q, dimL: L||null, dimW: W||null, dimH: H||null });
+    }
+  });
+  return pkgs;
+}
 function lineDim(p, it, k){ var v=prodVariant(p,it); if(v&&v[k]!=null&&v[k]!=="") return parseFloat(v[k])||0; return (p&&p[k])?(parseFloat(p[k])||0):0; }
 // Display price for a product: a range when variants are priced differently, else a single price.
 function priceRange(p){
@@ -5502,6 +5542,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                             <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Shipping to {toZip}</div>
                             <ShippingRatePicker toZip={toZip} toState={toState}
                               totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products.find(function(px){return px.id===it.prodId;});var w=p?lineWeight(p,it):0;return s+((w||1)*it.qty);},0)||1;})()}
+                              packages={computeShippingPackages(items, products)}
                               {...(function(){
                                 var dom=null,domW=-1;
                                 items.filter(function(it){return it.prodId;}).forEach(function(it){var p=products.find(function(px){return px.id===it.prodId;});if(!p)return;var w=lineWeight(p,it)*it.qty;if(w>domW){domW=w;dom={l:lineDim(p,it,"dimL"),wd:lineDim(p,it,"dimW"),h:lineDim(p,it,"dimH")};}});
@@ -5532,6 +5573,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                     <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Shipping to {toZip}</div>
                     <ShippingRatePicker toZip={toZip} toState={toState}
                       totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products.find(function(px){return px.id===it.prodId;});var w=p?lineWeight(p,it):0;return s+((w||1)*it.qty);},0)||1;})()}
+                      packages={computeShippingPackages(items, products)}
                       {...(function(){
                         var dom=null,domW=-1;
                         items.filter(function(it){return it.prodId;}).forEach(function(it){var p=products.find(function(px){return px.id===it.prodId;});if(!p)return;var w=lineWeight(p,it)*it.qty;if(w>domW){domW=w;dom={l:lineDim(p,it,"dimL"),wd:lineDim(p,it,"dimW"),h:lineDim(p,it,"dimH")};}});
@@ -10940,6 +10982,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                       <div style={{fontSize:10,color:C.muted,marginBottom:6}}>Live carrier rates to {shipAddr.zip}:</div>
                       <ShippingRatePicker toZip={shipAddr.zip} toState={shipAddr.state}
                         totalWeight={(function(){return items.filter(function(it){return it.prodId;}).reduce(function(s,it){var p=products&&products.find(function(px){return px.id===it.prodId;});var w=p?lineWeight(p,it):0;return s+((w||1)*it.qty);},0)||1;})()}
+                        packages={computeShippingPackages(items, products)}
                         {...(function(){
                           var dom=null,domW=-1;
                           items.filter(function(it){return it.prodId;}).forEach(function(it){var p=products&&products.find(function(px){return px.id===it.prodId;});if(!p)return;var w=lineWeight(p,it)*it.qty;if(w>domW){domW=w;dom={l:lineDim(p,it,"dimL"),wd:lineDim(p,it,"dimW"),h:lineDim(p,it,"dimH")};}});
@@ -15026,6 +15069,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                         key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
                         toZip={shipAddr.zip} toState={shipAddr.state}
                         totalWeight={totalWeight}
+                        packages={computeShippingPackages(lines.map(function(l){return Object.assign({},l,{prodId:l.productId});}), products)}
                         pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
                         onSelect={setSelectedRate}
                         selected={selectedRate}/>
@@ -15055,6 +15099,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                   key={"rp-"+shipAddr.zip+"-"+Math.round(totalWeight*100)}
                   toZip={shipAddr.zip} toState={shipAddr.state}
                   totalWeight={totalWeight}
+                  packages={computeShippingPackages(lines.map(function(l){return Object.assign({},l,{prodId:l.productId});}), products)}
                   pkgDimL={pkgDimL} pkgDimW={pkgDimW} pkgDimH={pkgDimH}
                   onSelect={setSelectedRate}
                   selected={selectedRate}/>
