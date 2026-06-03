@@ -120,9 +120,16 @@ function getFreightCfg(){
     // Migration: prior defaults were 150 then 500 lbs. Current default is 300.
     // If the cached value matches one of those legacy defaults, normalize to 300.
     // Anything else (a real custom value picked by an admin) is left alone.
-    if(merged.thresholds.weightLbs === 150) merged.thresholds.weightLbs = 300;
-    if(merged.thresholds.weightLbs === 500) merged.thresholds.weightLbs = 300;
-    if(merged.thresholds.maxParcelUnits === 5) merged.thresholds.maxParcelUnits = 0;
+    var migrated = false;
+    if(merged.thresholds.weightLbs === 150) { merged.thresholds.weightLbs = 300; migrated = true; }
+    if(merged.thresholds.weightLbs === 500) { merged.thresholds.weightLbs = 300; migrated = true; }
+    if(merged.thresholds.maxParcelUnits === 5) { merged.thresholds.maxParcelUnits = 0; migrated = true; }
+    if(migrated) {
+      // Persist the migrated value so settings UI and other readers see it,
+      // and so we don't keep re-migrating on every getter call.
+      try{ localStorage.setItem("__pv__freightCfg", JSON.stringify(merged)); }catch(e){}
+      try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:merged, updated_at:new Date().toISOString()}).then(function(){}); }catch(e){}
+    }
     return merged;
   }catch(e){ return DEFAULT_FREIGHT_CFG; }
 }
