@@ -9945,23 +9945,23 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   }
   function step2Valid() {
     if(!items.some(function(it){return it.prodId;})) return false;
-    // If live carrier rates are available (ShipStation configured + ship zip), a rate must be picked
-    try{
-      var ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");
-      var hasShipZip=(selCust&&((selCust.addresses&&selCust.addresses.length>0)||(selCust.address&&selCust.address.trim())))||(newCust&&custZip.trim());
-      if(ss&&(ss.ratesFnUrl||ss.edgeFnUrl)&&hasShipZip&&!selectedRate) return false;
-    }catch(e){}
+    // Freight is the chosen mode? No rate needed — admin will quote the carrier
+    var _customer = selCust||(newCust?{}:null);
+    var _qualifies = isOrderFreight(items, products, _customer, calcTotals().grand);
+    var _locked = _qualifies && isOrderFreightLocked(items, products, _customer);
+    var _effective = !_qualifies ? "parcel" : (shippingChoice || (_locked ? "freight" : "parcel"));
+    if(_effective === "freight") return true;
+    // Parcel: passes if a rate was picked OR the rep set a manual value (even $0)
+    if(selectedRate) return true;
+    if(shippingOverride !== null) return true;
+    // Otherwise let them proceed — TBD shows on the Confirm screen so they see it,
+    // and reps may legitimately ship free or get rates outside the app.
     return true;
   }
 
   function step2Errors() {
     var errs=[];
     if(!items.some(function(it){return it.prodId;})) errs.push("Add at least one product");
-    try{
-      var ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"null");
-      var hasShipZip=(selCust&&((selCust.addresses&&selCust.addresses.length>0)||(selCust.address&&selCust.address.trim())))||(newCust&&custZip.trim());
-      if(ss&&(ss.ratesFnUrl||ss.edgeFnUrl)&&hasShipZip&&!selectedRate) errs.push("Select a shipping rate before continuing");
-    }catch(e){}
     return errs;
   }
 
