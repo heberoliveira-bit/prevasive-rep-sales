@@ -113,10 +113,17 @@ function getFreightCfg(){
     var raw = localStorage.getItem("__pv__freightCfg");
     if(!raw) return DEFAULT_FREIGHT_CFG;
     var p = JSON.parse(raw);
-    return Object.assign({}, DEFAULT_FREIGHT_CFG, p, {
+    var merged = Object.assign({}, DEFAULT_FREIGHT_CFG, p, {
       thresholds: Object.assign({}, DEFAULT_FREIGHT_CFG.thresholds, p.thresholds||{}),
       carriers: (p.carriers && p.carriers.length) ? p.carriers : DEFAULT_FREIGHT_CFG.carriers,
     });
+    // Migration: earlier builds defaulted to weightLbs=150 and maxParcelUnits=5.
+    // Newer policy is 500 lbs / no unit cap. If the user still has the previous
+    // defaults cached, normalize them so they don't keep triggering freight on
+    // small orders. Custom non-default values are left alone.
+    if(merged.thresholds.weightLbs === 150) merged.thresholds.weightLbs = 500;
+    if(merged.thresholds.maxParcelUnits === 5) merged.thresholds.maxParcelUnits = 0;
+    return merged;
   }catch(e){ return DEFAULT_FREIGHT_CFG; }
 }
 function saveFreightCfg(cfg){
@@ -180,7 +187,7 @@ function freightTriggerReasons(items, products, customer, orderGrand){
     });
     reasons.push("Product"+(freighters.length>1?"s":"")+" requires freight: "+freighters.join(", "));
   }
-  if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (over the "+cfg.thresholds.weightLbs+" lb parcel limit)");
+  if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (freight available above "+cfg.thresholds.weightLbs+" lbs)");
   return reasons;
 }
 
@@ -9217,7 +9224,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                     </div>
                   </div>
                   <div style={{fontSize:10,color:C.dim,marginTop:10,lineHeight:1.6}}>
-                    When the order's total weight is at or above this, the freight option becomes the default (rep can still switch to parcel). Also routes to freight when any product has "always ships freight" flagged or a customer has "force freight" enabled.
+                    At or above this weight, the rep is offered a freight-quote option (parcel stays the default — they can switch). Freight is forced (no parcel option) when any line-item product has "always ships freight" flagged or the customer has "force freight" enabled.
                   </div>
                 </div>
 
