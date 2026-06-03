@@ -102,7 +102,7 @@ var STATUS_COLOR = {
 
 /* ─── Freight (LTL) Helpers ─────────────────────────────────────────────── */
 var DEFAULT_FREIGHT_CFG = {
-  thresholds: { weightLbs: 500, volumeCuFt: 10, dollarValue: 2500, maxParcelUnits: 0 },
+  thresholds: { weightLbs: 300, volumeCuFt: 10, dollarValue: 2500, maxParcelUnits: 0 },
   carriers: ["SAIA","Estes","R+L Carriers","ABF","XPO","Old Dominion","Other"],
   quoteExpiryHours: 24,
   showFreightTagInShipStation: true,
@@ -117,11 +117,11 @@ function getFreightCfg(){
       thresholds: Object.assign({}, DEFAULT_FREIGHT_CFG.thresholds, p.thresholds||{}),
       carriers: (p.carriers && p.carriers.length) ? p.carriers : DEFAULT_FREIGHT_CFG.carriers,
     });
-    // Migration: earlier builds defaulted to weightLbs=150 and maxParcelUnits=5.
-    // Newer policy is 500 lbs / no unit cap. If the user still has the previous
-    // defaults cached, normalize them so they don't keep triggering freight on
-    // small orders. Custom non-default values are left alone.
-    if(merged.thresholds.weightLbs === 150) merged.thresholds.weightLbs = 500;
+    // Migration: prior defaults were 150 then 500 lbs. Current default is 300.
+    // If the cached value matches one of those legacy defaults, normalize to 300.
+    // Anything else (a real custom value picked by an admin) is left alone.
+    if(merged.thresholds.weightLbs === 150) merged.thresholds.weightLbs = 300;
+    if(merged.thresholds.weightLbs === 500) merged.thresholds.weightLbs = 300;
     if(merged.thresholds.maxParcelUnits === 5) merged.thresholds.maxParcelUnits = 0;
     return merged;
   }catch(e){ return DEFAULT_FREIGHT_CFG; }
@@ -742,19 +742,10 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
       <div style={{padding:"10px 14px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:10,fontSize:11,color:C.muted,lineHeight:1.5}}>
         <div style={{fontWeight:600,color:C.warning,marginBottom:4}}>No live rates returned</div>
         {tried
-          ? <div>Tried: {tried}. None returned a rate to {toZip}. <strong>This usually means the package exceeds the carrier's weight or size limits</strong> (UPS caps single parcels around 150 lbs / 165 in. of length + girth). Heavy or oversized orders should ship freight.</div>
+          ? <div>Tried: {tried}. None returned a rate to {toZip}. Check that those carriers are connected in ShipStation and that the package weight/dimensions are valid.</div>
           : <div>The rate function returned no carriers. Confirm ShipStation has at least one connected carrier, and that <code>SHIPSTATION_API_KEY</code> / <code>SHIPSTATION_API_SECRET</code> are set as Supabase function secrets (or admin's keys are filled in Settings → Shipping).</div>
         }
-        {onSwitchToFreight && (
-          <div style={{marginTop:8}}>
-            <button type="button" onClick={onSwitchToFreight}
-              style={{padding:"7px 12px",background:C.warning,color:"#fff",border:"none",borderRadius:7,fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer"}}>
-              🚛 Switch to freight quote →
-            </button>
-            <span style={{marginLeft:10,color:C.dim,fontSize:10}}>Or enter a manual shipping cost below.</span>
-          </div>
-        )}
-        {!onSwitchToFreight && <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>}
+        <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>
       </div>
     );
   }
