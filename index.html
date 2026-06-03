@@ -2186,7 +2186,7 @@ function AppLanding({onLogin}) {
                 <div style={{fontSize:18,fontWeight:700,marginBottom:5,color:C.text,letterSpacing:"-.02em"}}>Apply to join</div>
                 <div style={{fontSize:12,color:C.muted,marginBottom:20}}>Submit your information to apply as a sales rep.</div>
                 <ApplyForm onSubmit={function(data){
-                  var sb = window.supabase?window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY):null;
+                  var sb = getSB();
                   if(sb) {
                     var _appId="app_"+Date.now();
                     sb.from("crm_applications").insert({
@@ -14106,7 +14106,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v52-weight-only-triggers</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v53-single-sb-client</div>
       </div>
     </div>
   );
@@ -15565,7 +15565,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v52-weight-only-triggers
+        BUILD: 2026-05-30-v53-single-sb-client
       </div>
     </div>
   );
