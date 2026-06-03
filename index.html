@@ -4807,6 +4807,73 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
 
 </script>
 <script id="c6" type="text/plain">
+/* ─── Rep Legal Wall Modal ───────────────────────────────────────────────
+   Blocking modal shown when an already-onboarded rep has outdated/missing
+   signatures for active required documents. Cannot be dismissed via close
+   button, escape, or click-outside. Only paths: sign each doc, or sign out. */
+function RepLegalWallModal({pendingDocs, repId, repName, onSign, onSignOut}){
+  const [activeDoc, setActiveDoc] = useState(null);
+  if(!pendingDocs || pendingDocs.length===0) return null;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,0.92)",backdropFilter:"blur(10px)",
+                 zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",
+                 padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}
+         onClick={function(e){e.stopPropagation();}}>
+      <div style={{background:C.surface,border:"2px solid "+C.warning,borderRadius:14,
+                   width:"100%",maxWidth:580,maxHeight:"90vh",display:"flex",
+                   flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
+        <div style={{padding:"22px 24px 18px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+          <div style={{fontSize:10,fontWeight:800,color:C.warning,textTransform:"uppercase",letterSpacing:".1em",marginBottom:6}}>
+            📋 Action Required
+          </div>
+          <div style={{fontSize:18,fontWeight:800,color:C.text,letterSpacing:"-.01em"}}>
+            Updated legal document{pendingDocs.length===1?"":"s"} — please re-sign
+          </div>
+        </div>
+        <div style={{padding:"18px 24px",overflowY:"auto",flex:1}}>
+          <div style={{fontSize:13,color:C.muted,marginBottom:14,lineHeight:1.7}}>
+            We've updated {pendingDocs.length===1?"a legal document":"some legal documents"} that you'd previously signed.
+            You'll need to review and sign the latest version{pendingDocs.length===1?"":"s"} before continuing to use the app.
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {pendingDocs.map(function(d){
+              return (
+                <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",
+                                          background:C.bg,border:"1px solid "+C.border,borderRadius:10}}>
+                  <div style={{width:34,height:34,borderRadius:8,background:C.warning+"18",
+                               display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>📄</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{d.title} (v{d.version})</div>
+                    <div style={{fontSize:11,color:C.dim,marginTop:2}}>
+                      {d.previousVersion ? "Was v"+d.previousVersion+" · " : ""}Updated {fmtDate(d.publishedAt||d.lastModifiedAt)}
+                    </div>
+                  </div>
+                  <Btn small onClick={function(){setActiveDoc(d);}}>Review &amp; Sign →</Btn>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div style={{padding:"14px 24px",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+          <div style={{fontSize:11,color:C.dim,lineHeight:1.5}}>
+            Need to step away? You can sign out and return later.
+          </div>
+          <Btn variant="ghost" small onClick={onSignOut}>Sign out</Btn>
+        </div>
+      </div>
+
+      {activeDoc && (
+        <LegalDocSignModal doc={activeDoc} repId={repId} repName={repName}
+          onSign={function(){
+            onSign(activeDoc);
+            setActiveDoc(null);
+          }}
+          onDecline={function(){setActiveDoc(null);}}/>
+      )}
+    </div>
+  );
+}
+
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
   const [tab,      setTab]      = useState("docs");
   const [showForm, setShowForm] = useState(false);
@@ -4817,6 +4884,33 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
   const [version,  setVersion]  = useState("1.0");
   const [requires, setRequires] = useState(true);
   const [viewDoc,  setViewDoc]  = useState(null);
+  const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+
+  /* Bump "1.0" → "2.0", "2.5" → "3.0", "v1" → "v2". Always increments the major. */
+  function bumpVersion(v){
+    if(!v) return "2.0";
+    var m = String(v).match(/^v?(\d+)/);
+    if(!m) return v + " (revised)";
+    var nextMajor = parseInt(m[1],10) + 1;
+    var hasPrefix = String(v).charAt(0) === "v" || String(v).charAt(0) === "V";
+    return (hasPrefix ? "v" : "") + nextMajor + ".0";
+  }
+
+  function publishNewVersion(){
+    if(!editDoc) return;
+    var nextVer = bumpVersion(editDoc.version);
+    var data = {
+      id: editDoc.id, title: title.trim(), description: desc.trim(), content: content.trim(),
+      version: nextVer, requiresResign: requires, active: true,
+      publishedAt: new Date().toISOString(),
+      publishedBy: "Admin",
+      previousVersion: editDoc.version, // audit trail
+    };
+    setLegalDocs(function(prev){return prev.map(function(d){return d.id===editDoc.id?data:d;});});
+    dbSave("crm_legal_docs", editDoc.id, data);
+    addToast("📢 "+editDoc.title+" published as v"+nextVer+" — reps must re-sign","success");
+    setShowForm(false);
+  }
 
   var SAMPLE_TEMPLATES = {
     contractor: "INDEPENDENT CONTRACTOR AGREEMENT\n\nThis Independent Contractor Agreement is entered into between PreVasive USA (\"Company\") and the Sales Representative (\"Contractor\").\n\n1. SERVICES\nContractor agrees to sell Company products to medical and healthcare customers within their designated territory in compliance with all applicable federal and state laws, including FDA regulations, anti-kickback statutes, and any state-specific medical sales requirements.\n\n2. COMPENSATION\nContractor earns commission as a markup percentage applied to Company's base product prices. Commission accrues at order placement and is held from each order's shipping date until the applicable release period elapses:\n  • 15 days for card, invoice-link, and Due-on-Receipt payments\n  • 16 days for Net 15 terms\n  • 31 days for Net 30 terms\n  • 46 days for Net 45 terms\nCommission for orders that are Cancelled, Refunded, or Returned during the hold period is forfeited. Released commissions are paid via Stripe Connect to Contractor's registered account.\n\n3. INDEPENDENT CONTRACTOR STATUS\nContractor is an independent contractor, not an employee. Contractor is solely responsible for all federal, state, and local taxes; self-employment tax; insurance; and business expenses. A current IRS Form W-9 must remain on file with Company.\n\n4. CONFIDENTIALITY & NON-SOLICITATION\nContractor agrees to keep all Company information, pricing, customer data, and proprietary materials strictly confidential during and after this engagement. Contractor will not solicit Company customers on behalf of competing products during the term of this agreement or for 12 months following its termination.\n\n5. TERM & TERMINATION\nThis agreement continues until terminated by either party with 30 days written notice. Earned commissions for completed orders will continue to release per the standard hold schedule after termination. Company may terminate immediately for cause, including breach of confidentiality, fraud, regulatory violations, or material misrepresentation.\n\n6. GOVERNING LAW\nThis agreement is governed by the laws of the State of Georgia, USA. Any disputes will be resolved through binding arbitration in Atlanta, GA.",
@@ -4840,16 +4934,19 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
   function save() {
     if(!title.trim()) return;
     var id = editDoc?editDoc.id:genId("doc");
-    var isNewVersion = editDoc && version !== editDoc.version;
     var data = {id:id,title:title.trim(),description:desc.trim(),content:content.trim(),
-                version:version,requiresResign:requires,active:true,
-                publishedAt:new Date().toISOString(),
+                version: editDoc ? editDoc.version : version, // minor edits preserve version
+                requiresResign:requires, active:true,
+                publishedAt: editDoc ? (editDoc.publishedAt || new Date().toISOString()) : new Date().toISOString(),
+                lastModifiedAt: new Date().toISOString(),
                 publishedBy:"Admin"};
+    // Preserve audit trail fields on edits
+    if(editDoc && editDoc.previousVersion) data.previousVersion = editDoc.previousVersion;
     setLegalDocs(function(prev){
       return editDoc ? prev.map(function(d){return d.id===editDoc.id?data:d;}) : [data].concat(prev);
     });
     dbSave("crm_legal_docs",id,data);
-    addToast(editDoc?"Document updated"+(isNewVersion?" — reps must re-sign":""):"Document published","success");
+    addToast(editDoc?"Document updated":"Document published","success");
     setShowForm(false);
   }
 
@@ -4898,15 +4995,30 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
               </tr></thead>
               <tbody>
                 {legalDocs.map(function(doc){
-                  var sigs = signatures.filter(function(s){return s.docId===doc.id&&s.version===doc.version;});
-                  var activeReps = reps.filter(function(r){return r.status==="active";});
+                  var allSigsForDoc = signatures.filter(function(s){return s.docId===doc.id;});
+                  var currentSigs   = allSigsForDoc.filter(function(s){return s.version===doc.version;});
+                  var activeReps    = reps.filter(function(r){return r.status==="active";});
+                  // Outdated: rep has a signature for this doc but at an older version
+                  var outdatedSigs  = activeReps.filter(function(r){
+                    var mine = allSigsForDoc.filter(function(s){return s.repId===r.id;});
+                    if(mine.length===0) return false;
+                    return !mine.some(function(s){return s.version===doc.version;});
+                  });
+                  var unsignedReps  = activeReps.filter(function(r){
+                    return !allSigsForDoc.some(function(s){return s.repId===r.id;});
+                  });
                   return (
                     <tr key={doc.id} style={{borderTop:"1px solid "+C.border}}>
                       <td style={{padding:"10px 14px"}}>
                         <div style={{fontWeight:600,fontSize:13,color:C.text}}>{doc.title}</div>
                         {doc.description&&<div style={{fontSize:11,color:C.dim,marginTop:1}}>{doc.description.slice(0,50)}</div>}
                       </td>
-                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.accent}}>v{doc.version}</td>
+                      <td style={{padding:"10px 14px"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,fontFamily:"monospace",color:C.accent,fontWeight:700}}>v{doc.version}</span>
+                          {doc.active && <span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:20,background:C.success+"18",color:C.success,whiteSpace:"nowrap"}}>● IN USE</span>}
+                        </div>
+                      </td>
                       <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(doc.publishedAt)}</td>
                       <td style={{padding:"10px 14px"}}>
                         <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,
@@ -4916,9 +5028,11 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
                         </span>
                       </td>
                       <td style={{padding:"10px 14px"}}>
-                        <span style={{fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.text}}>
-                          {sigs.length}<span style={{color:C.dim,fontWeight:400}}>/{activeReps.length}</span>
-                        </span>
+                        <div style={{display:"flex",flexDirection:"column",gap:2,fontSize:11,fontFamily:"monospace"}}>
+                          <span style={{color:C.success,fontWeight:700}}>✓ {currentSigs.length} current</span>
+                          {outdatedSigs.length>0 && <span style={{color:C.warning,fontWeight:700}}>⚠ {outdatedSigs.length} outdated</span>}
+                          {unsignedReps.length>0 && <span style={{color:C.dim,fontWeight:700}}>◯ {unsignedReps.length} unsigned</span>}
+                        </div>
                       </td>
                       <td style={{padding:"10px 14px"}}>
                         <span style={{fontSize:10,fontWeight:700,padding:"2px 7px",borderRadius:20,
@@ -5018,13 +5132,29 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
       {showForm&&(
         <Modal title={editDoc?"Edit Document":"New Legal Document"} wide={true}
           onClose={function(){setShowForm(false);}}
-          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
             <Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn>
-            <Btn onClick={save}>{editDoc?"Save Changes":"Publish Document"}</Btn>
+            {editDoc ? (
+              <React.Fragment>
+                <Btn variant="ghost" onClick={save}>💾 Save (minor edit)</Btn>
+                <Btn onClick={function(){setShowPublishConfirm(true);}}>📢 Publish New Version →</Btn>
+              </React.Fragment>
+            ) : (
+              <Btn onClick={save}>Publish Document</Btn>
+            )}
           </div>}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
             <div style={{gridColumn:"1/-1"}}><Field label="Document Title *" value={title} onChange={setTitle} placeholder="Independent Contractor Agreement"/></div>
-            <Field label="Version" value={version} onChange={setVersion} placeholder="1.0" hint="Increment to force re-signature from all reps"/>
+            {editDoc ? (
+              <div>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Current version</div>
+                <div style={{padding:"10px 12px",background:C.surface2,border:"1px solid "+C.border,borderRadius:7,fontSize:13,fontFamily:"monospace",color:C.accent,fontWeight:700}}>
+                  v{editDoc.version} <span style={{fontSize:10,color:C.muted,fontWeight:400,fontFamily:"inherit"}}>· {signatures.filter(function(s){return s.docId===editDoc.id&&s.version===editDoc.version;}).length} reps signed at this version</span>
+                </div>
+              </div>
+            ) : (
+              <Field label="Version" value={version} onChange={setVersion} placeholder="1.0" hint="Starting version, usually 1.0"/>
+            )}
             <Field label="Description (optional)" value={desc} onChange={setDesc} placeholder="Brief description shown to reps"/>
           </div>
           <div style={{marginBottom:14}}>
@@ -5040,8 +5170,43 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
               style={{accentColor:C.accent}}/>
             <span style={{fontSize:13,color:C.text}}>Require re-signature when version is updated</span>
           </label>
+          {editDoc && (
+            <div style={{marginTop:14,padding:"10px 14px",background:C.surface2,borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.6}}>
+              <strong style={{color:C.text}}>What's the difference?</strong><br/>
+              <strong style={{color:C.text}}>💾 Save (minor edit)</strong> — typo fixes, formatting. Existing signatures stay valid. Reps are not interrupted.<br/>
+              <strong style={{color:C.text}}>📢 Publish New Version</strong> — substantive changes. Version bumps. All existing signatures become outdated; reps see a blocking re-sign modal on next activity.
+            </div>
+          )}
         </Modal>
       )}
+
+      {/* Confirm new-version publish */}
+      {showPublishConfirm && editDoc && (function(){
+        var sigsAtCurrent = signatures.filter(function(s){return s.docId===editDoc.id&&s.version===editDoc.version;}).length;
+        var nextVer = bumpVersion(editDoc.version);
+        return (
+          <Modal title="📢 Publish New Version" onClose={function(){setShowPublishConfirm(false);}}
+            footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <Btn variant="ghost" onClick={function(){setShowPublishConfirm(false);}}>Cancel</Btn>
+              <Btn variant="danger" onClick={function(){publishNewVersion();setShowPublishConfirm(false);}}>Yes — publish v{nextVer} & require re-sign</Btn>
+            </div>}>
+            <div style={{fontSize:13,color:C.text,lineHeight:1.7,marginBottom:14}}>
+              You're about to publish a new version of <strong>{editDoc.title}</strong>.
+            </div>
+            <div style={{padding:"12px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"35",borderRadius:8,fontSize:12,color:C.muted,lineHeight:1.7,marginBottom:14}}>
+              <strong style={{color:C.warning}}>This will:</strong>
+              <ul style={{margin:"6px 0 0 18px",padding:0}}>
+                <li>Bump the version from <code style={{fontFamily:"monospace",color:C.text}}>v{editDoc.version}</code> to <code style={{fontFamily:"monospace",color:C.text}}>v{nextVer}</code></li>
+                <li>Invalidate <strong style={{color:C.text}}>{sigsAtCurrent}</strong> existing signature{sigsAtCurrent===1?"":"s"} for this document</li>
+                <li>Trigger a blocking re-sign modal for every active rep on their next activity</li>
+              </ul>
+            </div>
+            <div style={{fontSize:11,color:C.dim,lineHeight:1.6}}>
+              If you only fixed a typo or formatting, click Cancel and use <strong style={{color:C.muted}}>💾 Save (minor edit)</strong> instead.
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* View doc modal */}
       {viewDoc&&(
@@ -16417,6 +16582,8 @@ function App() {
       subscribeTable("crm_tickets",            setTickets),
       subscribeTable("crm_returns",            setReturns),
       subscribeTable("crm_quotes",             setQuotes),
+      subscribeTable("crm_legal_docs",         setLegalDocs),
+      subscribeTable("crm_legal_signatures",   setSignatures),
     ];
 
     // ─── Settings sync (custom handler) ────────────────────────────────────
@@ -16794,7 +16961,23 @@ function App() {
   // Onboarding is now a checklist that gates ONLY order creation (see RepSetupChecklist),
   // so reps can log in and look around. W-9 must be admin-approved to count as complete.
   var w9Approved = !!(myRepData && myRepData.w9ReviewStatus==="approved");
-  var repSetupComplete = isAdmin || !!viewAsRep || !!(myRepData && myRepData.termsAcceptedAt && myRepData.agreementSignedAt && unsignedDocs.length===0 && w9Approved);
+  // Distinguish "still onboarding" (needs the checklist screen) from "already onboarded but
+  // legal docs got updated" (needs the blocking re-sign wall modal).
+  var coreOnboarded = !!(myRepData && myRepData.termsAcceptedAt && myRepData.agreementSignedAt && w9Approved);
+  var repSetupComplete = isAdmin || !!viewAsRep || (coreOnboarded && unsignedDocs.length===0);
+  // Wall fires only for already-onboarded reps who hit an outdated/missing sig after they finished setup.
+  var showLegalWall = !isAdmin && !viewAsRep && coreOnboarded && unsignedDocs.length > 0;
+
+  function handleSignDocFromWall(doc){
+    var rid = effectiveUser.rep_id || effectiveUser.id;
+    var sig = {id:genId("sig"), docId:doc.id, version:doc.version, repId:rid, repName:effectiveUser.name||"", signedAt:new Date().toISOString()};
+    setSignatures(function(prev){return (prev||[]).concat([sig]);});
+    dbSave("crm_legal_signatures", sig.id, sig).then(function(r){
+      if(!r.ok) addToast("Signature could not be saved: "+((r.error&&r.error.message)||"unknown")+" — please contact your admin","danger");
+    });
+    addToast("✓ "+doc.title+" v"+doc.version+" signed","success");
+  }
+
 
   if(trialExpired) return React.createElement(RepSubscriptionWall, {
     rep: myRepData,
@@ -17051,6 +17234,14 @@ function App() {
                   boxShadow:"0 4px 14px rgba(0,0,0,.25)"}}>
           📱 Switch to mobile view
         </button>
+      )}
+      {showLegalWall && (
+        <RepLegalWallModal
+          pendingDocs={unsignedDocs}
+          repId={effectiveUser.rep_id||effectiveUser.id}
+          repName={effectiveUser.name||""}
+          onSign={handleSignDocFromWall}
+          onSignOut={handleLogout}/>
       )}
     </div>
   );
