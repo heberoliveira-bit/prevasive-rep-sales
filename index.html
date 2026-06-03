@@ -770,8 +770,8 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
             .filter(function(rate){return rate.linesReturned === packages.length;})
             .map(function(rate){
               return Object.assign({}, rate, {
+                shipmentCost: Math.round((rate.shipmentCost||0) * 100) / 100,
                 packageCount: totalPkgCount,
-                // Show the dominant-line weight as the per-box label (not the avg, which would mislead in mixed orders)
                 weightPerPackage: packages.length === 1 ? packages[0].weight : Math.round((packages.reduce(function(s,p){return s+p.weight*p.qty;},0)/totalPkgCount)*10)/10,
               });
             });
@@ -11194,40 +11194,39 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           })}
                         </div>
                       )}
-                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                        <div style={{display:"flex",alignItems:"center",gap:6,flex:1,
-                                     background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"7px 10px"}}>
-                          <span style={{fontSize:12,color:C.dim}}>$</span>
-                          <input type="number" min="0" step="0.01"
-                            value={shippingOverride!==null?shippingOverride:totals.shipping}
-                            onChange={function(e){setShippingOverride(e.target.value);setShippingOverrideSource("manual");}}
-                            placeholder={String(totals.shipping)}
-                            style={{flex:1,background:"none",border:"none",color:C.text,fontSize:13,
-                                    fontFamily:"monospace",outline:"none"}}/>
-                        </div>
-                        {shippingOverride!==null&&(
-                          <button onClick={function(){setShippingOverride(null);setShippingOverrideSource(null);}}
-                            style={{padding:"7px 10px",borderRadius:7,border:"1px solid "+C.border,
-                                    background:"none",color:C.accent,cursor:"pointer",
-                                    fontFamily:"inherit",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
-                            ↺ Auto
-                          </button>
-                        )}
-                      </div>
-                      {shippingOverride!==null && shippingOverrideSource==="manual" && (
-                        <div style={{fontSize:10,color:C.accent,marginTop:4}}>
-                          ✎ Manual override — click Auto to clear
-                        </div>
-                      )}
-                      {shippingOverride!==null && shippingOverrideSource==="rule" && (
-                        <div style={{fontSize:10,color:C.muted,marginTop:4}}>
-                          ⚙ Rule-based rate auto-applied — click Auto to clear, or type to override
-                        </div>
-                      )}
-                      {shippingOverride!==null && shippingOverrideSource==="rate" && (
-                        <div style={{fontSize:10,color:C.muted,marginTop:4}}>
-                          📦 Selected live rate — click Auto to clear, or type to override
-                        </div>
+                      {shippingOverrideSource !== "rate" && (
+                        <React.Fragment>
+                          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:6,flex:1,
+                                         background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"7px 10px"}}>
+                              <span style={{fontSize:12,color:C.dim}}>$</span>
+                              <input type="number" min="0" step="0.01"
+                                value={shippingOverride!==null?shippingOverride:totals.shipping}
+                                onChange={function(e){setShippingOverride(e.target.value);setShippingOverrideSource("manual");}}
+                                placeholder={String(totals.shipping)}
+                                style={{flex:1,background:"none",border:"none",color:C.text,fontSize:13,
+                                        fontFamily:"monospace",outline:"none"}}/>
+                            </div>
+                            {shippingOverride!==null&&(
+                              <button onClick={function(){setShippingOverride(null);setShippingOverrideSource(null);}}
+                                style={{padding:"7px 10px",borderRadius:7,border:"1px solid "+C.border,
+                                        background:"none",color:C.accent,cursor:"pointer",
+                                        fontFamily:"inherit",fontSize:11,fontWeight:600,whiteSpace:"nowrap"}}>
+                                ↺ Auto
+                              </button>
+                            )}
+                          </div>
+                          {shippingOverride!==null && shippingOverrideSource==="manual" && (
+                            <div style={{fontSize:10,color:C.accent,marginTop:4}}>
+                              ✎ Manual override — click Auto to clear
+                            </div>
+                          )}
+                          {shippingOverride!==null && shippingOverrideSource==="rule" && (
+                            <div style={{fontSize:10,color:C.muted,marginTop:4}}>
+                              ⚙ Rule-based rate auto-applied — click Auto to clear, or type to override
+                            </div>
+                          )}
+                        </React.Fragment>
                       )}
                       {shippingOverride===null&&autoRule&&autoRule.rate===0&&(
                         <div style={{fontSize:10,color:C.success,marginTop:4,fontWeight:600}}>
