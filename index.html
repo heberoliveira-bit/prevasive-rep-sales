@@ -102,7 +102,7 @@ var STATUS_COLOR = {
 
 /* ─── Freight (LTL) Helpers ─────────────────────────────────────────────── */
 var DEFAULT_FREIGHT_CFG = {
-  thresholds: { weightLbs: 150, volumeCuFt: 10, dollarValue: 2500 },
+  thresholds: { weightLbs: 500, volumeCuFt: 10, dollarValue: 2500, maxParcelUnits: 0 },
   carriers: ["SAIA","Estes","R+L Carriers","ABF","XPO","Old Dominion","Other"],
   quoteExpiryHours: 24,
   showFreightTagInShipStation: true,
@@ -124,26 +124,29 @@ function saveFreightCfg(cfg){
   try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:cfg, updated_at:new Date().toISOString()}).then(function(){}); }catch(e){}
 }
 
-/* Sum weight (lbs), volume (cu ft), and pallet count from line items. */
+/* Sum weight (lbs), volume (cu ft), unit count, and pallet count from line items. */
 function computeFreightSummary(items, products){
-  var weight = 0, volumeCuIn = 0, pallets = 0, freightLine = false, anyDimsKnown = false;
+  var weight = 0, volumeCuIn = 0, pallets = 0, units = 0, freightLine = false, anyDimsKnown = false;
   (items||[]).forEach(function(it){
     if(!it.prodId || !it.qty) return;
     var p = (products||[]).find(function(px){return px.id===it.prodId;}) || {};
     var dims = p.freightDimsLbs || p.shipDims || {};
     var w = parseFloat(dims.weight || p.weight || 0) || 0;
-    weight += w * (parseFloat(it.qty)||0);
+    var q = parseFloat(it.qty)||0;
+    weight += w * q;
+    units  += q;
     var L = parseFloat(dims.l||0)||0, W = parseFloat(dims.w||0)||0, H = parseFloat(dims.h||0)||0;
-    if(L>0 && W>0 && H>0){ anyDimsKnown = true; volumeCuIn += L*W*H * (parseFloat(it.qty)||0); }
+    if(L>0 && W>0 && H>0){ anyDimsKnown = true; volumeCuIn += L*W*H * q; }
     if(p.freightRequired) freightLine = true;
     if(p.unitsPerPallet && parseInt(p.unitsPerPallet,10) > 0){
-      pallets += Math.ceil((parseFloat(it.qty)||0) / parseInt(p.unitsPerPallet,10));
+      pallets += Math.ceil(q / parseInt(p.unitsPerPallet,10));
     }
   });
   var volumeCuFt = volumeCuIn / 1728;
   return {
     totalWeight: Math.round(weight*10)/10,
     totalVolume: anyDimsKnown ? Math.round(volumeCuFt*10)/10 : 0,
+    totalUnits: units,
     suggestedPallets: pallets || 0,
     hasFreightLine: freightLine,
     anyDimsKnown: anyDimsKnown
@@ -177,7 +180,7 @@ function freightTriggerReasons(items, products, customer, orderGrand){
     });
     reasons.push("Product"+(freighters.length>1?"s":"")+" requires freight: "+freighters.join(", "));
   }
-  if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (above "+cfg.thresholds.weightLbs+" lb parcel limit)");
+  if(s.totalWeight >= cfg.thresholds.weightLbs) reasons.push("Total weight is "+s.totalWeight+" lbs (over the "+cfg.thresholds.weightLbs+" lb parcel limit)");
   return reasons;
 }
 
@@ -5082,7 +5085,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var tax = Math.round(productCustomer*taxRate*100)/100;
     var quoteQualifies = isOrderFreight(items, products, selCust, productCustomer+tax);
     var quoteLocked = quoteQualifies && isOrderFreightLocked(items, products, selCust);
-    var quoteIsFreight = quoteQualifies && ((quoteShippingChoice || (quoteLocked?"freight":"parcel"))==="freight");
+    var quoteIsFreight = quoteQualifies && ((quoteShippingChoice || "freight")==="freight");
     var ship = quoteIsFreight ? 0 : (parseFloat(quoteShip)||0);
     var grand = Math.round((productCustomer+ship+tax)*100)/100;
     var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
@@ -5333,7 +5336,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 var hasItems = items.some(function(it){return it.prodId;});
                 var quoteQualifies = hasItems && isOrderFreight(items, products, cust, quoteGrandForFreight);
                 var quoteLocked = quoteQualifies && isOrderFreightLocked(items, products, cust);
-                var quoteEffChoice = !quoteQualifies ? "parcel" : (quoteShippingChoice || (quoteLocked ? "freight" : "parcel"));
+                var quoteEffChoice = !quoteQualifies ? "parcel" : (quoteShippingChoice || "freight");
 
                 if(quoteQualifies){
                   var reasons = freightTriggerReasons(items, products, cust, quoteGrandForFreight);
@@ -9207,14 +9210,14 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                   <div style={{maxWidth:280}}>
                     <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:4}}>Weight ≥</div>
                     <div style={{display:"flex",alignItems:"center",gap:6}}>
-                      <input type="number" defaultValue={fcfg.thresholds.weightLbs} min="0" step="10"
-                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||0})}));}}
+                      <input type="number" defaultValue={fcfg.thresholds.weightLbs} min="0" step="50"
+                        onBlur={function(e){saveFreightCfg(Object.assign({},fcfg,{thresholds:Object.assign({},fcfg.thresholds,{weightLbs:parseInt(e.target.value)||500})}));}}
                         style={{flex:1,padding:"8px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:13,boxSizing:"border-box"}}/>
                       <span style={{color:C.muted,fontSize:11}}>lbs</span>
                     </div>
                   </div>
                   <div style={{fontSize:10,color:C.dim,marginTop:10,lineHeight:1.6}}>
-                    Also routes to freight when any product has "always ships freight" flagged, or when a customer has "force freight" enabled.
+                    When the order's total weight is at or above this, the freight option becomes the default (rep can still switch to parcel). Also routes to freight when any product has "always ships freight" flagged or a customer has "force freight" enabled.
                   </div>
                 </div>
 
@@ -10052,10 +10055,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var customer4 = selCust||(newCust?{}:null);
     var freightQualifies = isOrderFreight(items, products, customer4, calcTotalsTmp.grand);
     var freightLocked = freightQualifies && isOrderFreightLocked(items, products, customer4);
-    var effectiveChoice = !freightQualifies ? "parcel" : (shippingChoice || (freightLocked ? "freight" : "parcel"));
+    var effectiveChoice = !freightQualifies ? "parcel" : (shippingChoice || "freight");
     var isFreight = effectiveChoice === "freight";
     // Track if rep diverged from the auto-default (for audit log)
-    var autoDefault = !freightQualifies ? "parcel" : (freightLocked ? "freight" : "parcel");
+    var autoDefault = !freightQualifies ? "parcel" : "freight";
     var repElectedDifferently = freightQualifies && shippingChoice && shippingChoice !== autoDefault;
 
     var order = {
@@ -10700,7 +10703,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
                 if(!freightQualifies) return null;
                 var freightLocked = isOrderFreightLocked(items, products, customer);
-                var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
+                var effectiveChoice = shippingChoice || "freight";
                 var reasons = freightTriggerReasons(items, products, customer, calcTotalsTmp.grand);
                 return (
                   <div style={{marginBottom:14,padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10}}>
@@ -10758,7 +10761,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
                 if(!freightQualifies) return null;
                 var freightLocked = isOrderFreightLocked(items, products, customer);
-                var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
+                var effectiveChoice = shippingChoice || "freight";
                 if(effectiveChoice !== "freight") return null;
                 var cfg = getFreightCfg();
                 return (
@@ -10803,7 +10806,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
                 if(freightQualifies){
                   var freightLocked = isOrderFreightLocked(items, products, customer);
-                  var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
+                  var effectiveChoice = shippingChoice || "freight";
                   if(effectiveChoice !== "parcel") return null;
                 }
                 return true; // continue to render below
@@ -14106,7 +14109,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v53-single-sb-client</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v55-500lb-default</div>
       </div>
     </div>
   );
@@ -14399,7 +14402,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var _mobileCustomer = selCust;
   var _mobileQualifies = hasLines && isOrderFreight(_mobileItemsArr, products, _mobileCustomer, total);
   var _mobileLocked = _mobileQualifies && isOrderFreightLocked(_mobileItemsArr, products, _mobileCustomer);
-  var _mobileIsFreight = _mobileQualifies && ((shippingChoice || (_mobileLocked ? "freight" : "parcel"))==="freight");
+  var _mobileIsFreight = _mobileQualifies && ((shippingChoice || "freight")==="freight");
   var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && (_mobileIsFreight || !!selectedRate);
 
   function place(){
@@ -14430,8 +14433,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     var _pItemsArr = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
     var _pQualifies = isOrderFreight(_pItemsArr, products, cRecord, total);
     var _pLocked = _pQualifies && isOrderFreightLocked(_pItemsArr, products, cRecord);
-    var _placeIsFreight = _pQualifies && ((shippingChoice || (_pLocked ? "freight" : "parcel"))==="freight");
-    var _placeAutoDefault = !_pQualifies ? "parcel" : (_pLocked ? "freight" : "parcel");
+    var _placeIsFreight = _pQualifies && ((shippingChoice || "freight")==="freight");
+    var _placeAutoDefault = !_pQualifies ? "parcel" : "freight";
     var _placeRepDeviated = _pQualifies && shippingChoice && shippingChoice !== _placeAutoDefault;
 
     function buildOrder(extra){
@@ -14812,7 +14815,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         var mobileItems = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
         var mobileQualifies = hasLines && isOrderFreight(mobileItems, products, selCust, mobileTotal);
         var mobileLocked = mobileQualifies && isOrderFreightLocked(mobileItems, products, selCust);
-        var mobileChoice = !mobileQualifies ? "parcel" : (shippingChoice || (mobileLocked ? "freight" : "parcel"));
+        var mobileChoice = !mobileQualifies ? "parcel" : (shippingChoice || "freight");
 
         if(mobileQualifies){
           var mobileReasons = freightTriggerReasons(mobileItems, products, selCust, mobileTotal);
@@ -15565,7 +15568,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v53-single-sb-client
+        BUILD: 2026-05-30-v55-500lb-default
       </div>
     </div>
   );
