@@ -7972,6 +7972,159 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast}) {
   );
 }
 
+/* ─── Rep Activity helpers ───────────────────────────────────────────────
+   Pure functions that derive activity insights from already-synced tables.
+   No new data collection — leverages orders/quotes/customers + lastSeenAt. */
+function computeRepStats(orders, quotes, customers, repId, sinceMs){
+  var since = sinceMs;
+  var orderRows  = (orders||[]).filter(function(o){return o.repId===repId && new Date(o.createdAt).getTime()>=since && o.status!=="Cancelled";});
+  var quoteRows  = (quotes||[]).filter(function(q){return q.repId===repId && new Date(q.createdAt).getTime()>=since;});
+  var custRows   = (customers||[]).filter(function(c){return (c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt && new Date(c.createdAt).getTime()>=since;});
+  var revenue    = orderRows.reduce(function(s,o){return s + ((o.totals&&o.totals.grand)||o.total||0);}, 0);
+  return {
+    orderCount:    orderRows.length,
+    revenue:       Math.round(revenue),
+    quoteCount:    quoteRows.length,
+    customerCount: custRows.length,
+  };
+}
+function computeRepActionFeed(orders, quotes, customers, repId, limit){
+  var actions = [];
+  (orders||[]).filter(function(o){return o.repId===repId;}).forEach(function(o){
+    actions.push({ts:o.createdAt, kind:"order_placed", label:"Order "+o.id+" placed — "+(o.custName||"customer"), amount:(o.totals&&o.totals.grand)||o.total||0, orderId:o.id});
+    if(o.invoiceSentAt) actions.push({ts:o.invoiceSentAt, kind:"invoice_sent", label:"Invoice sent — "+o.id, orderId:o.id});
+    if(o.paidAt)         actions.push({ts:o.paidAt, kind:"order_paid", label:"Order paid — "+o.id, orderId:o.id});
+    // Pull from auditLog for free-form entries
+    (o.auditLog||[]).forEach(function(a){
+      if(a.actor && a.action && a.ts){
+        actions.push({ts:a.ts, kind:"audit", label:a.action+" — "+o.id, detail:a.detail||"", orderId:o.id});
+      }
+    });
+  });
+  (quotes||[]).filter(function(q){return q.repId===repId;}).forEach(function(q){
+    actions.push({ts:q.createdAt, kind:"quote_created", label:"Quote "+q.id+" sent — "+(q.custName||"customer"), amount:q.total||0, quoteId:q.id});
+    if(q.acceptedAt) actions.push({ts:q.acceptedAt, kind:"quote_accepted", label:"Quote accepted — "+q.id, quoteId:q.id});
+  });
+  (customers||[]).filter(function(c){return (c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt;}).forEach(function(c){
+    actions.push({ts:c.createdAt, kind:"customer_added", label:"Customer added — "+c.name, customerId:c.id});
+  });
+  actions.sort(function(a,b){return new Date(b.ts).getTime() - new Date(a.ts).getTime();});
+  return limit ? actions.slice(0, limit) : actions;
+}
+
+/* ─── Admin Rep Activity ─────────────────────────────────────────────────
+   Overview of all reps: online status, period stats, recent action feed. */
+function AdminRepActivity({reps, orders, quotes, customers, addToast}){
+  const [expandedId, setExpandedId] = useState(null);
+  const [now,        setNow]        = useState(Date.now());
+  // Bump "now" every 30s so the relative-time labels stay fresh ("Just now" → "2 min ago")
+  useEffect(function(){
+    var t = setInterval(function(){ setNow(Date.now()); }, 30000);
+    return function(){ clearInterval(t); };
+  }, []);
+
+  function statusFor(rep){
+    if(!rep.lastSeenAt) return {dot:"⚪", label:"never signed in", color:C.dim};
+    var ageMs = now - new Date(rep.lastSeenAt).getTime();
+    if(ageMs < 2*60*1000)        return {dot:"🟢", label:"online",  color:C.success};
+    if(ageMs < 24*60*60*1000)    return {dot:"🟡", label:"today",   color:C.warning};
+    return {dot:"⚪", label:"inactive", color:C.dim};
+  }
+  function relTime(iso){
+    if(!iso) return "—";
+    var ms = now - new Date(iso).getTime();
+    if(ms<60*1000)       return "Just now";
+    if(ms<60*60*1000)    return Math.floor(ms/60000) + " min ago";
+    if(ms<24*60*60*1000) return Math.floor(ms/3600000) + " hr ago";
+    if(ms<7*24*60*60*1000) return Math.floor(ms/86400000) + " days ago";
+    return new Date(iso).toLocaleDateString("en-US", {month:"short", day:"numeric"});
+  }
+
+  var sortedReps = (reps||[]).slice().sort(function(a,b){
+    var aT = a.lastSeenAt ? new Date(a.lastSeenAt).getTime() : 0;
+    var bT = b.lastSeenAt ? new Date(b.lastSeenAt).getTime() : 0;
+    return bT - aT; // most-recently-active first
+  });
+
+  var since7  = now - 7*24*60*60*1000;
+  var since30 = now - 30*24*60*60*1000;
+  var onlineCount = sortedReps.filter(function(r){return statusFor(r).label==="online";}).length;
+  var todayCount  = sortedReps.filter(function(r){var s=statusFor(r).label; return s==="online" || s==="today";}).length;
+
+  return (
+    <div>
+      <PageHeader title="Rep Activity" subtitle={onlineCount+" online · "+todayCount+" active today · "+sortedReps.length+" total"}/>
+
+      <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 1.4fr 1.4fr 1.4fr 40px",padding:"10px 18px",background:C.surface2,fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",borderBottom:"1px solid "+C.border}}>
+          <div>Rep</div>
+          <div>Last seen</div>
+          <div>Last 7 days</div>
+          <div>Last 30 days</div>
+          <div></div>
+        </div>
+        {sortedReps.length===0 && (
+          <div style={{padding:"40px 18px",textAlign:"center",color:C.dim,fontSize:13}}>No reps yet.</div>
+        )}
+        {sortedReps.map(function(rep){
+          var st  = statusFor(rep);
+          var s7  = computeRepStats(orders, quotes, customers, rep.id, since7);
+          var s30 = computeRepStats(orders, quotes, customers, rep.id, since30);
+          var isOpen = expandedId === rep.id;
+          var feed = isOpen ? computeRepActionFeed(orders, quotes, customers, rep.id, 20) : [];
+          return (
+            <React.Fragment key={rep.id}>
+              <div style={{display:"grid",gridTemplateColumns:"2fr 1.4fr 1.4fr 1.4fr 40px",padding:"14px 18px",borderBottom:"1px solid "+C.border,alignItems:"center",cursor:"pointer",background:isOpen?C.surface2:"transparent"}}
+                   onClick={function(){setExpandedId(isOpen?null:rep.id);}}>
+                <div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                    <span style={{fontSize:14}}>{st.dot}</span>
+                    <span style={{fontWeight:700,fontSize:13,color:C.text}}>{rep.name||"—"}</span>
+                    <span style={{padding:"1px 7px",borderRadius:20,background:st.color+"20",color:st.color,fontSize:10,fontWeight:700}}>{st.label}</span>
+                  </div>
+                  <div style={{fontSize:11,color:C.muted}}>{rep.email||""}{rep.status?" · "+rep.status:""}</div>
+                </div>
+                <div style={{fontSize:12,color:C.text}}>{relTime(rep.lastSeenAt)}</div>
+                <div>
+                  <div style={{fontSize:12,color:C.text,fontWeight:600}}>{s7.orderCount} order{s7.orderCount===1?"":"s"} · ${(s7.revenue/1000).toFixed(1)}K</div>
+                  <div style={{fontSize:10,color:C.muted}}>{s7.quoteCount} quotes · {s7.customerCount} customers</div>
+                </div>
+                <div>
+                  <div style={{fontSize:12,color:C.text,fontWeight:600}}>{s30.orderCount} order{s30.orderCount===1?"":"s"} · ${(s30.revenue/1000).toFixed(1)}K</div>
+                  <div style={{fontSize:10,color:C.muted}}>{s30.quoteCount} quotes · {s30.customerCount} customers</div>
+                </div>
+                <div style={{textAlign:"right",color:C.dim,fontSize:14}}>{isOpen?"▾":"▸"}</div>
+              </div>
+              {isOpen && (
+                <div style={{padding:"14px 18px",background:C.bg,borderBottom:"1px solid "+C.border}}>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:10}}>Recent activity ({feed.length})</div>
+                  {feed.length===0 ? (
+                    <div style={{fontSize:11,color:C.dim,padding:"6px 0"}}>No activity recorded yet.</div>
+                  ) : (
+                    <div style={{maxHeight:360,overflowY:"auto"}}>
+                      {feed.map(function(a,i){
+                        return (
+                          <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:i<feed.length-1?"1px dashed "+C.border:"none",fontSize:11}}>
+                            <div style={{minWidth:110,color:C.dim,fontFamily:"monospace",fontSize:10}}>{new Date(a.ts).toLocaleString("en-US",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})}</div>
+                            <div style={{flex:1}}>
+                              <div style={{color:C.text}}>{a.label}{a.amount?" · $"+a.amount.toFixed(2):""}</div>
+                              {a.detail && <div style={{color:C.muted,fontSize:10,marginTop:2}}>{a.detail}</div>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Admin Reps ─────────────────────────────────────────────────────────── */
 function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,setApplications,legalDocs,signatures,currentUser,addToast,showResult,onViewAsRep}) {
   const [tab,      setTab]      = useState("reps");
@@ -14585,7 +14738,13 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var taxInfo = (shipAddr && shipAddr.zip) ? getGaTaxRate(shipAddr.zip) : null;
   var taxRate = taxInfo ? taxInfo.rate : 0;
   var tax = Math.round(subtotal * taxRate * 100) / 100;
-  var shipping = selectedRate ? (Number(selectedRate.shipmentCost)||0) : 0;
+  // Determine if freight is the active mode so shipping shows TBD ($0) regardless of any
+  // previously-picked parcel rate left in selectedRate.
+  var _shipFreightItems = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
+  var _shipQualifies = hasLines && isOrderFreight(_shipFreightItems, products, selCust, subtotal);
+  var _shipLocked = _shipQualifies && isOrderFreightLocked(_shipFreightItems, products, selCust);
+  var _shipFreightMode = (shippingChoice === "freight") || (shippingChoice == null && _shipLocked);
+  var shipping = _shipFreightMode ? 0 : (selectedRate ? (Number(selectedRate.shipmentCost)||0) : 0);
   var total = Math.round((subtotal + tax + shipping)*100)/100;
 
   var pickedProduct = (products||[]).find(function(p){return p.id===productId;});
@@ -15804,6 +15963,10 @@ function App() {
   const [legalDocs,     setLegalDocs]     = useState([]);
   const [signatures,    setSignatures]    = useState([]);
   const [notifications, setNotifications] = useState([]);
+  // Bumped whenever a realtime settings event arrives — forces components that
+  // read settings from localStorage (getFreightCfg, getSS, etc.) to re-render
+  // with the latest values from cross-browser admin changes.
+  const [settingsVersion, setSettingsVersion] = useState(0);
   const [tickets,       setTickets]       = useState([]);
   const [faqs,          setFaqs]          = useState([]);
   const [returns,       setReturns]       = useState([]);
@@ -16257,10 +16420,122 @@ function App() {
       subscribeTable("crm_quotes",             setQuotes),
     ];
 
+    // ─── Settings sync (custom handler) ────────────────────────────────────
+    // crm_settings holds key-value config rows (id = "freight_cfg", "email_notifications",
+    // "public_settings", etc.). When an admin updates settings on browser A, mirror to
+    // localStorage on browser B and bump _settingsVersion so consumers re-render.
+    (function(){
+      var sbS = getSB(); if(!sbS) return;
+      var SETTINGS_KEY_MAP = {
+        "freight_cfg":        "__pv__freightCfg",
+        "shipstation_cfg":    "__pv__shipStationCfg",
+        "invoice_cfg":        "__pv__invoiceCfg",
+        "stripe_cfg":         "__pv__stripeCfg",
+        "email_cfg":          "__pv__emailCfg",
+        "email_notifications":"__pv__emailNotifs",
+        "shipping_rules":     "__pv__shippingRules",
+        "public_settings":    "__pv__publicSettings",
+      };
+      var ch = sbS.channel("rt_crm_settings_"+Math.random().toString(36).slice(2,8))
+        .on("postgres_changes", {event:"*", schema:"public", table:"crm_settings"}, function(payload){
+          try{
+            try{ console.info("[realtime] ⚡ crm_settings "+(payload.eventType||payload.type), payload); }catch(e){}
+            var row = payload.new || payload.old || {};
+            var key = SETTINGS_KEY_MAP[row.id];
+            if(key && row.data) {
+              try{ localStorage.setItem(key, JSON.stringify(row.data)); }catch(e){}
+            }
+            setSettingsVersion(function(v){return v+1;});
+          }catch(e){ try{ console.warn("[realtime] crm_settings handler error:", e); }catch(_){} }
+        })
+        .subscribe(function(status){
+          if(status === "SUBSCRIBED") { try{ console.info("[realtime] ✓ crm_settings — connected"); }catch(e){} }
+          else if(status === "CHANNEL_ERROR" || status === "TIMED_OUT") { try{ console.warn("[realtime] ✗ crm_settings — "+status+". Run: ALTER PUBLICATION supabase_realtime ADD TABLE crm_settings;"); }catch(e){} }
+        });
+      subs.push(ch);
+    })();
+
+    // ─── Notifications sync (user-scoped custom handler) ───────────────────
+    // crm_notifications holds persistent alerts. Pipe new ones into the in-app
+    // notifications state when they're relevant to the current user.
+    (function(){
+      var sbN = getSB(); if(!sbN) return;
+      var ch = sbN.channel("rt_crm_notifications_"+Math.random().toString(36).slice(2,8))
+        .on("postgres_changes", {event:"*", schema:"public", table:"crm_notifications"}, function(payload){
+          try{
+            try{ console.info("[realtime] ⚡ crm_notifications "+(payload.eventType||payload.type), payload); }catch(e){}
+            var ev = payload.eventType || payload.type;
+            if(ev === "DELETE"){
+              var oldId = payload.old && payload.old.id;
+              if(oldId) setNotifications(function(prev){return (prev||[]).filter(function(n){return n.id!==oldId;});});
+              return;
+            }
+            var row = payload.new || {};
+            var n = row.data || {};
+            if(!n || !n.id) return;
+            // Scope: include if it's for this user (matching repId) or for admins (adminNotify true + user is admin)
+            var isMine = (currentUser && (
+              (n.repId && (n.repId === currentUser.id || n.repId === currentUser.rep_id)) ||
+              (n.adminNotify && currentUser.role === "admin")
+            ));
+            if(!isMine) return;
+            setNotifications(function(prev){
+              prev = prev || [];
+              var idx = prev.findIndex(function(x){return x.id===n.id;});
+              if(idx >= 0) {
+                var copy = prev.slice();
+                copy[idx] = n;
+                return copy;
+              }
+              // New notification — prepend, cap to 50
+              return [n].concat(prev).slice(0,50);
+            });
+          }catch(e){ try{ console.warn("[realtime] crm_notifications handler error:", e); }catch(_){} }
+        })
+        .subscribe(function(status){
+          if(status === "SUBSCRIBED") { try{ console.info("[realtime] ✓ crm_notifications — connected"); }catch(e){} }
+          else if(status === "CHANNEL_ERROR" || status === "TIMED_OUT") { try{ console.warn("[realtime] ✗ crm_notifications — "+status+". Run: ALTER PUBLICATION supabase_realtime ADD TABLE crm_notifications;"); }catch(e){} }
+        });
+      subs.push(ch);
+    })();
+
     return function(){
       alive = false;
       var sbc = getSB();
       if(sbc) subs.forEach(function(ch){ if(ch) sbc.removeChannel(ch); });
+    };
+  }, [currentUser&&currentUser.id]);
+
+  // ─── Heartbeat: keep rep's lastSeenAt fresh for admin's Rep Activity view ───
+  // Uses a ref so the interval callback always sees the latest reps without re-triggering on every reps update.
+  var repsRefHB = useRef([]);
+  useEffect(function(){ repsRefHB.current = reps; }, [reps]);
+  useEffect(function(){
+    if(!currentUser) return;
+    var myRepId = currentUser.rep_id || currentUser.id;
+    if(!myRepId) return;
+    function heartbeat(){
+      if(typeof document !== "undefined" && document.hidden) return; // don't ping when tab is backgrounded
+      var current = repsRefHB.current || [];
+      var myRep = current.find(function(r){return r.id === myRepId;});
+      if(!myRep) return; // admin or other user that's not in crm_reps — silently skip
+      var nowIso = new Date().toISOString();
+      // Avoid hammering the DB if we just wrote within the last 50s
+      if(myRep.lastSeenAt) {
+        var ageMs = Date.now() - new Date(myRep.lastSeenAt).getTime();
+        if(ageMs < 50*1000) return;
+      }
+      var updated = Object.assign({}, myRep, {lastSeenAt: nowIso});
+      setReps(function(prev){return (prev||[]).map(function(r){return r.id===myRepId?updated:r;});});
+      dbSave("crm_reps", myRepId, updated);
+    }
+    heartbeat(); // immediate ping on sign-in
+    var t = setInterval(heartbeat, 60*1000); // every 60s
+    function onFocus(){ heartbeat(); }
+    if(typeof window !== "undefined") window.addEventListener("focus", onFocus);
+    return function(){
+      clearInterval(t);
+      if(typeof window !== "undefined") window.removeEventListener("focus", onFocus);
     };
   }, [currentUser&&currentUser.id]);
 
@@ -16567,6 +16842,7 @@ function App() {
     {divider:true},
     {label:"Management"},
     {id:"reps",       name:"Sales Reps",  icon:"🤝"},
+    {id:"rep_activity", name:"Rep Activity", icon:"📊"},
     {id:"pricing",     name:"Pricing",     icon:"🏷️"},
     {id:"tasks",       name:"Tasks",       icon:"✅", badge:true},
     {id:"legal",       name:"Legal & Compliance", icon:"⚖️", badge:"legal"},
@@ -16670,6 +16946,9 @@ function App() {
             currentUser={currentUser}
             addToast={addToast} showResult={showResult}
             onViewAsRep={function(rep){setViewAsRep(rep);setActiveTab("dashboard");}}/>
+        )}
+        {isAdmin&&activeTab==="rep_activity"&&(
+          <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast}/>
         )}
         {isAdmin&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} reps={reps} commissions={commissions}
