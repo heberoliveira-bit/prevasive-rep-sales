@@ -679,7 +679,7 @@ function PlacesAutocomplete({value,onChange,onSelect,placeholder,label,hint}) {
 
 
 /* ─── ShippingRatePicker ─────────────────────────────────────────── */
-function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgDimH, onSelect, selected}) {
+function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgDimH, onSelect, selected, onSwitchToFreight}) {
   const [rates,    setRates]    = useState([]);
   const [loading,  setLoading]  = useState(false);
   const [error,    setError]    = useState("");
@@ -742,10 +742,19 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
       <div style={{padding:"10px 14px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:10,fontSize:11,color:C.muted,lineHeight:1.5}}>
         <div style={{fontWeight:600,color:C.warning,marginBottom:4}}>No live rates returned</div>
         {tried
-          ? <div>Tried: {tried}. None returned a rate to {toZip}. Check that those carriers are connected in ShipStation and that the package weight/dimensions are valid.</div>
+          ? <div>Tried: {tried}. None returned a rate to {toZip}. <strong>This usually means the package exceeds the carrier's weight or size limits</strong> (UPS caps single parcels around 150 lbs / 165 in. of length + girth). Heavy or oversized orders should ship freight.</div>
           : <div>The rate function returned no carriers. Confirm ShipStation has at least one connected carrier, and that <code>SHIPSTATION_API_KEY</code> / <code>SHIPSTATION_API_SECRET</code> are set as Supabase function secrets (or admin's keys are filled in Settings → Shipping).</div>
         }
-        <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>
+        {onSwitchToFreight && (
+          <div style={{marginTop:8}}>
+            <button type="button" onClick={onSwitchToFreight}
+              style={{padding:"7px 12px",background:C.warning,color:"#fff",border:"none",borderRadius:7,fontFamily:"inherit",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+              🚛 Switch to freight quote →
+            </button>
+            <span style={{marginLeft:10,color:C.dim,fontSize:10}}>Or enter a manual shipping cost below.</span>
+          </div>
+        )}
+        {!onSwitchToFreight && <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>}
       </div>
     );
   }
@@ -10065,11 +10074,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var customer4 = selCust||(newCust?{}:null);
     var freightQualifies = isOrderFreight(items, products, customer4, calcTotalsTmp.grand);
     var freightLocked = freightQualifies && isOrderFreightLocked(items, products, customer4);
-    var effectiveChoice = !freightQualifies ? "parcel" : (shippingChoice || "freight");
+    // Rep can explicitly choose freight on a non-qualifying order (e.g., parcel rates failed)
+    var effectiveChoice = shippingChoice ||
+                          (freightQualifies ? (freightLocked ? "freight" : "parcel") : "parcel");
     var isFreight = effectiveChoice === "freight";
     // Track if rep diverged from the auto-default (for audit log)
-    var autoDefault = !freightQualifies ? "parcel" : "freight";
-    var repElectedDifferently = freightQualifies && shippingChoice && shippingChoice !== autoDefault;
+    var autoDefault = freightQualifies ? (freightLocked ? "freight" : "parcel") : "parcel";
+    var repElectedDifferently = shippingChoice && shippingChoice !== autoDefault;
 
     var order = {
       id:id, repId:repId, repName:repName,
@@ -10706,22 +10717,26 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 })()}
               </div>
 
-              {/* Toggle: parcel vs freight — only shown when order qualifies for freight */}
+              {/* Toggle: parcel vs freight — shown when order qualifies OR rep explicitly chose freight */}
               {(function(){
                 var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
-                if(!freightQualifies) return null;
-                var freightLocked = isOrderFreightLocked(items, products, customer);
-                var effectiveChoice = shippingChoice || "freight";
+                var repChoseFreight = shippingChoice === "freight";
+                if(!freightQualifies && !repChoseFreight) return null;
+                var freightLocked = freightQualifies && isOrderFreightLocked(items, products, customer);
+                var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
                 var reasons = freightTriggerReasons(items, products, customer, calcTotalsTmp.grand);
+                var byChoiceOnly = !freightQualifies && repChoseFreight;
                 return (
                   <div style={{marginBottom:14,padding:"10px 14px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10}}>
                     <div style={{fontSize:13,fontWeight:800,color:C.warning,marginBottom:4}}>
-                      🚛 {freightLocked ? "Freight shipping required" : "This order is big enough for freight shipping"}
+                      🚛 {freightLocked ? "Freight shipping required" : byChoiceOnly ? "Freight quote — your choice" : "This order is big enough for freight shipping"}
                     </div>
                     <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
-                      {freightLocked ? "Admin flagged this customer or product as always-freight. Freight is required." : "Either option is fine — pick whichever fits the customer best."}
+                      {freightLocked ? "Admin flagged this customer or product as always-freight. Freight is required." :
+                       byChoiceOnly ? "You picked freight for this order. Click 'Try parcel rates' to go back if you want to try ShipStation again." :
+                       "Either option is fine — pick whichever fits the customer best."}
                     </div>
                     {reasons.length>0 && (
                       <ul style={{fontSize:11,color:C.muted,margin:"0 0 10px 18px",padding:0,lineHeight:1.7}}>
@@ -10769,9 +10784,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
-                if(!freightQualifies) return null;
-                var freightLocked = isOrderFreightLocked(items, products, customer);
-                var effectiveChoice = shippingChoice || "freight";
+                var repChoseFreight = shippingChoice === "freight";
+                if(!freightQualifies && !repChoseFreight) return null;
+                var freightLocked = freightQualifies && isOrderFreightLocked(items, products, customer);
+                var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
                 if(effectiveChoice !== "freight") return null;
                 var cfg = getFreightCfg();
                 return (
@@ -10814,10 +10830,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
+                var repChoseFreight = shippingChoice === "freight";
                 if(freightQualifies){
                   var freightLocked = isOrderFreightLocked(items, products, customer);
-                  var effectiveChoice = shippingChoice || "freight";
+                  var effectiveChoice = shippingChoice || (freightLocked ? "freight" : "parcel");
                   if(effectiveChoice !== "parcel") return null;
+                } else if(repChoseFreight){
+                  return null; // rep explicitly switched to freight on a non-qualifying order
                 }
                 return true; // continue to render below
               })() && <div style={{marginBottom:16}}>
@@ -10848,7 +10867,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                           return dom?{pkgDimL:dom.l,pkgDimW:dom.wd,pkgDimH:dom.h}:{};
                         })()}
                         selected={selectedRate}
-                        onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);setShippingOverrideSource("rate");}}/>
+                        onSelect={function(r){setSelectedRate(r);setShippingOverride(r.shipmentCost);setShippingOverrideSource("rate");}}
+                        onSwitchToFreight={function(){setShippingChoice("freight");}}/>
                     </div>
                   );
                 })()}
