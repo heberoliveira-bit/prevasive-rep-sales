@@ -703,25 +703,57 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
     var rfn = ss.ratesFnUrl||ss.edgeFnUrl;
     if(!rfn||!ss.warehouseZip) return;
     setLoading(true); setError(""); setFetched(toZip);
-    fetch(rfn,{
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        apiKey:ss.apiKey, apiSecret:ss.apiSecret,
-        fromZip:ss.warehouseZip,
-        toZip:toZip, toState:toState||"",
-        weight:parseFloat(totalWeight||ss.defaultWeight)||1,
-        weightUnit:ss.weightUnit||"pounds",
-        dimL:parseFloat(pkgDimL)||parseFloat(ss.dimL||ss.defaultL)||12,
-        dimW:parseFloat(pkgDimW)||parseFloat(ss.dimW||ss.defaultW)||10,
-        dimH:parseFloat(pkgDimH)||parseFloat(ss.dimH||ss.defaultH)||6,
-        carrierCodes:ss.carrierFilter ? ss.carrierFilter.split(",").map(function(x){return x.trim();}).filter(Boolean) : null,
-      }),
-    }).then(function(r){return r.json();}).then(function(d){
+
+    // Multi-package handling: UPS Ground caps single parcels at 150 lbs. For heavy
+    // orders we split into N boxes ≤ 140 lbs each and aggregate rates per service.
+    var MAX_LBS_PER_PKG = 140;
+    var MAX_PACKAGES = 10; // ~1,400 lbs ceiling; anything heavier should be freight
+    var totalW = parseFloat(totalWeight||ss.defaultWeight)||1;
+    var numPackages = totalW > MAX_LBS_PER_PKG ? Math.min(MAX_PACKAGES, Math.ceil(totalW / MAX_LBS_PER_PKG)) : 1;
+    var weightPerPkg = Math.round((totalW / numPackages) * 100) / 100;
+
+    var carrierCodes = ss.carrierFilter ? ss.carrierFilter.split(",").map(function(x){return x.trim();}).filter(Boolean) : null;
+    var dimL = parseFloat(pkgDimL)||parseFloat(ss.dimL||ss.defaultL)||12;
+    var dimW = parseFloat(pkgDimW)||parseFloat(ss.dimW||ss.defaultW)||10;
+    var dimH = parseFloat(pkgDimH)||parseFloat(ss.dimH||ss.defaultH)||6;
+
+    function fetchPkg(){
+      return fetch(rfn,{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          apiKey:ss.apiKey, apiSecret:ss.apiSecret,
+          fromZip:ss.warehouseZip,
+          toZip:toZip, toState:toState||"",
+          weight: weightPerPkg,
+          weightUnit:ss.weightUnit||"pounds",
+          dimL: dimL, dimW: dimW, dimH: dimH,
+          carrierCodes: carrierCodes,
+        }),
+      }).then(function(r){return r.json();})
+       .catch(function(e){return {ok:false, error:"Could not reach shipping server: "+e.message};});
+    }
+
+    var requests = [];
+    for(var i=0; i<numPackages; i++) requests.push(fetchPkg());
+
+    Promise.all(requests).then(function(responses){
       setLoading(false);
-      setDebug(d);
-      if(d.ok){
-        var allRates = d.rates||[];
-        // Deduplicate by serviceCode+cost
+      // Use the first response for debug/error display
+      var first = responses[0] || {};
+      setDebug(Object.assign({}, first, {numPackages: numPackages, weightPerPkg: weightPerPkg}));
+
+      // Any total failure
+      var failed = responses.filter(function(d){return !d || !d.ok;});
+      if(failed.length === numPackages) {
+        var err = (failed[0] && failed[0].error) || "Failed to get rates";
+        setError(err);
+        return;
+      }
+
+      if(numPackages === 1) {
+        // Single-package path: existing behavior, dedupe by service+cost
+        var d = responses[0];
+        var allRates = (d && d.rates) || [];
         var seen = {};
         var deduped = allRates.filter(function(r){
           var key = r.serviceCode+"_"+r.shipmentCost;
@@ -730,9 +762,40 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
           return true;
         });
         setRates(deduped);
-        if(deduped.length>0&&!selected) onSelect(deduped[0]);
-      } else { setError(d.error||"Failed to get rates"); }
-    }).catch(function(e){setLoading(false);setError("Could not reach shipping server: "+e.message);});
+        if(deduped.length>0 && !selected) onSelect(deduped[0]);
+        return;
+      }
+
+      // Multi-package: aggregate by carrier|service. Only keep services that
+      // returned a rate for ALL N packages (otherwise we can't quote it cleanly).
+      var byKey = {};
+      responses.forEach(function(d){
+        if(!d || !d.ok || !Array.isArray(d.rates)) return;
+        // Dedupe within a single package response first
+        var seenInPkg = {};
+        d.rates.forEach(function(r){
+          var k = r.serviceCode+"_"+r.shipmentCost;
+          if(seenInPkg[k]) return; seenInPkg[k] = true;
+          var key = (r.carrierCode||"")+"|"+(r.serviceCode||"");
+          if(!byKey[key]) byKey[key] = Object.assign({}, r, {shipmentCost: 0, packagesReturned: 0});
+          byKey[key].shipmentCost += (r.shipmentCost || 0);
+          byKey[key].packagesReturned += 1;
+        });
+      });
+      var combined = Object.keys(byKey).map(function(k){return byKey[k];})
+        .filter(function(r){return r.packagesReturned === numPackages;})
+        .map(function(r){
+          return Object.assign({}, r, {
+            packageCount: numPackages,
+            weightPerPackage: weightPerPkg,
+            // The displayed cost stays raw; the picker UI shows "× N packages" inline
+          });
+        });
+      // Sort cheapest first
+      combined.sort(function(a,b){return (a.shipmentCost||0) - (b.shipmentCost||0);});
+      setRates(combined);
+      if(combined.length>0 && !selected) onSelect(combined[0]);
+    });
   }, [toZip]);
 
   if(loading) return (
@@ -771,8 +834,14 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
               <div style={{width:16,height:16,borderRadius:"50%",border:"2px solid "+(isSel?C.accent:C.border),
                            background:isSel?C.accent:"transparent",flexShrink:0}}/>
               <div>
-                <div style={{fontSize:12,fontWeight:isSel?700:400,color:C.text}}>{r.carrierName||r.carrierCode} — {r.serviceName}</div>
-                {r.transitDays&&<div style={{fontSize:10,color:C.muted}}>{r.transitDays} business day{r.transitDays!==1?"s":""}</div>}
+                <div style={{fontSize:12,fontWeight:isSel?700:400,color:C.text}}>
+                  {r.carrierName||r.carrierCode} — {r.serviceName}
+                  {r.packageCount>1 && <span style={{marginLeft:6,padding:"1px 6px",borderRadius:20,background:C.accent+"18",color:C.accent,fontSize:9,fontWeight:700}}>× {r.packageCount} packages</span>}
+                </div>
+                <div style={{fontSize:10,color:C.muted}}>
+                  {r.transitDays && (r.transitDays+" business day"+(r.transitDays!==1?"s":""))}
+                  {r.packageCount>1 && (r.transitDays?" · ":"")+r.weightPerPackage.toFixed(1)+" lbs/box"}
+                </div>
               </div>
             </div>
             <div style={{fontSize:13,fontWeight:700,color:isSel?C.accent:C.text}}>${(r.shipmentCost||0).toFixed(2)}</div>
@@ -10114,6 +10183,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       notes:notes,
       status: isEdit ? (editOrder.status||"Submitted") : (isFreight ? "Awaiting Freight Quote" : "Submitted"),
       shippingType: isFreight ? "freight" : "parcel",
+      packageCount: (selectedRate && selectedRate.packageCount) || 1,
+      weightPerPackage: (selectedRate && selectedRate.weightPerPackage) || null,
       freightDetails: isFreight ? {
         pallets: freightPallets,
         totalWeight: computeFreightSummary(items, products).totalWeight,
@@ -14504,10 +14575,12 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         subtotal:subtotal, tax:tax, taxRate:taxRate, taxInfo:taxInfo, shipping:shipping, total:total,
         shippingRate: selectedRate ? {
           amount: Number(selectedRate.shipmentCost)||0,
-          label: (selectedRate.carrierName||selectedRate.carrierCode||"")+" — "+(selectedRate.serviceName||""),
+          label: (selectedRate.carrierName||selectedRate.carrierCode||"")+" — "+(selectedRate.serviceName||"")+(selectedRate.packageCount>1?" (× "+selectedRate.packageCount+" packages)":""),
           carrierCode: selectedRate.carrierCode||"",
           serviceCode: selectedRate.serviceCode||"",
           transitDays: selectedRate.transitDays||null,
+          packageCount: selectedRate.packageCount||1,
+          weightPerPackage: selectedRate.weightPerPackage||null,
         } : null,
         commissionRate: commRate, commissionAmount: commission,
         paymentMethod: payMethod==="card" ? "card" : (payMethod==="invoice" ? "invoice_link" : ((selCust&&selCust.termsType)||"due_receipt")),
