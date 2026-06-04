@@ -11087,11 +11087,20 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
   const [custOpen, setCustOpen] = useState(false);
   const [search,   setSearch]   = useState("");
   const [sending,  setSending]  = useState(false);
-  const [sentLog,  setSentLog]  = useState([]);
+  // Persist sent log per user — survives refresh (v78 fix)
+  const sentLogKey = "__pv__sentLog_" + (currentUser&&(currentUser.email||currentUser.id||"anon"));
+  const [sentLog, setSentLog] = useState(function(){
+    try{ return JSON.parse(localStorage.getItem(sentLogKey)||"[]"); }catch(e){ return []; }
+  });
   const [thread,     setThread]     = useState([]);
   const [loadThread, setLoadThread] = useState(false);
   const [threadErr,  setThreadErr]  = useState("");
   const [expanded,   setExpanded]   = useState(null);
+
+  // Cache the email config read so we don't re-parse localStorage 100x per render
+  var emailCfg = (function(){ try{ return JSON.parse(localStorage.getItem("__pv__emailCfg")||"null"); }catch(e){ return null; } })();
+  var emailReady = !!(emailCfg && emailCfg.edgeFnUrl && emailCfg.fromEmail);
+  var threadReady = !!(emailCfg && emailCfg.edgeFnUrl && emailCfg.tenantId && emailCfg.clientId && emailCfg.clientSecret);
 
   var myCusts = isAdmin ? customers : customers.filter(function(c2){return c2.repId===repId;});
   var selCust = myCusts.find(function(c2){return c2.id===toId;})||null;
@@ -11107,31 +11116,39 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
 
   function insertVar(v){setBody(function(prev){return prev+v;});}
 
+  function escapeHtml(s){
+    return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+  }
+
   function send() {
     if(!toEmail.trim()||!body.trim()) return;
-    var cfg=null;
-    try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(!cfg||!cfg.edgeFnUrl||!cfg.fromEmail){
+    if(!emailReady){
       addToast("Email not configured — go to Admin → Settings → Email","warning");
       return;
     }
     setSending(true);
-    var htmlBody = body.split("\n").join("<br/>");
-    fetch(cfg.edgeFnUrl,{
+    // Escape HTML in body before sending — preserves user's intent while preventing
+    // injection of <script>/<style> through the rep's compose box
+    var htmlBody = escapeHtml(body).split("\n").join("<br/>");
+    fetch(emailCfg.edgeFnUrl,{
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         to:toEmail.trim(),
         subject:subject,
         html:htmlBody,
-        fromName:cfg.fromName||"PreVasive USA",
-        fromEmail:cfg.fromEmail,
+        fromName:emailCfg.fromName||"PreVasive USA",
+        fromEmail:emailCfg.fromEmail,
       }),
     }).then(function(r){return r.json();}).then(function(d){
       setSending(false);
       if(d.ok){
         var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
-        setSentLog(function(prev){return [entry].concat(prev);});
+        setSentLog(function(prev){
+          var next = [entry].concat(prev).slice(0,50);
+          try{ localStorage.setItem(sentLogKey, JSON.stringify(next)); }catch(e){}
+          return next;
+        });
         addToast("✓ Email sent to "+(selCust?selCust.name:toEmail),"success");
         setToId(""); setToEmail(""); setSubject(""); setBody(""); setTmpl("custom");
       } else {
@@ -11145,17 +11162,18 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
 
   function fetchThread(custEmail) {
     if(!custEmail) return;
-    var cfg=null;
-    try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    if(!cfg||!cfg.edgeFnUrl) return;
+    if(!threadReady){
+      setThreadErr("");  // shown via threadReady gate instead
+      return;
+    }
     setLoadThread(true); setThreadErr("");
-    fetch(cfg.edgeFnUrl,{
+    fetch(emailCfg.edgeFnUrl,{
       method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         action:"getMessages",
         customerEmail:custEmail,
-        fromEmail:cfg.fromEmail,
-        tenantId:cfg.tenantId, clientId:cfg.clientId, clientSecret:cfg.clientSecret,
+        fromEmail:emailCfg.fromEmail,
+        tenantId:emailCfg.tenantId, clientId:emailCfg.clientId, clientSecret:emailCfg.clientSecret,
       }),
     }).then(function(r){return r.json();}).then(function(d){
       setLoadThread(false);
@@ -11166,7 +11184,19 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
 
   return (
     <div>
-      <PageHeader title="Email" subtitle="Compose and send messages to customers"/>
+      <PageHeader title="Email" subtitle={emailReady?("Compose and send messages to customers — sending as "+emailCfg.fromEmail):"Compose and send messages to customers"}/>
+
+      {!emailReady && (
+        <div style={{padding:"12px 16px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:18}}>⚠</span>
+          <div style={{flex:1,fontSize:12,color:C.warning,lineHeight:1.5}}>
+            <strong>Email sending not configured.</strong> {isAdmin
+              ? <span>Go to <strong>Settings → Email</strong> and add the edge function URL + From address before reps can send.</span>
+              : <span>Ask your admin to configure email sending in Settings → Email.</span>}
+          </div>
+        </div>
+      )}
+
       <div style={{display:"grid",gridTemplateColumns:"1fr 340px",gap:20,alignItems:"start"}}>
         <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
           <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
@@ -11193,7 +11223,7 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
                     <div style={{maxHeight:180,overflowY:"auto"}}>
                       {search&&search.indexOf("@")>=0&&<div onClick={function(){setToEmail(search);setToId("");setCustOpen(false);setSearch("");}} style={{padding:"9px 12px",cursor:"pointer",fontSize:12,color:C.accent,fontWeight:600,borderBottom:"1px solid "+C.border}}>Send to: {search}</div>}
                       {filtCusts.map(function(cu){return (
-                        <div key={cu.id} onClick={function(){setToId(cu.id);setToEmail(cu.email||"");setCustOpen(false);setSearch("");fetchThread(cu.email||"");setThread([]);}} style={{padding:"9px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,background:cu.id===toId?C.accent+"10":"none",borderBottom:"1px solid "+C.border}}>
+                        <div key={cu.id} onClick={function(){setToId(cu.id);setToEmail(cu.email||"");setCustOpen(false);setSearch("");setThread([]);setThreadErr("");fetchThread(cu.email||"");}} style={{padding:"9px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:8,background:cu.id===toId?C.accent+"10":"none",borderBottom:"1px solid "+C.border}}>
                           <Avatar name={cu.name} size={24}/>
                           <div><div style={{fontSize:12,fontWeight:600,color:C.text}}>{cu.name}</div><div style={{fontSize:10,color:C.dim}}>{cu.email||"no email"}</div></div>
                         </div>
@@ -11209,6 +11239,16 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
                 style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
             </div>
             
+            <div style={{marginBottom:6,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted}}>Message</div>
+              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                <span style={{fontSize:10,color:C.dim,alignSelf:"center",marginRight:2}}>Insert:</span>
+                {EMAIL_VARS.map(function(v){return (
+                  <button key={v} type="button" onClick={function(){insertVar(v);}}
+                    style={{padding:"3px 8px",borderRadius:5,border:"1px solid "+C.border,background:"transparent",cursor:"pointer",fontFamily:"monospace",fontSize:10,color:C.muted}}>{v}</button>
+                );})}
+              </div>
+            </div>
             <div style={{marginBottom:12}}>
               <textarea value={body} onChange={function(e){setBody(e.target.value);}} rows={9} placeholder="Write your message…"
                 style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.7}}/>
@@ -11242,19 +11282,24 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
                   Select a customer to see conversation history
                 </div>
               )}
-              {toEmail&&loadThread&&(
+              {toEmail && !threadReady && (
+                <div style={{padding:"20px 16px",color:C.dim,fontSize:11,lineHeight:1.6}}>
+                  <strong style={{color:C.muted}}>📥 Inbox integration not configured</strong><br/>
+                  To see two-way conversation history, the admin needs to add Microsoft Graph credentials (Tenant ID, Client ID, Client Secret) in <strong>Settings → Email</strong>. Sending will still work without it.
+                </div>
+              )}
+              {toEmail&&threadReady&&loadThread&&(
                 <div style={{padding:"24px 16px",textAlign:"center",color:C.muted,fontSize:12}}>Loading messages…</div>
               )}
-              {toEmail&&!loadThread&&threadErr&&(
+              {toEmail&&threadReady&&!loadThread&&threadErr&&(
                 <div style={{padding:"16px",fontSize:11,color:C.danger}}>{threadErr}</div>
               )}
-              {toEmail&&!loadThread&&!threadErr&&thread.length===0&&(
+              {toEmail&&threadReady&&!loadThread&&!threadErr&&thread.length===0&&(
                 <div style={{padding:"24px 16px",textAlign:"center",color:C.dim,fontSize:12,fontStyle:"italic"}}>No messages found</div>
               )}
               {thread.map(function(msg){
-                var isFromCust = msg.from&&msg.from.emailAddress&&msg.from.emailAddress.address.toLowerCase()!==((toEmail||"").toLowerCase()) ? false : true;
-                var fromAddr = msg.from&&msg.from.emailAddress&&msg.from.emailAddress.address||"";
-                var cfgEmail = (function(){try{return JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}").fromEmail||"";}catch(e){return "";}})();
+                var fromAddr = (msg.from&&msg.from.emailAddress&&msg.from.emailAddress.address)||"";
+                var cfgEmail = (emailCfg&&emailCfg.fromEmail)||"";
                 var sent = fromAddr.toLowerCase()===cfgEmail.toLowerCase();
                 var date = new Date(msg.receivedDateTime);
                 var dateStr = date.toLocaleDateString("en-US",{month:"short",day:"numeric"})+" "+date.toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"});
