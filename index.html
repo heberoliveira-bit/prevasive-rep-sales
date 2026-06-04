@@ -95,9 +95,12 @@ var STATUS_COLOR = {
   Refunded:           {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
   Returned:           {c:"#df1b41",bg:"rgba(223,27,65,.12)"},
   // Freight workflow
-  "Awaiting Freight Quote": {c:"#b45309", bg:"rgba(245,158,11,.18)"},
-  "Quoted":                 {c:"#635bff", bg:"rgba(99,91,255,.12)"},
-  "Quote Expired":          {c:"#df1b41", bg:"rgba(223,27,65,.12)"},
+  "Awaiting Freight Quote":    {c:"#b45309", bg:"rgba(245,158,11,.18)"},
+  "Quoted":                    {c:"#635bff", bg:"rgba(99,91,255,.12)"},
+  "Quote Expired":             {c:"#df1b41", bg:"rgba(223,27,65,.12)"},
+  // Post-quote payment gates (v72)
+  "Awaiting Customer Payment": {c:"#b45309", bg:"rgba(245,158,11,.18)"},
+  "Awaiting Admin Approval":   {c:"#8b5cf6", bg:"rgba(139,92,246,.14)"},
 };
 
 /* ─── Freight (LTL) Helpers ─────────────────────────────────────────────── */
@@ -3861,20 +3864,41 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
       {tab==="addresses"&&(
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
           {(function(){
-            var billing=[customer.billingAddress||customer.address,customer.billingAddress2,(customer.billingCity||customer.city)&&((customer.billingCity||customer.city)+(customer.billingState||customer.state?", "+(customer.billingState||customer.state):"")+(customer.billingZip||customer.zip?" "+(customer.billingZip||customer.zip):""))].filter(Boolean).join("\n");
-            var sameAs=customer.shippingSameAsBilling!==false&&!customer.shippingAddress;
-            var shipping=sameAs?"Same as billing":[customer.shippingAddress,customer.shippingAddress2,customer.shippingCity&&(customer.shippingCity+(customer.shippingState?", "+customer.shippingState:"")+(customer.shippingZip?" "+customer.shippingZip:""))].filter(Boolean).join("\n");
+            // Defensive read: a few legacy paths saved billingAddress as an object
+            // ({address, address2, city, state, zip}) instead of a flat string —
+            // unwrap to its .address field so we don't render [object Object].
+            function asStr(v){
+              if(!v) return "";
+              if(typeof v === "string") return v;
+              if(typeof v === "object") return v.address || v.line1 || v.street || v.address1 || "";
+              return String(v);
+            }
+            var bAddr  = asStr(customer.billingAddress)  || asStr(customer.address);
+            var bAddr2 = asStr(customer.billingAddress2);
+            var bCity  = asStr(customer.billingCity)  || asStr(customer.city);
+            var bState = asStr(customer.billingState) || asStr(customer.state);
+            var bZip   = asStr(customer.billingZip)   || asStr(customer.zip);
+            var billing = [bAddr, bAddr2, bCity && (bCity + (bState?", "+bState:"") + (bZip?" "+bZip:""))].filter(Boolean).join("\n");
+
+            var sAddr  = asStr(customer.shippingAddress);
+            var sameAs = customer.shippingSameAsBilling !== false && !sAddr;
+            var sAddr2 = asStr(customer.shippingAddress2);
+            var sCity  = asStr(customer.shippingCity);
+            var sState = asStr(customer.shippingState);
+            var sZip   = asStr(customer.shippingZip);
+            var shipping = sameAs ? "Same as billing" : [sAddr, sAddr2, sCity && (sCity + (sState?", "+sState:"") + (sZip?" "+sZip:""))].filter(Boolean).join("\n");
+
             return [["🧾 Billing Address",billing],["📦 Shipping Address",shipping]].map(function(block,i){return (
-            <div key={i} style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
-              <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{block[0]}</div>
-              {block[1] ? (
-                <div style={{fontSize:13,color:block[1]==="Same as billing"?C.muted:C.text,lineHeight:1.8,whiteSpace:"pre-line",fontStyle:block[1]==="Same as billing"?"italic":"normal"}}>{block[1]}</div>
-              ) : (
-                <div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>Not set</div>
-              )}
-            </div>
-          );});})()}
-          );})}
+              <div key={i} style={{background:C.surface2,borderRadius:10,padding:"14px 16px"}}>
+                <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>{block[0]}</div>
+                {block[1] ? (
+                  <div style={{fontSize:13,color:block[1]==="Same as billing"?C.muted:C.text,lineHeight:1.8,whiteSpace:"pre-line",fontStyle:block[1]==="Same as billing"?"italic":"normal"}}>{block[1]}</div>
+                ) : (
+                  <div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>Not set</div>
+                )}
+              </div>
+            );});
+          })()}
         </div>
       )}
     </Modal>
@@ -4063,7 +4087,9 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
   var awaitingCustomerPayment = (orders||[]).filter(function(o){
     return o.shippingType==="freight" && o.invoiceSentAt && !o.paid && o.status!=="Cancelled" && !freightQuoteExpired(o);
   });
-  var total = pendingW9.length+pendingApps.length+pendingReps.length+submittedOrders.length+pendingFreightOrders.length;
+  // v72: orders sitting at "Awaiting Admin Approval" — terms or offline payment, need admin gate before fulfillment
+  var awaitingAdminApproval = (orders||[]).filter(function(o){return o.status==="Awaiting Admin Approval";});
+  var total = pendingW9.length+pendingApps.length+pendingReps.length+submittedOrders.length+pendingFreightOrders.length+awaitingAdminApproval.length;
   const [freightQuoteTarget, setFreightQuoteTarget] = useState(null);
 
   function approveW9(rep) {
@@ -4394,6 +4420,115 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     </div>
                   </div>
                   <div style={{textAlign:"right",fontFamily:"monospace",fontWeight:700,fontSize:13,color:C.accent}}>${((o.totals&&o.totals.grand)||0).toFixed(2)}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* v72: Awaiting Admin Approval — terms or offline freight orders that need admin gate before fulfillment */}
+      {tasksTab==="active"&&awaitingAdminApproval.length>0&&(
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>💳 Orders Awaiting Your Approval <span style={{fontWeight:400,color:C.dim,fontSize:11}}>(terms / offline freight)</span></span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:"#8b5cf6"+"22",color:"#8b5cf6",fontSize:11,fontWeight:700}}>{awaitingAdminApproval.length}</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {awaitingAdminApproval.map(function(o,i){
+              var fq = o.freightQuote || {};
+              var isTerms = o.payMethod && o.payMethod.indexOf("net_")===0;
+              var isOffline = o.payMethod === "offline";
+              var customer = (customers||[]).find(function(c){return c.id===o.custId;}) || {};
+              var sentAgo = (function(){
+                if(!o.invoiceSentAt && !o.auditLog) return "";
+                var lastTs = o.invoiceSentAt || (o.auditLog && o.auditLog.length ? o.auditLog[o.auditLog.length-1].ts : null);
+                if(!lastTs) return "";
+                var ms = Date.now() - new Date(lastTs).getTime();
+                var h = Math.floor(ms/3600000);
+                if(h<1) return "just now";
+                if(h<24) return h+"h ago";
+                return Math.floor(h/24)+"d ago";
+              })();
+              function approveOrder(){
+                showResult({
+                  type:"confirm",
+                  title:"Approve & send to fulfillment?",
+                  body: isTerms
+                    ? "This will mark "+o.id+" approved under "+fmtTerms(o.payMethod)+" and bump it to Waiting Shipping. The customer hasn't paid yet — they'll pay per their terms. ShipStation will pick up the order on its next poll."
+                    : "This will mark "+o.id+" approved (offline payment verified) and bump it to Waiting Shipping. ShipStation will pick up the order on its next poll.",
+                  confirmLabel:"✓ Approve & fulfill",
+                  onConfirm:function(){
+                    var now = new Date().toISOString();
+                    var entry = {ts:now, actor:(currentUser&&currentUser.name)||"Admin", action:"Admin approved — sent to fulfillment", detail:isTerms?fmtTerms(o.payMethod):"offline payment verified"};
+                    var updated = Object.assign({}, o, {
+                      status:"Waiting Shipping",
+                      paymentApproved:true,
+                      adminApprovedAt:now,
+                      adminApprovedBy:(currentUser&&currentUser.name)||"Admin",
+                      auditLog:(o.auditLog||[]).concat([entry])
+                    });
+                    setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
+                    dbSave("crm_orders",o.id,updated);
+                    addToast("✓ "+o.id+" approved — sent to fulfillment","success");
+                    // Notify rep
+                    try{
+                      var n = {id:genId("n"),ts:now,type:"success",repId:o.repId,
+                               msg:"✓ Order "+o.id+" approved — sent to fulfillment",
+                               link:"orders",read:false};
+                      var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:n,created_at:n.ts}).then(function(){});
+                    }catch(e){}
+                  }
+                });
+              }
+              function declineOrder(){
+                var reason = prompt("Optional reason for decline (sent to rep):", "");
+                if(reason === null) return;
+                var now = new Date().toISOString();
+                var entry = {ts:now, actor:(currentUser&&currentUser.name)||"Admin", action:"Admin declined approval — returned to Quoted", detail:reason||"(no reason given)"};
+                var updated = Object.assign({}, o, {
+                  status:"Quoted",
+                  payMethod:undefined, invoiceSentAt:undefined,
+                  adminDeclinedAt:now,
+                  adminDeclineReason:reason||"",
+                  auditLog:(o.auditLog||[]).concat([entry])
+                });
+                setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
+                dbSave("crm_orders",o.id,updated);
+                addToast("Order "+o.id+" returned to rep","info");
+                try{
+                  var n = {id:genId("n"),ts:now,type:"warning",repId:o.repId,
+                           msg:"⚠ Order "+o.id+" approval declined — please update payment method"+(reason?". Reason: "+reason:""),
+                           link:"orders",read:false};
+                  var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:n,created_at:n.ts}).then(function(){});
+                }catch(e){}
+              }
+              return (
+                <div key={o.id} style={{padding:"14px 18px",borderBottom:i<awaitingAdminApproval.length-1?"1px solid "+C.border:"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:4}}>
+                        <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:C.accent}}>{o.id}</span>
+                        <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:"#8b5cf6"+"22",color:"#8b5cf6"}}>
+                          {isTerms ? "📅 "+fmtTerms(o.payMethod) : "💵 Offline"}
+                        </span>
+                        {fq.carrier && <span style={{padding:"2px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:C.warning+"15",color:C.warning}}>🚛 {fq.carrier}</span>}
+                        {sentAgo && <span style={{fontSize:10,color:C.dim}}>· submitted {sentAgo}</span>}
+                      </div>
+                      <div style={{fontSize:12,color:C.text,fontWeight:600}}>{o.custName||"Customer"}</div>
+                      <div style={{fontSize:11,color:C.muted,marginTop:1}}>
+                        Rep: {o.repName||"—"} · {(o.items||[]).length} item(s) · {fmtMoney(o.totals&&o.totals.grand||0)}
+                        {isTerms && customer.termsLimit ? " · Credit limit: $"+(customer.termsLimit||0).toLocaleString("en-US",{minimumFractionDigits:2}) : ""}
+                      </div>
+                      {isTerms && customer.termsLimit && ((o.totals&&o.totals.grand||0) > customer.termsLimit) && (
+                        <div style={{fontSize:11,color:C.danger,fontWeight:700,marginTop:3}}>⚠ Order exceeds credit limit (${(customer.termsLimit).toLocaleString("en-US",{minimumFractionDigits:2})})</div>
+                      )}
+                    </div>
+                    <div style={{display:"flex",gap:6,flexShrink:0}}>
+                      <Btn small variant="ghost" onClick={declineOrder}>Decline</Btn>
+                      <Btn small onClick={approveOrder}>✓ Approve & Fulfill</Btn>
+                    </div>
+                  </div>
                 </div>
               );
             })}
@@ -4914,15 +5049,41 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
 
   var SAMPLE_TEMPLATES = {
     contractor: "INDEPENDENT CONTRACTOR AGREEMENT\n\nThis Independent Contractor Agreement is entered into between PreVasive USA (\"Company\") and the Sales Representative (\"Contractor\").\n\n1. SERVICES\nContractor agrees to sell Company products to medical and healthcare customers within their designated territory in compliance with all applicable federal and state laws, including FDA regulations, anti-kickback statutes, and any state-specific medical sales requirements.\n\n2. COMPENSATION\nContractor earns commission as a markup percentage applied to Company's base product prices. Commission accrues at order placement and is held from each order's shipping date until the applicable release period elapses:\n  • 15 days for card, invoice-link, and Due-on-Receipt payments\n  • 16 days for Net 15 terms\n  • 31 days for Net 30 terms\n  • 46 days for Net 45 terms\nCommission for orders that are Cancelled, Refunded, or Returned during the hold period is forfeited. Released commissions are paid via Stripe Connect to Contractor's registered account.\n\n3. INDEPENDENT CONTRACTOR STATUS\nContractor is an independent contractor, not an employee. Contractor is solely responsible for all federal, state, and local taxes; self-employment tax; insurance; and business expenses. A current IRS Form W-9 must remain on file with Company.\n\n4. CONFIDENTIALITY & NON-SOLICITATION\nContractor agrees to keep all Company information, pricing, customer data, and proprietary materials strictly confidential during and after this engagement. Contractor will not solicit Company customers on behalf of competing products during the term of this agreement or for 12 months following its termination.\n\n5. TERM & TERMINATION\nThis agreement continues until terminated by either party with 30 days written notice. Earned commissions for completed orders will continue to release per the standard hold schedule after termination. Company may terminate immediately for cause, including breach of confidentiality, fraud, regulatory violations, or material misrepresentation.\n\n6. GOVERNING LAW\nThis agreement is governed by the laws of the State of Georgia, USA. Any disputes will be resolved through binding arbitration in Atlanta, GA.",
-    nda: "NON-DISCLOSURE AGREEMENT\n\nThis Agreement is entered into between PreVasive USA and the Sales Representative.\n\n1. CONFIDENTIAL INFORMATION\nConfidential information includes: product pricing, customer lists, business strategies, technical specifications, and any proprietary information disclosed during the course of the business relationship.\n\n2. OBLIGATIONS\nRecipient agrees to: (a) keep all confidential information strictly secret; (b) not disclose to third parties without written consent; (c) use only for authorized sales activities.\n\n3. TERM\nThis obligation survives termination of the business relationship for a period of 3 years.",
-    conduct: "CODE OF CONDUCT\n\nAs a PreVasive Sales Representative, you agree to:\n\n1. PROFESSIONAL STANDARDS\nRepresent PreVasive with integrity and professionalism at all times.\n\n2. COMPLIANCE\nComply with all applicable laws, including FDA regulations, HIPAA, and anti-kickback statutes when applicable.\n\n3. ACCURATE REPRESENTATION\nMake only truthful claims about PreVasive products. Do not make claims not supported by product documentation.\n\n4. CONFLICT OF INTEREST\nDisclose any potential conflicts of interest to your admin immediately.",
+    nda: "NON-DISCLOSURE AGREEMENT\n\nThis Agreement is entered into between PreVasive USA (\"Disclosing Party\") and the Sales Representative (\"Recipient\").\n\n1. CONFIDENTIAL INFORMATION\nConfidential Information includes, without limitation: product pricing and cost data; customer lists, contacts, and purchase histories; business strategies, marketing plans, and sales pipelines; technical specifications, formulations, and manufacturing processes; supplier and vendor information; financial statements; employee and contractor information; and any other proprietary information disclosed in oral, written, electronic, or any other form during the course of the business relationship.\n\n2. EXCLUSIONS\nThis Agreement does not apply to information that: (a) is or becomes publicly known through no fault of Recipient; (b) was known to Recipient before disclosure by the Disclosing Party and is properly documented; (c) is disclosed by a third party who has the right to do so and is not bound by confidentiality; or (d) is required to be disclosed by law, provided that Recipient gives prompt notice and cooperates with any effort to obtain a protective order.\n\n3. OBLIGATIONS OF RECIPIENT\nRecipient agrees to: (a) hold all Confidential Information in strict confidence and use the same degree of care to protect it as it uses for its own confidential information, but in no event less than reasonable care; (b) not disclose Confidential Information to any third party without prior written consent; (c) use Confidential Information only for authorized sales activities on behalf of the Disclosing Party; (d) limit access to Confidential Information to those with a legitimate need to know who are bound by similar obligations of confidentiality; (e) not copy or reproduce Confidential Information except as necessary to fulfill obligations under this Agreement.\n\n4. RETURN OR DESTRUCTION\nUpon termination of the business relationship or at the Disclosing Party's request, Recipient shall promptly return or, at the Disclosing Party's option, destroy all Confidential Information in its possession or control, including all copies, notes, summaries, and derivative works, and certify such return or destruction in writing.\n\n5. INJUNCTIVE RELIEF\nRecipient acknowledges that unauthorized disclosure or use of Confidential Information would cause irreparable harm to the Disclosing Party. The Disclosing Party shall be entitled to seek injunctive relief in addition to any other available remedies, without the requirement of posting bond.\n\n6. TERM\nRecipient's obligations under this Agreement survive termination of the business relationship for a period of three (3) years for general Confidential Information and indefinitely for trade secrets.\n\n7. GOVERNING LAW\nThis Agreement is governed by the laws of the State of Georgia, USA, without regard to its conflict of law principles. Any disputes will be resolved through binding arbitration in Atlanta, GA.",
+    conduct: "CODE OF CONDUCT\n\nAs a PreVasive Sales Representative, you agree to uphold the following standards in your business activities.\n\n1. PROFESSIONAL STANDARDS\nRepresent PreVasive with integrity, honesty, and professionalism at all times. Maintain appropriate dress, demeanor, and communication when interacting with customers, prospects, suppliers, and other representatives. Do not engage in conduct that could embarrass or damage the reputation of the Company.\n\n2. LEGAL COMPLIANCE\nComply with all applicable federal, state, and local laws and regulations. For medical product sales, this includes FDA regulations (including 21 CFR for medical devices and pharmaceuticals where applicable), HIPAA privacy and security requirements, federal and state anti-kickback statutes, Stark Law (where applicable), and state-specific medical sales licensing requirements.\n\n3. ACCURATE PRODUCT REPRESENTATION\nMake only truthful, evidence-based claims about PreVasive products. Do not make off-label claims, exaggerate efficacy, or misrepresent FDA clearance or approval status. Use only Company-approved marketing materials, product literature, and claims. Direct technical questions you cannot accurately answer to Company personnel.\n\n4. CONFLICT OF INTEREST\nDisclose any potential conflicts of interest to your admin in writing within five (5) business days of becoming aware. Do not accept gifts, entertainment, or anything of value from customers, prospects, or competitors in exchange for, or that could appear to influence, business decisions. Do not represent competing product lines without prior written approval.\n\n5. ANTI-DISCRIMINATION & HARASSMENT\nTreat all customers, prospects, fellow representatives, and Company personnel with respect. Do not discriminate based on race, color, religion, national origin, sex, age, disability, sexual orientation, gender identity, or any other protected class. Do not engage in harassment, intimidation, or retaliation of any kind.\n\n6. CUSTOMER DATA HANDLING\nProtect customer information at all times. Do not share, sell, or use customer data outside the scope of your authorized sales activities. Report any data breach or suspected unauthorized access to your admin immediately.\n\n7. REPORTING VIOLATIONS\nReport any suspected violation of this Code, applicable law, or Company policy to your admin or through any anonymous reporting channel the Company provides. The Company prohibits retaliation against any person who reports a suspected violation in good faith.\n\n8. CONSEQUENCES OF VIOLATION\nViolation of this Code may result in disciplinary action up to and including immediate termination of the contractor relationship, forfeiture of unreleased commissions, and pursuit of any legal remedies available to the Company.",
+    commission: "COMMISSION AGREEMENT\n\nThis Commission Agreement is between PreVasive USA (\"Company\") and the Sales Representative (\"Representative\") and governs how commissions are earned, accrued, held, and paid.\n\n1. COMMISSION STRUCTURE\nRepresentative earns a commission calculated as a markup percentage applied to the Company's base product price for each order successfully placed and shipped to Representative's customers. The applicable markup percentage is configured per Representative in the Company's CRM and may be adjusted from time to time with thirty (30) days written notice.\n\n2. ACCRUAL & RECOGNITION\nCommission is recognized at the time an order is placed and the customer's payment terms are confirmed. Commission is shown as \"Accrued\" in the CRM dashboard immediately upon order placement.\n\n3. HOLDING PERIOD\nAll commissions are held from the date the order is marked Shipped until the applicable release date, calculated as follows:\n  • Card / Invoice-Link / Due-on-Receipt payments: shipping date + 15 days\n  • Net 15 terms: shipping date + 16 days\n  • Net 30 terms: shipping date + 31 days\n  • Net 45 terms: shipping date + 46 days\nDuring the holding period, the commission is shown as \"Pending\" in the dashboard and is not available for withdrawal.\n\n4. FORFEITURE\nCommission is forfeited and reversed in the following cases occurring during the holding period: (a) the order is Cancelled; (b) the order is Refunded in whole or part; (c) the order is Returned in whole or part (commission on returned line items is forfeited); (d) the customer disputes the charge and the dispute is resolved against the Company; (e) the Representative materially breaches this Agreement, the Independent Contractor Agreement, or applicable law.\n\n5. RELEASE & PAYMENT\nOnce the holding period elapses without forfeiture, the commission is automatically released and shown as \"Available\". Available commissions are paid via Stripe Connect transfer to Representative's verified bank account on a schedule defined by the Company (typically weekly or bi-weekly). Representative must complete Stripe Connect onboarding, including identity verification, before any payment is released.\n\n6. ADJUSTMENTS & CLAW-BACK\nThe Company may adjust or reverse commission for legitimate business reasons, including but not limited to: pricing errors, customer credits, regulatory chargebacks, or correction of system errors. Any adjustment will be documented in the CRM audit log and communicated to Representative.\n\n7. TAX OBLIGATIONS\nCommission payments are 1099 income. Representative is solely responsible for all federal, state, and local income taxes; self-employment tax; and any required tax filings. Company will issue an annual IRS Form 1099-NEC summarizing payments. A current Form W-9 must remain on file at all times.\n\n8. NO MINIMUM, NO GUARANTEE\nThis Agreement does not guarantee any minimum commission level or volume of orders. Commission is earned solely on successful sales activity as defined above.\n\n9. TERMINATION\nUpon termination of the business relationship for any reason, accrued commissions for orders already shipped will continue through the standard holding/release schedule. No new commission will accrue after termination. Commission held at the time of termination remains subject to the standard forfeiture rules.",
+    nonsolicit: "NON-SOLICITATION AGREEMENT\n\nThis Non-Solicitation Agreement is between PreVasive USA (\"Company\") and the Sales Representative (\"Representative\").\n\n1. RECOGNITION OF COMPANY INTERESTS\nRepresentative acknowledges that the Company has invested significant resources in: (a) developing customer relationships and goodwill; (b) compiling and maintaining customer lists and contact information; (c) training Representatives; and (d) developing proprietary pricing, products, and sales strategies. Representative agrees that these constitute legitimate, protectable interests of the Company.\n\n2. NON-SOLICITATION OF CUSTOMERS\nDuring the term of the business relationship and for twelve (12) months following its termination for any reason, Representative will not, directly or indirectly, for Representative's own benefit or on behalf of any third party:\n  (a) solicit, contact, or accept business from any customer of the Company with whom Representative had material contact during the last twelve (12) months of the business relationship for the purpose of selling competing products; or\n  (b) induce or attempt to induce any customer of the Company to reduce, terminate, or alter its business relationship with the Company.\n\n3. NON-SOLICITATION OF REPRESENTATIVES & EMPLOYEES\nDuring the term of the business relationship and for twelve (12) months following its termination, Representative will not, directly or indirectly, solicit, hire, or induce any other Representative, contractor, or employee of the Company to terminate their relationship with the Company or to join a competing business.\n\n4. DEFINITION OF COMPETING PRODUCTS\n\"Competing products\" means any product or service that is functionally similar to, substitutable for, or directly competitive with the products that the Company sold during the last twelve (12) months of the business relationship.\n\n5. NO RESTRICTION ON GENERAL EMPLOYMENT\nNothing in this Agreement prevents Representative from accepting employment or engagements in any industry, including industries that incidentally compete with the Company, so long as Representative does not engage in the specific activities prohibited above.\n\n6. REASONABLENESS\nRepresentative acknowledges that the duration, geographic scope (Representative's assigned territory and any territory where Representative had material customer contact), and activity restrictions are reasonable and necessary to protect the legitimate business interests of the Company. If any provision is held to be overbroad by a court of competent jurisdiction, the parties intend that the provision be enforced to the maximum extent permitted by law.\n\n7. REMEDIES\nRepresentative acknowledges that breach of this Agreement would cause irreparable harm to the Company that monetary damages alone cannot adequately remedy. The Company is entitled to seek injunctive relief, specific performance, and any other available remedy without the requirement of posting bond, in addition to forfeiture of unreleased commissions and recovery of attorneys' fees.\n\n8. SURVIVAL\nThis Agreement survives termination of any other agreement between the parties.\n\n9. GOVERNING LAW\nThis Agreement is governed by the laws of the State of Georgia, USA. Any disputes will be resolved through binding arbitration in Atlanta, GA, except that the Company may seek injunctive relief in any court of competent jurisdiction.",
+    compliance: "ANTI-KICKBACK & HEALTHCARE COMPLIANCE POLICY\n\nThis Policy applies to all PreVasive Sales Representatives engaged in the marketing or sale of healthcare-related products to medical, dental, veterinary, or other healthcare professionals or facilities (collectively, \"Healthcare Customers\").\n\n1. PURPOSE\nThe Company is committed to full compliance with federal and state anti-kickback statutes (including 42 U.S.C. § 1320a-7b), the Federal False Claims Act, the Stark Law where applicable, the federal Sunshine Act (Open Payments), and all state-specific healthcare sales laws. This Policy establishes the standards of conduct Representatives must follow.\n\n2. PROHIBITED CONDUCT\nRepresentatives must NOT, directly or indirectly:\n  (a) offer, pay, solicit, or receive any remuneration (including cash, gifts, services, entertainment, travel, lodging, meals beyond modest in-office refreshments, free or discounted services, or anything else of value) in exchange for or to induce the referral of business reimbursable by any federal healthcare program (Medicare, Medicaid, TRICARE, VA, etc.) or any other payor;\n  (b) provide free or below-cost products, services, or supplies to a Healthcare Customer as an inducement to purchase Company products;\n  (c) pay or accept any \"finder's fee,\" \"consultant fee,\" or similar payment without a written agreement reviewed and approved in advance by the Company's compliance function and reflecting fair-market-value for legitimate services actually rendered;\n  (d) engage in any quid-pro-quo arrangement linking a Healthcare Customer's purchasing decisions to anything of value;\n  (e) make payments or provide remuneration that could reasonably be interpreted as influencing prescribing, ordering, or referral decisions.\n\n3. PERMISSIBLE ACTIVITIES\nSubject to written Company guidelines and applicable law, the following activities are generally permissible:\n  • Modest in-office meals during legitimate educational or sales presentations (typically under $50 per person and clearly tied to a substantive professional discussion);\n  • Branded educational items of nominal value;\n  • Product samples provided in accordance with FDA Prescription Drug Marketing Act requirements and tracked per Company sample-control procedures;\n  • Legitimate business meetings, training, and continuing education that have a clear, substantive professional purpose.\nAll such activities must be properly documented per Company procedures.\n\n4. STATE-SPECIFIC REQUIREMENTS\nRepresentatives must comply with state-level marketing and disclosure laws that may impose stricter standards than federal law, including but not limited to disclosure thresholds, prohibited gifts, mandatory state registration of medical sales representatives, and reporting of transfers of value. Representative is responsible for knowing the requirements of every state in which Representative operates.\n\n5. TRANSFERS OF VALUE & SUNSHINE ACT\nAny transfer of value (gifts, meals, payments, travel, etc.) to a covered recipient may be subject to disclosure under the federal Sunshine Act. Representative must accurately record all transfers of value in the Company's tracking system within five (5) business days of the transfer.\n\n6. RED FLAGS\nRepresentative must immediately escalate to the Company's admin or compliance contact any of the following: requests for kickbacks, suspicious billing patterns, requests for off-label use, demands for cash payments or undocumented \"consulting\" arrangements, or pressure from a Healthcare Customer to provide anything of value as a condition of business.\n\n7. TRAINING\nRepresentative agrees to complete annual compliance training provided by the Company and any additional training required by changes in law.\n\n8. ENFORCEMENT\nViolation of this Policy is grounds for immediate termination of the business relationship, forfeiture of unreleased commissions, recovery of any wrongful gain, and the Company's pursuit of all legal remedies. Representative may be personally liable for civil penalties (including treble damages under the False Claims Act) and criminal penalties (including fines and imprisonment) under federal and state law.\n\n9. NON-RETALIATION\nThe Company prohibits retaliation against any person who reports a suspected violation in good faith.",
+    privacy: "DATA PRIVACY & CONFIDENTIALITY ADDENDUM\n\nThis Addendum supplements any Non-Disclosure Agreement between PreVasive USA (\"Company\") and the Sales Representative (\"Representative\") with respect to personal data and customer information.\n\n1. SCOPE\nThis Addendum applies to any personal information, customer data, or business records that Representative receives, processes, stores, or transmits in connection with the business relationship, including: customer names, contact details, billing and shipping addresses, payment methods (excluding card numbers, which are tokenized through Stripe), order histories, communications, and any other personally identifiable information (\"Customer Data\").\n\n2. PERMITTED USE\nRepresentative may use Customer Data solely to: (a) fulfill authorized sales activities on behalf of the Company; (b) communicate with the customer about pending orders, quotes, or services; (c) deliver legitimate business correspondence; and (d) comply with applicable law. All other uses are prohibited.\n\n3. PROHIBITED USES\nRepresentative shall NOT:\n  (a) sell, rent, lease, or share Customer Data with any third party;\n  (b) use Customer Data to market competing products or services;\n  (c) use Customer Data after termination of the business relationship for any purpose other than as required by law;\n  (d) export Customer Data outside the Company's CRM system except as specifically authorized in writing;\n  (e) commingle Customer Data with Representative's personal contacts or with data belonging to any other business or principal.\n\n4. SAFEGUARDS\nRepresentative shall maintain reasonable administrative, technical, and physical safeguards for Customer Data, including:\n  • Strong, unique passwords for CRM access;\n  • Two-factor authentication where the Company offers it;\n  • Locked devices and password-protected screensavers;\n  • Encrypted storage on any laptop, tablet, or phone used to access Customer Data;\n  • No use of public Wi-Fi for Customer Data access without a VPN;\n  • No printing of Customer Data except as necessary, and secure destruction of any printed records.\n\n5. HEALTHCARE INFORMATION (HIPAA)\nIf the business relationship involves Protected Health Information (PHI) as defined by HIPAA (45 CFR § 160.103), Representative agrees to execute a separate Business Associate Agreement (BAA) and to comply with all applicable HIPAA Privacy, Security, and Breach Notification Rules. In the absence of a BAA, Representative shall not access or receive PHI in any form.\n\n6. PAYMENT CARD DATA\nRepresentative shall NEVER store, transmit, or transcribe full payment card numbers, security codes, or full magnetic stripe / chip data on paper, in email, in chat, or in any non-PCI-compliant system. All card data must flow exclusively through the Company's PCI-compliant payment processor (Stripe).\n\n7. BREACH NOTIFICATION\nRepresentative must notify the Company in writing within twenty-four (24) hours of discovering any actual or suspected unauthorized access to, loss of, or disclosure of Customer Data, including device theft or loss, phishing compromise, account takeover, or accidental disclosure. Representative shall cooperate fully with Company's investigation and any required breach response activities.\n\n8. RETURN OR DESTRUCTION\nUpon termination of the business relationship, Representative shall promptly: (a) cease all access to Customer Data; (b) delete Customer Data from any personal devices or accounts; (c) return or destroy any printed records; and (d) certify such return or destruction in writing within thirty (30) days.\n\n9. INDIVIDUAL RIGHTS REQUESTS\nIf a customer contacts Representative requesting access to, correction of, deletion of, or restriction on their data, Representative shall promptly forward the request to the Company without responding substantively. The Company will manage all rights requests centrally.\n\n10. ENFORCEMENT\nViolation of this Addendum is a material breach of the Non-Disclosure Agreement and may result in immediate termination, forfeiture of unreleased commissions, and pursuit of all legal remedies including injunctive relief and damages.",
+    aup: "ACCEPTABLE USE POLICY — CRM PLATFORM\n\nThis Acceptable Use Policy governs Representative's access to and use of the PreVasive CRM platform (the \"Platform\").\n\n1. ACCOUNT SECURITY\nRepresentative agrees to:\n  (a) keep account credentials confidential and not share login credentials with any other person, including other Representatives;\n  (b) use a strong, unique password for the Platform;\n  (c) enable two-factor authentication when available;\n  (d) sign out when leaving a shared or unattended device;\n  (e) notify the Company immediately of any unauthorized access or suspected compromise of the account.\nRepresentative is responsible for all activity that occurs under Representative's account.\n\n2. ACCEPTABLE USES\nThe Platform may be used solely for:\n  • Creating, managing, and tracking orders for Company products;\n  • Maintaining customer records related to authorized sales activities;\n  • Communicating with the Company through approved channels;\n  • Accessing Company-provided documents, reports, and training materials;\n  • Other activities expressly authorized by the Company.\n\n3. PROHIBITED ACTIVITIES\nRepresentative shall NOT:\n  (a) use the Platform for any unlawful purpose;\n  (b) attempt to access accounts, data, or features for which Representative does not have authorization;\n  (c) scrape, crawl, harvest, or systematically extract data from the Platform other than through normal use;\n  (d) reverse-engineer, decompile, or attempt to derive the source code of the Platform;\n  (e) introduce malware, viruses, or other malicious code;\n  (f) attempt to disrupt, overload, or degrade Platform performance;\n  (g) circumvent security controls, rate limits, or access restrictions;\n  (h) use automated scripts, bots, or AI agents to interact with the Platform without prior written approval;\n  (i) export, sell, or share Customer Data in violation of the Data Privacy & Confidentiality Addendum;\n  (j) misrepresent identity or impersonate any other Representative, customer, or Company personnel.\n\n4. DATA ENTRY ACCURACY\nRepresentative agrees to enter accurate, complete, and timely information. Fraudulent or materially inaccurate entries (including fake customers, fake orders, or fake addresses) are grounds for immediate termination and may constitute fraud under applicable law.\n\n5. MONITORING\nThe Company may monitor Representative's use of the Platform, including audit logs, login records, and data access patterns, for legitimate business purposes including security, compliance, performance review, and policy enforcement. Representative has no expectation of privacy in their use of the Platform.\n\n6. THIRD-PARTY SERVICES\nThe Platform may integrate with third-party services (Stripe for payments, ShipStation for shipping rates, email and document delivery services, etc.). Representative's use of those features is also governed by the applicable third-party terms. Representative is responsible for understanding and complying with those terms.\n\n7. AVAILABILITY & MAINTENANCE\nThe Company makes commercially reasonable efforts to keep the Platform available but does not guarantee uninterrupted access. Scheduled maintenance, unscheduled outages, third-party service disruptions, and other interruptions may occur. The Company is not liable for missed sales opportunities or other losses arising from Platform unavailability.\n\n8. INTELLECTUAL PROPERTY\nThe Platform, its content, and all related intellectual property remain the exclusive property of the Company. Representative receives only a limited, revocable, non-transferable, non-exclusive license to use the Platform for authorized purposes.\n\n9. SUSPENSION & TERMINATION\nThe Company may suspend or terminate Platform access at any time, with or without notice, for actual or suspected violation of this Policy, applicable law, or any other Company agreement. Upon termination, Representative shall cease all use of the Platform and comply with the return/destruction obligations in the Data Privacy & Confidentiality Addendum.",
   };
+
+  // Friendly metadata for the template picker
+  var TEMPLATE_META = [
+    { key:"contractor",  icon:"📋", title:"Independent Contractor Agreement", desc:"Foundational engagement terms: services, compensation, contractor status, term, governing law." },
+    { key:"commission",  icon:"💰", title:"Commission Agreement",              desc:"Detailed commission structure, accrual, hold periods, forfeiture, payment, and tax obligations." },
+    { key:"nda",         icon:"🔒", title:"Non-Disclosure Agreement",          desc:"Confidentiality of pricing, customer lists, business strategies. Three-year term, indefinite for trade secrets." },
+    { key:"nonsolicit",  icon:"🛡️", title:"Non-Solicitation Agreement",        desc:"12-month customer and rep non-solicitation after termination. Reasonableness, injunctive relief." },
+    { key:"compliance",  icon:"⚖️", title:"Anti-Kickback & Healthcare Compliance", desc:"Federal AKS, False Claims Act, Sunshine Act, state-level rules. Prohibited and permissible conduct." },
+    { key:"privacy",     icon:"🛡️", title:"Data Privacy & Confidentiality Addendum", desc:"Customer data handling, safeguards, HIPAA reference, breach notification, return/destruction on termination." },
+    { key:"aup",         icon:"🖥️", title:"Acceptable Use Policy (CRM)",       desc:"Account security, permitted/prohibited uses of the platform, monitoring, IP rights." },
+    { key:"conduct",     icon:"📜", title:"Code of Conduct",                   desc:"Professional standards, legal compliance, product representation, anti-discrimination, reporting." },
+  ];
+
+  function templateTitleFor(key){
+    var meta = TEMPLATE_META.find(function(m){return m.key===key;});
+    return meta ? meta.title : "";
+  }
+
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
 
   function openNew(tmpl) {
     setEditDoc(null);
-    setTitle(tmpl==="contractor"?"Independent Contractor Agreement":tmpl==="nda"?"Non-Disclosure Agreement":tmpl==="conduct"?"Code of Conduct":"");
-    setContent(SAMPLE_TEMPLATES[tmpl]||"");
-    setDesc(""); setVersion("1.0"); setRequires(true); setShowForm(true);
+    setTitle(tmpl ? templateTitleFor(tmpl) : "");
+    setContent(tmpl ? (SAMPLE_TEMPLATES[tmpl]||"") : "");
+    setDesc(""); setVersion("1.0"); setRequires(true);
+    setShowTemplatePicker(false);
+    setShowForm(true);
   }
 
   function openEdit(doc) {
@@ -4963,8 +5124,7 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
     <div>
       <PageHeader title="Legal & Compliance" subtitle="Manage agreements, policies and rep signatures"
         action={tab==="docs"&&<div style={{display:"flex",gap:6}}>
-          <Btn small variant="ghost" onClick={function(){openNew("contractor");}}>+ Contractor</Btn>
-          <Btn small variant="ghost" onClick={function(){openNew("nda");}}>+ NDA</Btn>
+          <Btn small variant="ghost" onClick={function(){setShowTemplatePicker(true);}}>📋 From Template…</Btn>
           <Btn small onClick={function(){openNew("");}}>+ New Doc</Btn>
         </div>}/>
 
@@ -4980,9 +5140,9 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
       {tab==="docs"&&(
         legalDocs.length===0 ? (
           <EmptyState icon="📄" title="No documents yet"
-            subtitle="Publish legal documents that reps must sign before accessing the platform."
+            subtitle="Publish legal documents that reps must sign before accessing the platform. Eight ready-made templates are available — pick one to start."
             action={<div style={{display:"flex",gap:8,justifyContent:"center"}}>
-              <Btn small onClick={function(){openNew("contractor");}}>+ Contractor Agreement</Btn>
+              <Btn small onClick={function(){setShowTemplatePicker(true);}}>📋 Browse Templates</Btn>
               <Btn small variant="ghost" onClick={function(){openNew("");}}>+ Custom Doc</Btn>
             </div>}/>
         ) : (
@@ -5215,6 +5375,44 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
           <div style={{fontSize:13,color:C.text,whiteSpace:"pre-wrap",lineHeight:1.8,
                        background:C.surface2,borderRadius:10,padding:"16px",
                        maxHeight:400,overflowY:"auto"}}>{viewDoc.content}</div>
+        </Modal>
+      )}
+
+      {/* Template picker */}
+      {showTemplatePicker && (
+        <Modal title="📋 Choose a template" wide={true} onClose={function(){setShowTemplatePicker(false);}}
+          footer={<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
+            <div style={{fontSize:11,color:C.dim}}>All templates load editable in the editor — customize before publishing.</div>
+            <Btn variant="ghost" small onClick={function(){setShowTemplatePicker(false);}}>Cancel</Btn>
+          </div>}>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.6,marginBottom:14}}>
+            Eight standard commerce documents are bundled. Pick one to load it in the editor with full text — you can edit any clause before publishing.
+            Already-published documents won't be duplicated; the picker doesn't check, so use it as a starting point only.
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            {TEMPLATE_META.map(function(t){
+              var alreadyPublished = legalDocs.some(function(d){return d.title === t.title;});
+              return (
+                <button key={t.key} onClick={function(){openNew(t.key);}}
+                  style={{textAlign:"left",padding:"14px 16px",background:C.bg,
+                          border:"1px solid "+(alreadyPublished?C.success+"40":C.border),
+                          borderRadius:10,cursor:"pointer",fontFamily:"inherit",
+                          display:"flex",gap:12,alignItems:"flex-start",
+                          transition:"all .15s"}}
+                  onMouseOver={function(e){e.currentTarget.style.borderColor=C.accent;e.currentTarget.style.background=C.surface2;}}
+                  onMouseOut={function(e){e.currentTarget.style.borderColor=alreadyPublished?C.success+"40":C.border;e.currentTarget.style.background=C.bg;}}>
+                  <div style={{fontSize:22,lineHeight:1,flexShrink:0,marginTop:2}}>{t.icon}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{t.title}</div>
+                      {alreadyPublished && <span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:20,background:C.success+"22",color:C.success,whiteSpace:"nowrap"}}>● Published</span>}
+                    </div>
+                    <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{t.desc}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </Modal>
       )}
     </div>
@@ -11842,23 +12040,33 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
    order onto the customer's net terms. */
 function FinishFreightOrderModal({order, customer, repName, onFinish, onClose, addToast}) {
   // Available payment methods depend on the customer's account state.
-  // Always available: pay link (Stripe). Available if customer has approved terms: net.
+  // - online: always available (CC via Stripe link — pay link is on the order from quote-save)
+  // - net_15 / net_30 / net_45: available only if customer has approved terms (any term-type counts)
+  // - offline: always available (rep handles outside the platform; admin approves once payment received)
   var hasApprovedTerms = !!(customer && customer.termsType && (customer.termsStatus==="active" || customer.termsStatus==="signed"));
-  var defaultMethod = "invoice_link";
-  const [method,  setMethod]  = useState(defaultMethod);
-  const [sending, setSending] = useState(false);
+  // The customer's pre-approved term-type, used as the default term selection if applicable
+  var customerTerm = (customer && customer.termsType) || "net_30";
+  const [method,   setMethod]   = useState("online"); // online | net | offline
+  const [netTerm,  setNetTerm]  = useState(customerTerm);
+  const [agreed,   setAgreed]   = useState(false);
+  const [sending,  setSending]  = useState(false);
 
   var fq = order.freightQuote || {};
   var totals = order.totals || {};
+  var custEmail = (customer && customer.email) || "";
 
   function submit(){
-    var custEmail = customer.email || "";
-    if(method==="invoice_link" && !custEmail){ addToast("Customer has no email on file — add one first","warning"); return; }
+    if(!agreed){ addToast("Please confirm the customer accepted the freight cost and payment terms","warning"); return; }
     setSending(true);
     var now = new Date().toISOString();
     var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
 
-    if(method==="invoice_link") {
+    // ─── Path 1: Online payment (CC via Stripe-hosted pay link) ─────────────
+    // Rep emails or shares the pay link. Customer pays online. The pay-link
+    // handler (App component, on token check) flips status to "Paid" once
+    // Stripe approves, and autoFulfillIfPaid bumps to Waiting Shipping.
+    if(method === "online") {
+      if(!custEmail){ setSending(false); addToast("Customer has no email on file — add one first","warning"); return; }
       var payLink = order.payToken ? (getSiteUrl()+"#pay="+order.payToken) : null;
       if(!payLink){ setSending(false); addToast("No pay token on this order — ask admin to re-save the quote","warning"); return; }
       notifyEmail("freightInvoice", custEmail,
@@ -11871,48 +12079,90 @@ function FinishFreightOrderModal({order, customer, repName, onFinish, onClose, a
           (totals.tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.tax)||0).toFixed(2)+"</td></tr>":"") +
           "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
           "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+((totals.grand)||0).toFixed(2)+"</td></tr>" +
-          "</table>" +
-          "<p style='font-size:12px;color:#6b7c93;'>Carrier: <strong style='color:#1a1a2e;'>"+(fq.carrier||"")+(fq.carrierService?" · "+fq.carrierService:"")+"</strong>" +
-          (fq.pickupETA?" · Pickup: "+fq.pickupETA:"") + (fq.transitDays?" · Transit: "+fq.transitDays+" business days":"") + "</p>",
+          "</table>",
           "Pay now", payLink, "#1ea672"));
       var updated = Object.assign({}, order, {
         payMethod: "invoice_link",
+        status: "Awaiting Customer Payment", // will flip to Paid via pay-link handler when customer pays
+        paymentApproved: false,
         invoiceSentAt: now,
-        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Invoice sent to customer", detail:custEmail}])
+        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Invoice link sent — awaiting customer payment", detail:custEmail}])
       });
-      onFinish(updated);
-    } else {
-      // Net terms — flag the order with the customer's term + send the customer an info email
-      var termCode = customer.termsType || "net_30";
+      onFinish(updated, "online");
+      return;
+    }
+
+    // ─── Path 2: Net terms (admin must approve before fulfillment) ──────────
+    if(method === "net") {
+      if(!hasApprovedTerms){ setSending(false); addToast("Customer doesn't have approved credit terms — request them first","warning"); return; }
       if(custEmail){
         notifyEmail("freightInvoice", custEmail,
-          "Your order is confirmed — "+order.id+" — "+fmtTerms(termCode),
+          "Your order is confirmed — "+order.id+" — "+fmtTerms(netTerm),
           notifEmailHtml(co, "Your order is confirmed",
             "<p>Hi "+(order.custName||"there")+",</p>" +
-            "<p>Your order has been confirmed under your <strong>"+fmtTerms(termCode)+"</strong> credit terms. Here's the breakdown:</p>" +
+            "<p>Your order has been confirmed under <strong>"+fmtTerms(netTerm)+"</strong> credit terms. Here's the breakdown:</p>" +
             "<table style='border-collapse:collapse;width:100%;font-size:13px;margin:10px 0;'>" +
             "<tr><td style='padding:6px 10px;'>Subtotal</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.subtotal)||0).toFixed(2)+"</td></tr>" +
             (totals.tax>0?"<tr><td style='padding:6px 10px;'>Tax</td><td style='padding:6px 10px;text-align:right;'>$"+((totals.tax)||0).toFixed(2)+"</td></tr>":"") +
             "<tr><td style='padding:6px 10px;'>Freight ("+(fq.carrier||"LTL")+")</td><td style='padding:6px 10px;text-align:right;'>$"+((fq.freightCost)||0).toFixed(2)+"</td></tr>" +
             "<tr style='border-top:2px solid #1a1a2e;'><td style='padding:8px 10px;font-weight:800;'>Total</td><td style='padding:8px 10px;text-align:right;font-weight:800;color:#635bff;font-size:16px;'>$"+((totals.grand)||0).toFixed(2)+"</td></tr>" +
             "</table>" +
-            "<p style='padding:10px 12px;background:#f6f9fc;border-radius:6px;color:#1a1a2e;font-size:13px;'>Payment per your <strong>"+fmtTerms(termCode)+"</strong> terms. We'll include an invoice with the shipment.</p>",
+            "<p style='padding:10px 12px;background:#f6f9fc;border-radius:6px;color:#1a1a2e;font-size:13px;'>Payment per your <strong>"+fmtTerms(netTerm)+"</strong> terms. We'll include an invoice with the shipment.</p>",
             null, null, "#1ea672"));
       }
-      var updated2 = Object.assign({}, order, {
-        payMethod: termCode,
+      var updatedNet = Object.assign({}, order, {
+        payMethod: netTerm,
+        status: "Awaiting Admin Approval",
+        paymentApproved: false,
         invoiceSentAt: now,
-        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Order finalized under "+fmtTerms(termCode), detail:custEmail||"(no email)"}])
+        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Submitted for admin approval — "+fmtTerms(netTerm), detail:custEmail||"(no email)"}])
       });
-      onFinish(updated2);
+      onFinish(updatedNet, "net");
+      return;
     }
+
+    // ─── Path 3: Offline / other (admin verifies receipt of offline payment) ─
+    if(method === "offline") {
+      var updatedOff = Object.assign({}, order, {
+        payMethod: "offline",
+        status: "Awaiting Admin Approval",
+        paymentApproved: false,
+        auditLog: (order.auditLog||[]).concat([{ts:now, actor:repName, action:"Submitted for admin approval — offline payment", detail:""}])
+      });
+      onFinish(updatedOff, "offline");
+      return;
+    }
+
+    setSending(false);
+  }
+
+  // UI helpers
+  function MethodCard({val, icon, title, desc, warn, children}){
+    var sel = method === val;
+    return (
+      <label style={{display:"flex",gap:10,padding:"12px 14px",background:sel?C.accent+"10":C.surface2,border:"2px solid "+(sel?C.accent:C.border),borderRadius:10,cursor:"pointer",marginBottom:8}}>
+        <input type="radio" name="payMethod" value={val} checked={sel}
+          onChange={function(){setMethod(val);}}
+          style={{accentColor:C.accent,marginTop:2,flexShrink:0}}/>
+        <div style={{flex:1}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2}}>{icon} {title}</div>
+          <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{desc}</div>
+          {warn && <div style={{fontSize:10,color:C.warning,marginTop:4}}>⚠ {warn}</div>}
+          {sel && children}
+        </div>
+      </label>
+    );
   }
 
   return (
     <Modal title={"Finish Order — "+order.id} onClose={onClose}
       footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
         <Btn variant="ghost" onClick={onClose}>Cancel</Btn>
-        <Btn onClick={submit} disabled={sending}>{sending?"Sending…":"Submit & Send →"}</Btn>
+        <Btn onClick={submit} disabled={sending||!agreed}>{sending?"Submitting…":
+          method==="online"?"📧 Send Pay Link →" :
+          method==="net" ? "📅 Submit for Admin Approval →" :
+                            "💵 Submit for Admin Verification →"
+        }</Btn>
       </div>}>
 
       {/* Order recap */}
@@ -11928,34 +12178,53 @@ function FinishFreightOrderModal({order, customer, repName, onFinish, onClose, a
       </div>
 
       {/* Payment method picker */}
-      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:8}}>How should the customer pay?</div>
+      <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:8}}>How will the customer pay?</div>
 
-      <label style={{display:"flex",gap:10,padding:"12px 14px",background:method==="invoice_link"?C.accent+"10":C.surface2,border:"2px solid "+(method==="invoice_link"?C.accent:C.border),borderRadius:10,cursor:"pointer",marginBottom:8}}>
-        <input type="radio" name="payMethod" value="invoice_link" checked={method==="invoice_link"}
-          onChange={function(){setMethod("invoice_link");}}
-          style={{accentColor:C.accent,marginTop:2,flexShrink:0}}/>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2}}>📨 Send invoice link by email</div>
-          <div style={{fontSize:11,color:C.muted}}>Customer pays online via Stripe. They get an email with a pay button.</div>
-          {!customer.email && <div style={{fontSize:10,color:C.warning,marginTop:4}}>⚠ No email on file — add one to the customer record first</div>}
-        </div>
-      </label>
+      <MethodCard val="online"
+        icon="💳"
+        title="Credit Card / Online (Stripe)"
+        desc="Customer pays online via Stripe-hosted pay link. Auto-fulfillment kicks in as soon as Stripe approves the charge — no further admin step."
+        warn={!custEmail ? "No email on file — add one to the customer record first" : null}/>
 
       {hasApprovedTerms ? (
-        <label style={{display:"flex",gap:10,padding:"12px 14px",background:method==="net_terms"?C.accent+"10":C.surface2,border:"2px solid "+(method==="net_terms"?C.accent:C.border),borderRadius:10,cursor:"pointer"}}>
-          <input type="radio" name="payMethod" value="net_terms" checked={method==="net_terms"}
-            onChange={function(){setMethod("net_terms");}}
-            style={{accentColor:C.accent,marginTop:2,flexShrink:0}}/>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:2}}>📋 Use <strong>{fmtTerms(customer.termsType)}</strong> (on file)</div>
-            <div style={{fontSize:11,color:C.muted}}>Customer pays per their approved terms. Invoice ships with the order. Credit limit: ${(customer.termsLimit||0).toLocaleString("en-US",{minimumFractionDigits:2})}.</div>
+        <MethodCard val="net"
+          icon="📅"
+          title={"Net Terms — customer is approved for "+fmtTerms(customerTerm)}
+          desc={"Goods ship on credit; customer pays per their approved terms. Admin must approve the order in the Tasks tab before fulfillment. Credit limit: $"+((customer&&customer.termsLimit)||0).toLocaleString("en-US",{minimumFractionDigits:2})+"."}>
+          <div style={{marginTop:8,display:"flex",gap:6,flexWrap:"wrap"}}>
+            {["net_15","net_30","net_45"].map(function(t){
+              var sel = netTerm === t;
+              return (
+                <button key={t} type="button" onClick={function(e){e.preventDefault();setNetTerm(t);}}
+                  style={{padding:"6px 12px",borderRadius:20,border:"1px solid "+(sel?C.accent:C.border),
+                          background:sel?C.accent+"15":"transparent",color:sel?C.accent:C.muted,
+                          fontFamily:"inherit",fontSize:11,fontWeight:sel?700:500,cursor:"pointer"}}>
+                  {fmtTerms(t)}{t===customerTerm?" (on file)":""}
+                </button>
+              );
+            })}
           </div>
-        </label>
+        </MethodCard>
       ) : (
-        <div style={{padding:"10px 12px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:8,fontSize:11,color:C.dim,lineHeight:1.6}}>
-          <strong>Net terms not available</strong> — this customer doesn't have approved credit terms on file. To enable terms, have them apply via Customers → Request Credit Terms.
+        <div style={{padding:"10px 12px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:8,fontSize:11,color:C.dim,lineHeight:1.6,marginBottom:8}}>
+          <strong>📅 Net terms — not available</strong><br/>
+          This customer doesn't have approved credit terms on file. To enable, have them apply via Customers → Request Credit Terms.
         </div>
       )}
+
+      <MethodCard val="offline"
+        icon="💵"
+        title="Other / Offline (check, wire, COD, etc.)"
+        desc="Use when the customer is paying outside the platform. Admin will verify receipt of payment in the Tasks tab before fulfillment is approved."/>
+
+      {/* Required confirmation */}
+      <label style={{display:"flex",alignItems:"flex-start",gap:8,marginTop:14,padding:"10px 12px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,cursor:"pointer"}}>
+        <input type="checkbox" checked={agreed} onChange={function(e){setAgreed(e.target.checked);}}
+          style={{accentColor:C.accent,marginTop:2,flexShrink:0}}/>
+        <span style={{fontSize:12,color:C.muted,lineHeight:1.5}}>
+          I confirm the customer accepted the freight cost (<strong style={{color:C.text}}>${(fq.freightCost||0).toFixed(2)}</strong>) and the payment terms above.
+        </span>
+      </label>
     </Modal>
   );
 }
@@ -11975,10 +12244,12 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
   var myOrds = orders.filter(function(o){return o.repId===repId;});
   var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
 
-  // Pending Your Action — freight orders where rep still has work
+  // Pending Your Action — freight orders where rep still has work, or is waiting on customer/admin
   var pendingAction = myOrds.filter(function(o){
-    if(o.status==="Awaiting Freight Quote") return true;
-    if(o.status==="Quoted" && !o.invoiceSentAt && !freightQuoteExpired(o)) return true;
+    if(o.status==="Awaiting Freight Quote") return true;                                          // waiting on admin to quote
+    if(o.status==="Quoted" && !o.invoiceSentAt && !freightQuoteExpired(o)) return true;           // quote ready, rep finalizes
+    if(o.status==="Awaiting Customer Payment") return true;                                       // info: waiting on customer
+    if(o.status==="Awaiting Admin Approval") return true;                                         // info: waiting on admin
     return false;
   });
 
@@ -12049,17 +12320,36 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
         </div>
       )}
 
-      {/* Finish Order modal — Option B: rep picks payment method */}
+      {/* Finish Order modal — rep picks payment method, status routes accordingly */}
       {finishTarget && (
         <FinishFreightOrderModal
           order={finishTarget}
           customer={customers.find(function(c){return c.id===finishTarget.custId;})||{}}
           repName={repName}
-          onFinish={function(updated){
+          onFinish={function(updated, path){
             setOrders(function(prev){return prev.map(function(x){return x.id===updated.id?updated:x;});});
             dbSave("crm_orders",updated.id,updated);
             setFinishTarget(null);
-            addToast("Order finalized — "+(updated.payMethod==="invoice_link"||updated.payMethod==="pay_later"?"invoice sent to customer":"customer is on "+fmtTerms(updated.payMethod)),"success");
+            if(path === "online"){
+              addToast("📧 Pay link sent — order is awaiting customer payment","success");
+            } else if(path === "net"){
+              addToast("📅 Submitted for admin approval — they'll review and send to fulfillment","success");
+              // Notify admin via crm_notifications so they can act from Tasks tab
+              try{
+                var notif = {id:genId("n"), ts:new Date().toISOString(), type:"info", adminNotify:true,
+                             msg:"💳 Order "+updated.id+" ("+fmtTerms(updated.payMethod)+") needs your approval — "+updated.custName,
+                             link:"tasks", read:false};
+                var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:notif.id, data:notif, created_at:notif.ts}).then(function(){});
+              }catch(e){}
+            } else if(path === "offline"){
+              addToast("💵 Submitted for admin verification — they'll confirm the offline payment","success");
+              try{
+                var notif2 = {id:genId("n"), ts:new Date().toISOString(), type:"info", adminNotify:true,
+                              msg:"💵 Order "+updated.id+" (offline payment) needs admin verification — "+updated.custName,
+                              link:"tasks", read:false};
+                var sb2=getSB(); if(sb2) sb2.from("crm_notifications").upsert({id:notif2.id, data:notif2, created_at:notif2.ts}).then(function(){});
+              }catch(e){}
+            }
           }}
           onClose={function(){setFinishTarget(null);}}
           addToast={addToast}/>
@@ -15813,6 +16103,8 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
         var pending = myOrders.filter(function(o){
           if(o.status==="Awaiting Freight Quote") return true;
           if(o.status==="Quoted" && !o.invoiceSentAt && !freightQuoteExpired(o)) return true;
+          if(o.status==="Awaiting Customer Payment") return true;
+          if(o.status==="Awaiting Admin Approval") return true;
           return false;
         });
         if(!pending.length) return null;
@@ -15876,11 +16168,19 @@ function MobileOrders({myOrders, customers, products, selectedOrderId, setSelect
           order={finishTarget}
           customer={(customers||[]).find(function(c){return c.id===finishTarget.custId;})||{}}
           repName={(currentUser&&currentUser.name)||"Rep"}
-          onFinish={function(updated){
+          onFinish={function(updated, path){
             setOrders(function(prev){return prev.map(function(x){return x.id===updated.id?updated:x;});});
             dbSave("crm_orders",updated.id,updated);
             setFinishTarget(null);
-            addToast("Order finalized","success");
+            if(path === "online") addToast("📧 Pay link sent — order is awaiting customer payment","success");
+            else if(path === "net"){
+              addToast("📅 Submitted for admin approval","success");
+              try{ var n={id:genId("n"),ts:new Date().toISOString(),type:"info",adminNotify:true,msg:"💳 Order "+updated.id+" ("+fmtTerms(updated.payMethod)+") needs your approval — "+updated.custName,link:"tasks",read:false}; var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:n,created_at:n.ts}).then(function(){}); }catch(e){}
+            }
+            else if(path === "offline"){
+              addToast("💵 Submitted for admin verification","success");
+              try{ var n2={id:genId("n"),ts:new Date().toISOString(),type:"info",adminNotify:true,msg:"💵 Order "+updated.id+" (offline payment) needs admin verification — "+updated.custName,link:"tasks",read:false}; var sb2=getSB(); if(sb2) sb2.from("crm_notifications").upsert({id:n2.id,data:n2,created_at:n2.ts}).then(function(){}); }catch(e){}
+            }
           }}
           onClose={function(){setFinishTarget(null);}}
           addToast={addToast}/>
