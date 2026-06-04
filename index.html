@@ -18560,11 +18560,6 @@ function App() {
       {showSearch&&<GlobalSearch orders={orders} customers={customers} reps={reps} quotes={quotes} products={products} isAdmin={isAdmin} onNav={setActiveTab} onClose={function(){setShowSearch(false);}}/>}
       {viewAsRep&&React.createElement(ImpersonationBanner,{rep:viewAsRep,onExit:function(){setViewAsRep(null);setActiveTab("dashboard");}})}
       </div>
-      {showComplianceBanner && (
-        <div style={{position:"fixed",left:0,right:0,top:viewAsRep?42:0,zIndex:5900}}>
-          <RepComplianceBanner compliance={compliance} onOpen={function(){setComplianceMinimized(false);}}/>
-        </div>
-      )}
       {React.createElement(ToastStack,{toasts:toasts,setToasts:setToasts})}
       {resultModal&&React.createElement(ResultModal,{data:resultModal,onClose:function(){setResultModal(null);}})}
       {isMobileUA && preferDesktopOnMobile && !isAdmin && (
