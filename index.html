@@ -17343,6 +17343,9 @@ function App() {
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
   const isMobileUA = useState(function(){return isMobileDevice();})[0];
   const [preferDesktopOnMobile, setPreferDesktopOnMobile] = useState(false);
+  // v77: compliance wall minimize state — MUST be declared at top of App, before any conditional
+  // early-return paths (receipt/sign/quote/invite/loading) — moving it later violates the rules-of-hooks.
+  const [complianceMinimized, setComplianceMinimized] = useState(false);
   const [twoFAEnabled,  setTwoFAEnabled]  = useLS("twoFAEnabled", false);
   const [twoFAVerified, setTwoFAVerified] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
@@ -18191,13 +18194,8 @@ function App() {
   var compliance = !isAdmin && !viewAsRep && myRepData
     ? repComplianceStatus(myRepData, legalDocs, signatures)
     : {ok:true, issues:[]};
-
-  // Soft-wall minimization persists for the session (cleared by sign-out or page reload)
-  const [complianceMinimized, setComplianceMinimized] = useState(false);
-  // Auto-clear the minimized flag once compliance becomes ok — covers the "admin just approved my W-9" path
-  useEffect(function(){
-    if(compliance.ok && complianceMinimized) setComplianceMinimized(false);
-  }, [compliance.ok]);
+  // Note: useState for complianceMinimized is declared at top of App (above), not here,
+  // to avoid the rules-of-hooks violation with the early-return paths above.
 
   // Legacy `unsignedDocs` used elsewhere in the app for the rep checklist screen
   var unsignedDocs = !isAdmin && currentUser ? legalDocs.filter(function(doc){
