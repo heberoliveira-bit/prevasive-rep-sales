@@ -135,6 +135,41 @@ function transferRepCommission(rep, amountDollars, description){
   });
 }
 
+/* ─── repComplianceStatus — single source of truth for "is this rep fully compliant" ───
+   Compliance has two parts:
+     (a) Every published + required legal doc has a current-version signature on file
+     (b) W-9 is on file AND approved by admin
+
+   Returns { ok, issues[] } where issues is a list of:
+     {type:"unsigned", doc}     — required doc never signed
+     {type:"outdated", doc, sig} — signed but admin published a newer version
+     {type:"w9_missing"}         — W-9 PDF not uploaded
+     {type:"w9_pending"}         — W-9 uploaded, awaiting admin review
+     {type:"w9_rejected", reason} — admin rejected the W-9
+
+   Only `requires && published` docs gate access. Drafts don't count. */
+function repComplianceStatus(rep, legalDocs, signatures){
+  var issues = [];
+  if(!rep) return {ok:false, issues:[]};
+  var required = (legalDocs||[]).filter(function(d){return d.requires && d.published;});
+  required.forEach(function(d){
+    var sig = (signatures||[]).find(function(s){
+      return s.repId===rep.id && s.docId===d.id;
+    });
+    if(!sig){ issues.push({type:"unsigned", doc:d}); return; }
+    var sigVer = sig.version || sig.docVersion;
+    if(sigVer !== d.version){ issues.push({type:"outdated", doc:d, sig:sig}); }
+  });
+  if(!rep.w9Status || rep.w9Status==="not_submitted"){
+    issues.push({type:"w9_missing"});
+  } else if(rep.w9ReviewStatus==="rejected"){
+    issues.push({type:"w9_rejected", reason:rep.w9RejectReason||rep.w9RejectionReason||""});
+  } else if(rep.w9ReviewStatus!=="approved"){
+    issues.push({type:"w9_pending"});
+  }
+  return {ok:issues.length===0, issues:issues};
+}
+
 /* Subscription gate. True if rep can use the platform (paid, in-trial, or comp). */
 function isSubscriptionActive(rep){
   if(!rep) return false;
@@ -5044,67 +5079,208 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
    Blocking modal shown when an already-onboarded rep has outdated/missing
    signatures for active required documents. Cannot be dismissed via close
    button, escape, or click-outside. Only paths: sign each doc, or sign out. */
-function RepLegalWallModal({pendingDocs, repId, repName, onSign, onSignOut}){
-  const [activeDoc, setActiveDoc] = useState(null);
-  if(!pendingDocs || pendingDocs.length===0) return null;
+/* ─── RepComplianceWall — v77 unified wall for legal sigs + W-9 ───
+   Soft wall: rep can minimize to a banner and browse read-only, but key actions
+   (place order, request payout) gate on `compliance.ok`. Wall auto-closes when
+   all issues clear (live via realtime sync).
+
+   Props:
+     compliance — output of repComplianceStatus()
+     rep        — rep record
+     legalDocs  — for finding docs to re-sign
+     setReps    — to update W-9 fields
+     addToast
+     onSign(doc)    — called after rep signs a doc
+     onMinimize()   — soft-dismiss to banner
+     onSignOut()    — full sign-out
+*/
+function RepComplianceWall({compliance, rep, legalDocs, setReps, addToast, onSign, onMinimize, onSignOut}){
+  const [activeDoc,   setActiveDoc]   = useState(null);
+  const [showW9Modal, setShowW9Modal] = useState(false);
+  if(!compliance || compliance.ok) return null;
+  if(!rep) return null;
+
+  var docIssues = compliance.issues.filter(function(i){return i.type==="unsigned" || i.type==="outdated";});
+  var w9Issue   = compliance.issues.find(function(i){return /^w9/.test(i.type);});
+  var requiredDocs = (legalDocs||[]).filter(function(d){return d.requires && d.published;});
+
+  // Per-doc render: row showing status + action
+  function DocRow({d}){
+    var iss = docIssues.find(function(i){return i.doc && i.doc.id===d.id;});
+    var done = !iss;
+    var stale = iss && iss.type==="outdated";
+    var bg = done ? C.success+"08" : stale ? C.warning+"08" : C.bg;
+    var bdr = done ? C.success+"30" : stale ? C.warning+"30" : C.border;
+    return (
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:bg,border:"1px solid "+bdr,borderRadius:8}}>
+        <div style={{width:22,fontSize:14,textAlign:"center",flexShrink:0}}>
+          {done ? "✓" : stale ? "⚠" : "○"}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.text}}>{d.title}</div>
+          <div style={{fontSize:10,color:done?C.success:stale?C.warning:C.dim,marginTop:1}}>
+            {done ? "v"+d.version+" signed" :
+             stale ? "You signed v"+((iss.sig&&(iss.sig.version||iss.sig.docVersion))||"?")+" — current is v"+d.version :
+             "Not signed"}
+          </div>
+        </div>
+        {!done && (
+          <Btn small variant={stale?"warning":"default"} onClick={function(){setActiveDoc(d);}}>{stale ? "Re-sign" : "Read & Sign"}</Btn>
+        )}
+      </div>
+    );
+  }
+
+  // W-9 section render based on state
+  function W9Block(){
+    if(!w9Issue) return (
+      <div style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:C.success+"08",border:"1px solid "+C.success+"30",borderRadius:8}}>
+        <div style={{width:22,fontSize:14,textAlign:"center"}}>✓</div>
+        <div style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>W-9 on file and approved</div>
+      </div>
+    );
+    if(w9Issue.type==="w9_missing"){
+      return (
+        <div style={{padding:"12px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <div style={{width:22,fontSize:14,textAlign:"center"}}>○</div>
+            <div style={{flex:1,fontSize:12,fontWeight:700,color:C.text}}>W-9 form not yet uploaded</div>
+          </div>
+          <div style={{fontSize:11,color:C.muted,marginBottom:10,lineHeight:1.6}}>
+            We need your IRS Form W-9 on file before we can pay commissions. Upload the completed form as a PDF.
+          </div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <Btn small onClick={function(){setShowW9Modal(true);}}>📄 Upload W-9 PDF</Btn>
+            <a href="https://www.irs.gov/pub/irs-pdf/fw9.pdf" target="_blank" rel="noopener noreferrer"
+               style={{padding:"7px 12px",fontSize:11,color:C.muted,border:"1px solid "+C.border,borderRadius:7,textDecoration:"none",display:"inline-flex",alignItems:"center"}}>
+              Need a blank form? Download from IRS ↗
+            </a>
+          </div>
+        </div>
+      );
+    }
+    if(w9Issue.type==="w9_pending"){
+      return (
+        <div style={{display:"flex",alignItems:"flex-start",gap:10,padding:"12px 14px",background:C.warning+"08",border:"1px solid "+C.warning+"30",borderRadius:8}}>
+          <div style={{width:22,fontSize:14,textAlign:"center",marginTop:1}}>⏳</div>
+          <div style={{flex:1,fontSize:11,lineHeight:1.6}}>
+            <div style={{fontWeight:700,color:C.text,fontSize:12,marginBottom:3}}>W-9 received — awaiting admin review</div>
+            <div style={{color:C.muted}}>
+              You submitted your W-9 on {fmtDate(rep.w9SubmittedAt)}. Admin typically reviews within 1 business day. You'll get a notification once it's approved, and this window will close automatically.
+            </div>
+            <div style={{color:C.dim,marginTop:6,fontSize:10}}>
+              You can browse the platform in the meantime, but ordering and payout requests are blocked until W-9 is approved.
+            </div>
+          </div>
+        </div>
+      );
+    }
+    if(w9Issue.type==="w9_rejected"){
+      return (
+        <div style={{padding:"12px 14px",background:C.danger+"08",border:"1px solid "+C.danger+"30",borderRadius:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <div style={{width:22,fontSize:14,textAlign:"center"}}>❌</div>
+            <div style={{flex:1,fontSize:12,fontWeight:700,color:C.danger}}>W-9 needs revision</div>
+          </div>
+          {w9Issue.reason && (
+            <div style={{padding:"8px 12px",background:C.danger+"10",borderRadius:6,fontSize:11,color:C.danger,marginBottom:10,lineHeight:1.6}}>
+              <strong>Admin note:</strong> {w9Issue.reason}
+            </div>
+          )}
+          <Btn small onClick={function(){setShowW9Modal(true);}}>📄 Re-upload W-9</Btn>
+        </div>
+      );
+    }
+    return null;
+  }
+
+  var docsDone = requiredDocs.length - docIssues.length;
+
   return (
     <div style={{position:"fixed",inset:0,background:"rgba(9,17,31,0.92)",backdropFilter:"blur(10px)",
                  zIndex:9000,display:"flex",alignItems:"center",justifyContent:"center",
                  padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}
          onClick={function(e){e.stopPropagation();}}>
       <div style={{background:C.surface,border:"2px solid "+C.warning,borderRadius:14,
-                   width:"100%",maxWidth:580,maxHeight:"90vh",display:"flex",
+                   width:"100%",maxWidth:620,maxHeight:"92vh",display:"flex",
                    flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,.5)"}}>
         <div style={{padding:"22px 24px 18px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
           <div style={{fontSize:10,fontWeight:800,color:C.warning,textTransform:"uppercase",letterSpacing:".1em",marginBottom:6}}>
-            📋 Action Required
+            📋 Complete your onboarding
           </div>
-          <div style={{fontSize:18,fontWeight:800,color:C.text,letterSpacing:"-.01em"}}>
-            Updated legal document{pendingDocs.length===1?"":"s"} — please re-sign
+          <div style={{fontSize:19,fontWeight:800,color:C.text,letterSpacing:"-.01em",marginBottom:6}}>
+            Welcome, {(rep.name||"").split(" ")[0]||"there"}!
+          </div>
+          <div style={{fontSize:12,color:C.muted,lineHeight:1.6}}>
+            A few required steps before you can place orders or request payouts. You can continue browsing the platform read-only while you complete them.
           </div>
         </div>
         <div style={{padding:"18px 24px",overflowY:"auto",flex:1}}>
-          <div style={{fontSize:13,color:C.muted,marginBottom:14,lineHeight:1.7}}>
-            We've updated {pendingDocs.length===1?"a legal document":"some legal documents"} that you'd previously signed.
-            You'll need to review and sign the latest version{pendingDocs.length===1?"":"s"} before continuing to use the app.
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10}}>
-            {pendingDocs.map(function(d){
-              return (
-                <div key={d.id} style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px",
-                                          background:C.bg,border:"1px solid "+C.border,borderRadius:10}}>
-                  <div style={{width:34,height:34,borderRadius:8,background:C.warning+"18",
-                               display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,flexShrink:0}}>📄</div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontSize:13,fontWeight:700,color:C.text}}>{d.title} (v{d.version})</div>
-                    <div style={{fontSize:11,color:C.dim,marginTop:2}}>
-                      {d.previousVersion ? "Was v"+d.previousVersion+" · " : ""}Updated {fmtDate(d.publishedAt||d.lastModifiedAt)}
-                    </div>
-                  </div>
-                  <Btn small onClick={function(){setActiveDoc(d);}}>Review &amp; Sign →</Btn>
-                </div>
-              );
-            })}
+          {requiredDocs.length>0 && (
+            <div style={{marginBottom:18}}>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+                <div style={{fontSize:13,fontWeight:700,color:C.text}}>1. Sign required agreements</div>
+                <div style={{fontSize:11,color:C.dim,fontWeight:600}}>{docsDone} of {requiredDocs.length} complete</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {requiredDocs.map(function(d){return <DocRow key={d.id} d={d}/>;})}
+              </div>
+            </div>
+          )}
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>{requiredDocs.length>0?"2. ":""}Submit your W-9 tax form</div>
+            <W9Block/>
           </div>
         </div>
-        <div style={{padding:"14px 24px",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
-          <div style={{fontSize:11,color:C.dim,lineHeight:1.5}}>
-            Need to step away? You can sign out and return later.
+        <div style={{padding:"14px 24px",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,gap:10,flexWrap:"wrap"}}>
+          <div style={{fontSize:10,color:C.dim,lineHeight:1.5,flex:1,minWidth:200}}>
+            This window closes automatically when everything is complete.
           </div>
-          <Btn variant="ghost" small onClick={onSignOut}>Sign out</Btn>
+          <div style={{display:"flex",gap:8}}>
+            <Btn variant="ghost" small onClick={onSignOut}>Sign out</Btn>
+            <Btn variant="ghost" small onClick={onMinimize}>Continue with limited access →</Btn>
+          </div>
         </div>
       </div>
 
       {activeDoc && (
-        <LegalDocSignModal doc={activeDoc} repId={repId} repName={repName}
+        <LegalDocSignModal doc={activeDoc} repId={rep.id} repName={rep.name||""}
           onSign={function(){
             onSign(activeDoc);
             setActiveDoc(null);
           }}
           onDecline={function(){setActiveDoc(null);}}/>
       )}
+
+      {showW9Modal && (
+        <W9SubmitModal repData={rep} setReps={setReps} addToast={addToast}
+          onClose={function(){setShowW9Modal(false);}}/>
+      )}
     </div>
   );
+}
+
+/* ─── RepComplianceBanner — top banner shown when wall is minimized ─── */
+function RepComplianceBanner({compliance, onOpen}){
+  if(!compliance || compliance.ok) return null;
+  var n = compliance.issues.length;
+  return (
+    <div style={{padding:"10px 18px",background:C.warning+"10",borderBottom:"1px solid "+C.warning+"30",
+                 display:"flex",alignItems:"center",gap:12,fontFamily:"inherit"}}>
+      <span style={{fontSize:16}}>⚠</span>
+      <div style={{flex:1,fontSize:12,color:C.warning,fontWeight:600,lineHeight:1.5}}>
+        Onboarding incomplete — {n} item{n===1?"":"s"} blocking ordering &amp; payouts
+      </div>
+      <Btn small variant="warning" onClick={onOpen}>Complete now</Btn>
+    </div>
+  );
+}
+
+/* Legacy export kept so existing callsite works during the rewire below. */
+function RepLegalWallModal(props){
+  // Forward to new wall for backward compatibility; only used in the App component
+  // until we wire the new wall directly. This shim does nothing actively.
+  return null;
 }
 
 function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToast}) {
@@ -12992,7 +13168,7 @@ function FinishFreightOrderModal({order, customer, repName, onFinish, onClose, a
   );
 }
 
-function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,returns,setReturns,autoOpen}) {
+function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,returns,setReturns,autoOpen,compliance,onOpenWall}) {
   const [showReturn,    setShowReturn]    = useState(false);
   const [showForm,      setShowForm]      = useState(false);
   const [filter,        setFilter]        = useState("all");
@@ -13032,7 +13208,13 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
   return (
     <div>
       <PageHeader title="My Orders" subtitle={myOrds.length+" orders"}
-        action={<Btn onClick={function(){setShowForm(true);}}>+ New Order</Btn>}/>
+        action={
+          (compliance && !compliance.ok) ? (
+            <Btn variant="warning" onClick={function(){if(onOpenWall) onOpenWall();}}>⚠ Complete onboarding to enable</Btn>
+          ) : (
+            <Btn onClick={function(){setShowForm(true);}}>+ New Order</Btn>
+          )
+        }/>
 
       {/* Pending Your Action — freight workflow surface */}
       {pendingAction.length>0 && (
@@ -18005,7 +18187,19 @@ function App() {
   var isAdmin = !viewAsRep && currentUser.role==="admin";
   var myRepData = isAdmin ? null : (viewAsRep ? reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null);
 
-  // Legal docs signing gate
+  // Legal docs signing gate (v77: only requires && published count toward compliance)
+  var compliance = !isAdmin && !viewAsRep && myRepData
+    ? repComplianceStatus(myRepData, legalDocs, signatures)
+    : {ok:true, issues:[]};
+
+  // Soft-wall minimization persists for the session (cleared by sign-out or page reload)
+  const [complianceMinimized, setComplianceMinimized] = useState(false);
+  // Auto-clear the minimized flag once compliance becomes ok — covers the "admin just approved my W-9" path
+  useEffect(function(){
+    if(compliance.ok && complianceMinimized) setComplianceMinimized(false);
+  }, [compliance.ok]);
+
+  // Legacy `unsignedDocs` used elsewhere in the app for the rep checklist screen
   var unsignedDocs = !isAdmin && currentUser ? legalDocs.filter(function(doc){
     if(!doc.active) return false;
     var alreadySigned = signatures.some(function(s){
@@ -18031,9 +18225,11 @@ function App() {
   // Distinguish "still onboarding" (needs the checklist screen) from "already onboarded but
   // legal docs got updated" (needs the blocking re-sign wall modal).
   var coreOnboarded = !!(myRepData && myRepData.termsAcceptedAt && myRepData.agreementSignedAt && w9Approved);
-  var repSetupComplete = isAdmin || !!viewAsRep || (coreOnboarded && unsignedDocs.length===0);
-  // Wall fires only for already-onboarded reps who hit an outdated/missing sig after they finished setup.
-  var showLegalWall = !isAdmin && !viewAsRep && coreOnboarded && unsignedDocs.length > 0;
+  var repSetupComplete = isAdmin || !!viewAsRep || (coreOnboarded && compliance.ok);
+  // v77: Wall fires whenever rep has any compliance issue (missing sigs OR W-9 missing/pending/rejected).
+  // Soft wall — rep can minimize to a banner and browse read-only.
+  var showComplianceWall = !isAdmin && !viewAsRep && myRepData && myRepData.status==="active" && !compliance.ok && !complianceMinimized;
+  var showComplianceBanner = !isAdmin && !viewAsRep && myRepData && myRepData.status==="active" && !compliance.ok && complianceMinimized;
 
   function handleSignDocFromWall(doc){
     var rid = effectiveUser.rep_id || effectiveUser.id;
@@ -18264,7 +18460,9 @@ function App() {
             addToast={addToast} showResult={showResult} discountCodes={discountCodes}
             shippingRules={shippingRules}
             returns={returns} setReturns={setReturns}
-            autoOpen={activeTab==="new_order"}/>
+            autoOpen={activeTab==="new_order" && compliance.ok}
+            compliance={compliance}
+            onOpenWall={function(){setComplianceMinimized(false);}}/>
         )}
         {!isAdmin&&activeTab==="customers"&&(
           <RepCustomers repId={effectiveUser.rep_id||effectiveUser.id}
@@ -18292,6 +18490,11 @@ function App() {
       {showSearch&&<GlobalSearch orders={orders} customers={customers} reps={reps} quotes={quotes} products={products} isAdmin={isAdmin} onNav={setActiveTab} onClose={function(){setShowSearch(false);}}/>}
       {viewAsRep&&React.createElement(ImpersonationBanner,{rep:viewAsRep,onExit:function(){setViewAsRep(null);setActiveTab("dashboard");}})}
       </div>
+      {showComplianceBanner && (
+        <div style={{position:"fixed",left:0,right:0,top:viewAsRep?42:0,zIndex:5900}}>
+          <RepComplianceBanner compliance={compliance} onOpen={function(){setComplianceMinimized(false);}}/>
+        </div>
+      )}
       {React.createElement(ToastStack,{toasts:toasts,setToasts:setToasts})}
       {resultModal&&React.createElement(ResultModal,{data:resultModal,onClose:function(){setResultModal(null);}})}
       {isMobileUA && preferDesktopOnMobile && !isAdmin && (
@@ -18304,12 +18507,15 @@ function App() {
           📱 Switch to mobile view
         </button>
       )}
-      {showLegalWall && (
-        <RepLegalWallModal
-          pendingDocs={unsignedDocs}
-          repId={effectiveUser.rep_id||effectiveUser.id}
-          repName={effectiveUser.name||""}
+      {showComplianceWall && (
+        <RepComplianceWall
+          compliance={compliance}
+          rep={myRepData}
+          legalDocs={legalDocs}
+          setReps={setReps}
+          addToast={addToast}
           onSign={handleSignDocFromWall}
+          onMinimize={function(){setComplianceMinimized(true);}}
           onSignOut={handleLogout}/>
       )}
     </div>
