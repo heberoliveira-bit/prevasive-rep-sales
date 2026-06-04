@@ -454,7 +454,7 @@ function dbLoad(table) {
    Requires the table to be added to the supabase_realtime publication on the DB side:
      ALTER PUBLICATION supabase_realtime ADD TABLE <table>;
    Returns the channel handle so the caller can clean up on unmount. */
-function subscribeTable(table, setState){
+function subscribeTable(table, setState, onStatus){
   var sb = getSB();
   if(!sb) return null;
   var ch = sb.channel("rt_"+table+"_"+Math.random().toString(36).slice(2,8))
@@ -495,6 +495,7 @@ function subscribeTable(table, setState){
       } else if(status === "CLOSED") {
         try{ console.info("[realtime] "+table+" — closed"); }catch(e){}
       }
+      if(typeof onStatus === "function"){ try{ onStatus(status); }catch(e){} }
     });
   return ch;
 }
@@ -8983,7 +8984,7 @@ function computeRepActionFeed(orders, quotes, customers, repId, limit){
 
 /* ─── Admin Rep Activity ─────────────────────────────────────────────────
    Overview of all reps: online status, period stats, recent action feed. */
-function AdminRepActivity({reps, orders, quotes, customers, addToast}){
+function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeStatus}){
   const [expandedId, setExpandedId] = useState(null);
   const [now,        setNow]        = useState(Date.now());
   // Bump "now" every 30s so the relative-time labels stay fresh ("Just now" → "2 min ago")
@@ -9020,9 +9021,32 @@ function AdminRepActivity({reps, orders, quotes, customers, addToast}){
   var onlineCount = sortedReps.filter(function(r){return statusFor(r).label==="online";}).length;
   var todayCount  = sortedReps.filter(function(r){var s=statusFor(r).label; return s==="online" || s==="today";}).length;
 
+  // Live indicator state derived from the crm_reps realtime subscription
+  // "" → connecting (no status yet)
+  // "SUBSCRIBED" → connected, pulsing green
+  // "CHANNEL_ERROR" / "TIMED_OUT" / "CLOSED" → disconnected
+  var liveLabel, liveColor, livePulse;
+  if(realtimeStatus === "SUBSCRIBED"){ liveLabel = "LIVE";       liveColor = C.success; livePulse = true; }
+  else if(realtimeStatus === "" || realtimeStatus == null){ liveLabel = "Connecting…"; liveColor = C.muted;   livePulse = false; }
+  else { liveLabel = "Connection lost"; liveColor = C.danger;  livePulse = false; }
+
   return (
     <div>
-      <PageHeader title="Rep Activity" subtitle={onlineCount+" online · "+todayCount+" active today · "+sortedReps.length+" total"}/>
+      <style>{
+        "@keyframes pv-live-pulse { 0%,100% { opacity:1; transform:scale(1);} 50% { opacity:.4; transform:scale(.6);} }"
+      }</style>
+      <PageHeader title="Rep Activity"
+        subtitle={onlineCount+" online · "+todayCount+" active today · "+sortedReps.length+" total"}
+        action={
+          <div title={"Realtime status: "+(realtimeStatus||"connecting")}
+               style={{display:"inline-flex",alignItems:"center",gap:6,padding:"4px 10px",
+                       borderRadius:20,background:liveColor+"15",border:"1px solid "+liveColor+"40",
+                       fontFamily:"inherit"}}>
+            <span style={{width:7,height:7,borderRadius:"50%",background:liveColor,
+                          animation:livePulse?"pv-live-pulse 1.6s ease-in-out infinite":"none"}}></span>
+            <span style={{fontSize:10,fontWeight:800,color:liveColor,letterSpacing:".06em"}}>{liveLabel}</span>
+          </div>
+        }/>
 
       <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
         <div style={{display:"grid",gridTemplateColumns:"2fr 1.4fr 1.4fr 1.4fr 40px",padding:"10px 18px",background:C.surface2,fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",borderBottom:"1px solid "+C.border}}>
@@ -17391,6 +17415,9 @@ function App() {
   // v77: compliance wall minimize state — MUST be declared at top of App, before any conditional
   // early-return paths (receipt/sign/quote/invite/loading) — moving it later violates the rules-of-hooks.
   const [complianceMinimized, setComplianceMinimized] = useState(false);
+  // v78: realtime channel status for crm_reps (used as canary for the AdminRepActivity live indicator)
+  // Possible values: "" (not yet subscribed), "SUBSCRIBED", "CHANNEL_ERROR", "TIMED_OUT", "CLOSED"
+  const [realtimeStatus, setRealtimeStatus] = useState("");
   const [twoFAEnabled,  setTwoFAEnabled]  = useLS("twoFAEnabled", false);
   const [twoFAVerified, setTwoFAVerified] = useState({});
   const [currentUser, setCurrentUser] = useState(null);
@@ -17871,7 +17898,7 @@ function App() {
       subscribeTable("crm_orders",             setOrders),
       subscribeTable("crm_customers",          setCustomers),
       subscribeTable("crm_products",           setProducts),
-      subscribeTable("crm_reps",               setReps),
+      subscribeTable("crm_reps",               setReps, function(status){ setRealtimeStatus(status); }),
       subscribeTable("crm_commission_payouts", setCommissions),
       subscribeTable("crm_applications",       setApplications),
       subscribeTable("crm_terms_requests",     setTermsRequests),
@@ -18438,7 +18465,7 @@ function App() {
             onViewAsRep={function(rep){setViewAsRep(rep);setActiveTab("dashboard");}}/>
         )}
         {isAdmin&&activeTab==="rep_activity"&&(
-          <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast}/>
+          <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast} realtimeStatus={realtimeStatus}/>
         )}
         {isAdmin&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} setOrders={setOrders} reps={reps} commissions={commissions}
