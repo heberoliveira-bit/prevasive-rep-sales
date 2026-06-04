@@ -9273,21 +9273,91 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 
 </script>
 <script id="c11" type="text/plain">
-function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests}) {
+function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests,currentUser}) {
   const [payTarget,    setPayTarget]    = useState(null);
   const [releasingAll, setReleasingAll] = useState(false);
+  // v76: Held-section state — early release modal target + form state
+  const [earlyTarget,  setEarlyTarget]  = useState(null);
+  const [earlyReason,  setEarlyReason]  = useState("");
+  const [earlySaving,  setEarlySaving]  = useState(false);
+  // Filters / search / period
+  const [filterRep,    setFilterRep]    = useState("all");
+  const [search,       setSearch]       = useState("");
+  const [range,        setRange]        = useState("all");
+  // Tick state — drives the countdown timer refresh (every 60s so we don't thrash render)
+  const [tickN,        setTickN]        = useState(0);
+
+  useEffect(function(){
+    var t = setInterval(function(){setTickN(function(n){return n+1;});}, 60000);
+    return function(){clearInterval(t);};
+  }, []);
 
   var now2 = Date.now();
   var paidOrderIds = (commissions||[]).map(function(cp){return cp.orderId;});
 
-  function getReadyOrders() {
-    return orders.filter(function(o){
-      if(!o.shippedAt) return false;
-      if(o.status==="Cancelled"||o.status==="Refunded"||o.status==="Returned") return false;
-      if(paidOrderIds.indexOf(o.id)>=0) return false;
-      return (now2-new Date(o.shippedAt).getTime()) >= commissionHoldDays(o)*24*60*60*1000;
-    });
+  // ─── Filter pipeline — applied to every section so they stay consistent ───
+  function inRange(dateStr){
+    if(range==="all") return true;
+    var d = new Date(dateStr||""); if(!d.getTime()) return false;
+    var n = new Date();
+    if(range==="today") return d.toDateString()===n.toDateString();
+    if(range==="week")  return (n-d) < 7*24*60*60*1000;
+    if(range==="month") return d.getMonth()===n.getMonth()&&d.getFullYear()===n.getFullYear();
+    if(range==="year")  return d.getFullYear()===n.getFullYear();
+    return true;
   }
+  var srchLow = (search||"").trim().toLowerCase();
+  function matchFilters(o){
+    if(filterRep!=="all" && o.repId !== filterRep) return false;
+    if(srchLow && (o.id||"").toLowerCase().indexOf(srchLow) < 0) return false;
+    return true;
+  }
+  var fOrders = orders.filter(function(o){return matchFilters(o) && inRange(o.createdAt);});
+
+  // Buckets — single source via commissionStateFor
+  var heldOrders     = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "held";});
+  var availableOrds  = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "available";});
+  var forfeitedOrds  = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "forfeited" && ((o.totals&&o.totals.commission)||0) > 0;});
+
+  var paidComms = (commissions||[]).filter(function(cp){
+    if(filterRep!=="all" && cp.repId !== filterRep) return false;
+    if(srchLow && (cp.orderId||"").toLowerCase().indexOf(srchLow) < 0) return false;
+    return inRange(cp.paidAt);
+  });
+
+  var totalHeld    = heldOrders.reduce(function(s,o){return s+((o.totals&&o.totals.commission)||0);}, 0);
+  var totalAvail   = availableOrds.reduce(function(s,o){return s+((o.totals&&o.totals.commission)||0);}, 0);
+  var totalPaidF   = paidComms.reduce(function(s,c){return s+(c.amount||0);}, 0);
+  var totalForfeit = forfeitedOrds.reduce(function(s,o){return s+((o.totals&&o.totals.commission)||0);}, 0);
+
+  // Helpers — countdown + progress for each held row
+  function fmtCountdown(o){
+    if(!o.shippedAt) return "—";
+    var releaseMs = new Date(o.shippedAt).getTime() + commissionHoldDays(o)*24*60*60*1000;
+    var remaining = releaseMs - now2;
+    if(remaining <= 0) return "Ready";
+    var d = Math.floor(remaining / (24*60*60*1000));
+    var h = Math.floor((remaining % (24*60*60*1000)) / (60*60*1000));
+    var m = Math.floor((remaining % (60*60*1000)) / (60*1000));
+    if(d > 0) return d+"d "+h+"h "+m+"m";
+    if(h > 0) return h+"h "+m+"m";
+    return m+"m";
+  }
+  function holdPct(o){
+    if(!o.shippedAt) return 0;
+    var elapsedMs = now2 - new Date(o.shippedAt).getTime();
+    var totalMs = commissionHoldDays(o)*24*60*60*1000;
+    return Math.min(100, Math.max(0, (elapsedMs/totalMs)*100));
+  }
+  function holdDayInfo(o){
+    if(!o.shippedAt) return "";
+    var elapsedMs = now2 - new Date(o.shippedAt).getTime();
+    var totalDays = commissionHoldDays(o);
+    var elapsedDays = Math.floor(elapsedMs / (24*60*60*1000));
+    return "Day "+(elapsedDays+1)+" of "+totalDays;
+  }
+
+  function getReadyOrders() { return availableOrds; }  // alias for legacy releaseAll
 
   function releaseAll() {
     var ready = getReadyOrders();
@@ -9333,13 +9403,8 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
     },400);
   }
   var now = Date.now();
-  var releasedOrds = orders.filter(function(o){
-    if(!o.deliveredAt||!o.repId) return false;
-    if(o.status==="Cancelled"||o.status==="Refunded") return false;
-    return (now-new Date(o.shippedAt).getTime()) >= commissionHoldDays(o)*24*60*60*1000;
-  });
   var paidIds = (commissions||[]).map(function(c){return c.orderId;});
-  var unpaid = releasedOrds.filter(function(o){return paidIds.indexOf(o.id)<0;});
+  var unpaid = availableOrds; // legacy alias; same data via the new buckets
 
   function payCommission(order) {
     var rep = reps.find(function(r){return r.id===order.repId;})||{name:"Unknown"};
@@ -9380,6 +9445,64 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
       showResult({type:"commission",title:"Commission Released",subtitle:connectId?"":connectFn?"Rep needs to connect Stripe account.":"Configure Stripe Connect in Settings to enable direct transfers.",
         rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(amount)],["Method",rec.note],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
     }
+  }
+
+  // ─── v76: Early Release flow — admin override, fires Stripe transfer immediately ───
+  function confirmEarlyRelease(){
+    if(!earlyTarget) return;
+    var reason = (earlyReason||"").trim();
+    if(!reason){ addToast("Reason required for early release","warning"); return; }
+    var o = earlyTarget;
+    var rep = reps.find(function(r){return r.id===o.repId;}) || {name:"Unknown"};
+    if(!rep.stripeConnectId){ addToast(rep.name+" hasn't connected Stripe — can't transfer","warning"); return; }
+    setEarlySaving(true);
+    var amount = (o.totals && o.totals.commission) || 0;
+    var nowIso = new Date().toISOString();
+    var actor = (currentUser && currentUser.name) || "Admin";
+    var pay = {
+      id: genId("pay"),
+      repId: o.repId, repName: rep.name,
+      orderId: o.id, amount: amount,
+      method: "early_release",
+      note: "Early release by "+actor+": "+reason,
+      paidAt: nowIso,
+      earlyRelease: true,
+      earlyReleaseReason: reason,
+      transferStatus: "pending"
+    };
+    dbSave("crm_commission_payouts", pay.id, pay);
+    setCommissions(function(prev){return [pay].concat(prev||[]);});
+    // Audit on order
+    var entry = {ts:nowIso, actor:actor, action:"Commission early-released", detail:fmtMoney(amount)+" — "+reason};
+    var updOrd = Object.assign({}, o, {auditLog: (o.auditLog||[]).concat([entry])});
+    if(setOrders) setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updOrd:x;});});
+    dbSave("crm_orders", o.id, updOrd);
+    // Fire transfer
+    transferRepCommission(rep, amount, "Early release — "+o.id+" — "+rep.name)
+      .then(function(result){
+        var done = Object.assign({}, pay, {
+          transferStatus: result.ok ? "sent" : "failed",
+          stripeTransferId: result.transferId,
+          transferError: result.error,
+          note: result.ok ? pay.note+" — Transfer "+result.transferId : pay.note+" — FAILED: "+result.error
+        });
+        dbSave("crm_commission_payouts", pay.id, done);
+        setCommissions(function(prev){return prev.map(function(c){return c.id===pay.id?done:c;});});
+        if(result.ok){
+          addToast("✓ "+fmtMoney(amount)+" early-released to "+rep.name,"success");
+          try{
+            var n = {id:genId("n"), ts:nowIso, type:"success", repId:o.repId,
+                     msg:"💰 Commission of "+fmtMoney(amount)+" released early for "+o.id+(reason?" — "+reason:""),
+                     link:"commissions", read:false};
+            var sb=getSB(); if(sb) sb.from("crm_notifications").upsert({id:n.id,data:n,created_at:n.ts}).then(function(){});
+          }catch(e){}
+        } else {
+          addToast("Transfer failed: "+result.error+" — payout recorded but funds not sent","danger");
+        }
+      });
+    setEarlyTarget(null);
+    setEarlyReason("");
+    setEarlySaving(false);
   }
 
   var totalUnpaid = unpaid.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
@@ -9478,14 +9601,94 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
           })}
         </div>
       )}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
-        <KpiCard label="Ready to Pay" value={fmtMoney(totalUnpaid)} sub={unpaid.length+" orders"} color={C.gold}/>
-        <KpiCard label="Total Paid Out" value={fmtMoney(totalPaid)} sub={(commissions||[]).length+" payments"} color={C.success}/>
-        <KpiCard label="In Return Window" value={fmtMoney(orders.filter(function(o){
-          if(!o.deliveredAt||!o.repId) return false;
-          return (now-new Date(o.shippedAt).getTime()) < commissionHoldDays(o)*24*60*60*1000;
-        }).reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0))} sub="Held — 15-day window" color={C.warning}/>
+      {/* v76: Filter / search / period row */}
+      <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap",alignItems:"center"}}>
+        <select value={filterRep} onChange={function(e){setFilterRep(e.target.value);}}
+          style={{padding:"7px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:12,minWidth:160}}>
+          <option value="all">All reps ({reps.length})</option>
+          {reps.map(function(r){return <option key={r.id} value={r.id}>{r.name}</option>;})}
+        </select>
+        <input type="text" value={search} onChange={function(e){setSearch(e.target.value);}}
+          placeholder="Search by order ID…"
+          style={{padding:"7px 10px",border:"1px solid "+C.border,borderRadius:7,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:12,flex:1,minWidth:200,boxSizing:"border-box"}}/>
+        <div style={{display:"flex",gap:4,marginLeft:"auto"}}>
+          {[["today","Today"],["week","Week"],["month","Month"],["year","Year"],["all","All"]].map(function(r){
+            var act=range===r[0];
+            return <button key={r[0]} onClick={function(){setRange(r[0]);}}
+              style={{padding:"5px 10px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",
+                      fontSize:11,fontWeight:act?700:400,background:act?C.accent+"18":"transparent",
+                      color:act?C.accent:C.muted}}>{r[1]}</button>;
+          })}
+        </div>
+        {(filterRep!=="all"||search||range!=="all") && (
+          <button onClick={function(){setFilterRep("all");setSearch("");setRange("all");}}
+            style={{padding:"5px 10px",borderRadius:6,border:"1px solid "+C.border,background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:10}}>Clear filters</button>
+        )}
       </div>
+
+      {/* 4-KPI panel — Held / Available / Paid / Forfeited */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
+        <KpiCard label="⏳ Held" value={fmtMoney(totalHeld)} sub={heldOrders.length+" order"+(heldOrders.length===1?"":"s")} color={C.warning}/>
+        <KpiCard label="✅ Available" value={fmtMoney(totalAvail)} sub={availableOrds.length+" ready to pay"} color={C.success}/>
+        <KpiCard label="💸 Paid" value={fmtMoney(totalPaidF)} sub={paidComms.length+" payment"+(paidComms.length===1?"":"s")} color={C.accent}/>
+        <KpiCard label="❌ Forfeited" value={fmtMoney(totalForfeit)} sub={forfeitedOrds.length+" order"+(forfeitedOrds.length===1?"":"s")} color={C.danger}/>
+      </div>
+
+      {/* ⏳ Held — In Return Window (per-order with live timer + Early Release) */}
+      {heldOrders.length>0 && (
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>⏳ Held — In Return Window</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>{heldOrders.length}</span>
+            <span style={{fontSize:10,color:C.dim,marginLeft:"auto"}}>Updates every minute</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            {heldOrders.sort(function(a,b){
+              // Closest to release first
+              var ra = new Date(a.shippedAt||0).getTime() + commissionHoldDays(a)*24*60*60*1000;
+              var rb = new Date(b.shippedAt||0).getTime() + commissionHoldDays(b)*24*60*60*1000;
+              return ra - rb;
+            }).map(function(o, i){
+              var rep = reps.find(function(r){return r.id===o.repId;}) || {name:"—"};
+              var pct = holdPct(o);
+              var pm = o.payMethod || o.paymentMethod || "credit_card";
+              return (
+                <div key={o.id} style={{padding:"14px 18px",borderTop:i>0?"1px solid "+C.border:"none"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:14,flexWrap:"wrap"}}>
+                    <div style={{flex:1,minWidth:280}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                        <span style={{fontFamily:"monospace",fontWeight:800,fontSize:13,color:C.accent}}>{o.id}</span>
+                        <span style={{fontSize:12,color:C.text}}>· {o.custName||"—"}</span>
+                        <span style={{fontSize:11,color:C.muted}}>· {rep.name}</span>
+                      </div>
+                      <div style={{fontSize:11,color:C.muted,marginBottom:8}}>
+                        <span style={{fontFamily:"monospace",fontWeight:700,color:C.gold,fontSize:13}}>{fmtMoney((o.totals&&o.totals.commission)||0)}</span>
+                        <span> · {fmtTerms(pm)} · shipped {fmtDate(o.shippedAt)}</span>
+                      </div>
+                      {/* Countdown bar */}
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{flex:1,height:6,background:C.surface2,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:pct+"%",background:"linear-gradient(90deg,"+C.warning+","+C.success+")",transition:"width .3s"}}></div>
+                        </div>
+                        <div style={{fontSize:11,fontWeight:700,color:C.warning,fontFamily:"monospace",minWidth:120,textAlign:"right"}}>⏱ {fmtCountdown(o)}</div>
+                      </div>
+                      <div style={{fontSize:10,color:C.dim,marginTop:4}}>{holdDayInfo(o)} · Schedule: {commissionHoldDays(o)}-day hold for {fmtTerms(pm)}</div>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                      {!rep.stripeConnectId && (
+                        <div style={{fontSize:10,color:C.warning,padding:"4px 8px",background:C.warning+"15",borderRadius:6}}>⚠ No Stripe</div>
+                      )}
+                      <Btn small variant="ghost" disabled={!rep.stripeConnectId} onClick={function(){
+                        setEarlyTarget(o); setEarlyReason("");
+                      }}>🔓 Early Release</Btn>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {unpaid.length>0&&(
         <div style={{marginBottom:24}}>
@@ -9597,6 +9800,45 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
         </div>
       )}
 
+      {/* ❌ Forfeited section (read-only audit) */}
+      {forfeitedOrds.length>0 && (
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>❌ Forfeited Commissions</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.danger+"15",color:C.danger,fontSize:11,fontWeight:700}}>{forfeitedOrds.length}</span>
+            <span style={{fontSize:10,color:C.dim,marginLeft:"auto"}}>Read-only audit trail — Cancelled / Refunded / Returned orders</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Order","Customer","Rep","Forfeited","Reason","Date"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {forfeitedOrds.sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);}).map(function(o){
+                  var rep = reps.find(function(r){return r.id===o.repId;}) || {name:"—"};
+                  // Find most recent ts where status changed to one of the forfeit states
+                  var forfeitTs = (o.auditLog||[]).filter(function(e){return /Cancelled|Refunded|Returned/i.test(e.action||"");}).slice(-1)[0];
+                  return (
+                    <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{o.id}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{rep.name}</td>
+                      <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.danger}}>{fmtMoney((o.totals&&o.totals.commission)||0)}</td>
+                      <td style={{padding:"10px 14px",fontSize:11}}>
+                        <span style={{padding:"2px 8px",borderRadius:20,background:C.danger+"15",color:C.danger,fontSize:10,fontWeight:700}}>{o.status}</span>
+                      </td>
+                      <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(forfeitTs?forfeitTs.ts:o.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {payTarget&&(
         <RepPayModal order={payTarget.order} rep={payTarget.rep}
           onConfirm={function(opts){
@@ -9610,8 +9852,45 @@ function AdminCommissions({orders,reps,commissions,setCommissions,addToast,showR
           }}
           onClose={function(){setPayTarget(null);}}/>
       )}
-      {unpaid.length===0&&(commissions||[]).length===0&&(
-        <EmptyState icon="💰" title="No commissions yet" subtitle="Commissions appear here 15 days after orders are delivered."/>
+
+      {/* Early Release modal */}
+      {earlyTarget && (function(){
+        var rep = reps.find(function(r){return r.id===earlyTarget.repId;}) || {name:"Rep"};
+        var amount = (earlyTarget.totals && earlyTarget.totals.commission) || 0;
+        return (
+          <Modal title={"🔓 Early Release — "+earlyTarget.id} onClose={function(){setEarlyTarget(null);setEarlyReason("");}}
+            footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <Btn variant="ghost" onClick={function(){setEarlyTarget(null);setEarlyReason("");}}>Cancel</Btn>
+              <Btn variant="success" disabled={!earlyReason.trim()||earlySaving} onClick={confirmEarlyRelease}>
+                {earlySaving?"Releasing…":"✓ Release Now"}
+              </Btn>
+            </div>}>
+            <div style={{padding:"12px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,marginBottom:14}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:4}}>{earlyTarget.custName||"Customer"} · {rep.name}</div>
+              <div style={{fontSize:11,color:C.muted,lineHeight:1.7}}>
+                Commission: <strong style={{color:C.gold,fontFamily:"monospace",fontSize:13}}>{fmtMoney(amount)}</strong><br/>
+                Currently in {commissionHoldDays(earlyTarget)}-day hold ({fmtTerms(earlyTarget.payMethod||earlyTarget.paymentMethod||"credit_card")})<br/>
+                Standard release: <strong>{fmtCountdown(earlyTarget)}</strong> from now
+              </div>
+            </div>
+            <div style={{padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:8,marginBottom:14,fontSize:11,color:C.warning,lineHeight:1.5}}>
+              ⚠ This overrides the hold window and transfers funds via Stripe Connect <strong>immediately</strong>. If the customer later refunds or returns the order, the commission claw-back must be handled manually.
+            </div>
+            <div style={{marginBottom:6,fontSize:11,fontWeight:700,color:C.text}}>Reason (required, logged in audit trail)</div>
+            <textarea value={earlyReason} onChange={function(e){setEarlyReason(e.target.value);}}
+              placeholder="e.g. Customer-confirmed payment received via wire transfer; rep performance bonus; …"
+              rows={3}
+              style={{width:"100%",padding:"10px 12px",border:"1px solid "+C.border,borderRadius:8,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:12,boxSizing:"border-box",resize:"vertical",lineHeight:1.5}}/>
+          </Modal>
+        );
+      })()}
+
+      {/* Empty state — only when no orders match ANY filter */}
+      {heldOrders.length===0 && availableOrds.length===0 && paidComms.length===0 && forfeitedOrds.length===0 && (
+        <EmptyState icon="💰" title="No commissions to show"
+          subtitle={(filterRep!=="all"||search||range!=="all")
+            ? "No commissions match the current filters. Try clearing them."
+            : "Commissions appear here after orders are shipped. The hold window depends on payment terms: 15 days for card/invoice-link, 16/31/46 days for Net 15/30/45. Forfeited commissions (Cancelled/Refunded/Returned) appear in the audit section."}/>
       )}
     </div>
   );
@@ -17923,9 +18202,9 @@ function App() {
           <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast}/>
         )}
         {isAdmin&&activeTab==="commissions"&&(
-          <AdminCommissions orders={orders} reps={reps} commissions={commissions}
+          <AdminCommissions orders={orders} setOrders={setOrders} reps={reps} commissions={commissions}
             setCommissions={setCommissions} addToast={addToast} showResult={showResult}
-            payoutRequests={payoutRequests} setPayoutRequests={setPayoutRequests}/>
+            payoutRequests={payoutRequests} setPayoutRequests={setPayoutRequests} currentUser={currentUser}/>
         )}
         {isAdmin&&activeTab==="legal"&&(
           <AdminLegal legalDocs={legalDocs} setLegalDocs={setLegalDocs}
