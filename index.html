@@ -11107,7 +11107,6 @@ var EMAIL_VARS = ["{{customer_name}}","{{rep_name}}","{{rep_email}}","{{order_id
    Multi-product: full catalog / top sellers / custom selection.
    Bodies use the standard {{vars}} so the existing fill() pipeline resolves them. */
 function buildSingleProductTemplate(product){
-  var price = "$"+((product.price||0).toFixed(2));
   var desc  = String(product.description||"").trim();
   if(desc.length > 200) desc = desc.substring(0,197).trim() + "…";
   if(!desc) desc = "Premium-quality "+(product.category||"medical")+" product, trusted by practices nationwide.";
@@ -11120,7 +11119,6 @@ function buildSingleProductTemplate(product){
       "Hi {{customer_name}},\n\n" +
       "I wanted to share "+product.name+" with you — it's been getting great response from practices like yours.\n\n" +
       desc + "\n\n" +
-      "Price: "+price+"\n\n" +
       "Would you like me to set up a quick demo or send a quote? Just reply to this email or give me a call.\n\n" +
       "Best,\n{{rep_name}}\n{{rep_email}}"
   };
@@ -11129,11 +11127,10 @@ function buildSingleProductTemplate(product){
 function formatMultiProductBlock(prods){
   if(!prods || !prods.length) return "(no products selected)";
   return prods.map(function(p){
-    var price = "$"+((p.price||0).toFixed(2));
     var desc  = String(p.description||"").trim();
     if(desc.length > 140) desc = desc.substring(0,137).trim() + "…";
     if(!desc) desc = "Premium-quality "+(p.category||"medical")+" product.";
-    return "📦 "+p.name+" — "+price+"\n"+desc;
+    return "📦 "+p.name+"\n"+desc;
   }).join("\n\n");
 }
 
@@ -11216,15 +11213,20 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
   var selCust = myCusts.find(function(c2){return c2.id===toId;})||null;
   var filtCusts = search ? myCusts.filter(function(c2){var s=search.toLowerCase();return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.email||"").toLowerCase().indexOf(s)>=0;}) : myCusts;
 
-  // Resolve the rep record for CC email + sign-off
-  var myRep = (reps||[]).find(function(r){return r.id === (currentUser&&(currentUser.rep_id||currentUser.id));});
+  // Resolve the rep record for CC email + sign-off. Use the `repId` prop directly
+  // (which is set to effectiveUser.rep_id||effectiveUser.id at the callsite) so
+  // admin impersonating a rep sees the IMPERSONATED rep's name/email in the
+  // CC checkbox and {{rep_name}}/{{rep_email}} substitutions — not admin's own.
+  var myRep = (reps||[]).find(function(r){return r.id === repId;});
+  var repName  = (myRep && myRep.name)  || (currentUser && currentUser.name)  || "";
   var repEmail = (myRep && myRep.email) || (currentUser && currentUser.email) || "";
 
   // Available active products for promotional templates
   var activeProducts = (products||[]).filter(function(p){return p.active!==false;});
 
   function fillTemplate(template, contextProducts){
-    var rn = (currentUser && currentUser.name) || (myRep && myRep.name) || "";
+    var rn = repName;
+    var re = repEmail;
     var cn = selCust ? selCust.name : "{{customer_name}}";
     var dt = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
     var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
@@ -11232,7 +11234,7 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
       return String(s||"")
         .replace(/\{\{customer_name\}\}/g, cn)
         .replace(/\{\{rep_name\}\}/g, rn)
-        .replace(/\{\{rep_email\}\}/g, repEmail)
+        .replace(/\{\{rep_email\}\}/g, re)
         .replace(/\{\{date\}\}/g, dt)
         .replace(/\{\{company\}\}/g, co)
         .replace(/\{\{company_name\}\}/g, (selCust && selCust.company)||"")
@@ -11601,7 +11603,6 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
                       </div>
                     )}
                   </div>
-                  <div style={{fontSize:12,fontWeight:700,color:C.accent,fontFamily:"monospace",flexShrink:0}}>${(p.price||0).toFixed(2)}</div>
                 </label>
               );
             })}
