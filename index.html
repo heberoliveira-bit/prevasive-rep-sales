@@ -14267,7 +14267,25 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
     dbSave("crm_reps",repData.id,updated);
     addToast("Switched to "+(target?target.name:newPlanId)+(repData.subscriptionStatus==="active"?" — confirm the new price in Stripe":" — activate billing to start"),isDowngrade?"info":"success");
   }
-  var TABS = [{id:"profile",l:"Profile"},{id:"documents",l:"Documents"},{id:"payouts",l:"Payouts"},{id:"subscription",l:"Subscription"},{id:"password",l:"Password"}];
+  // v82: Hide the Subscription tab for comp ("🎁 Granted Free Plan") reps —
+  // they don't need to manage billing. Other statuses (trial / active /
+  // past_due / expired) continue to see the tab and its content unchanged.
+  var TABS = [
+    {id:"profile",      l:"Profile"},
+    {id:"documents",    l:"Documents"},
+    {id:"payouts",      l:"Payouts"},
+    {id:"subscription", l:"Subscription"},
+    {id:"password",     l:"Password"},
+  ].filter(function(t){
+    if(t.id === "subscription" && repData && repData.subscriptionStatus === "comp") return false;
+    return true;
+  });
+
+  // Bounce off Subscription tab if it just got removed mid-session (e.g., admin
+  // granted comp via realtime sync while rep was viewing it)
+  useEffect(function(){
+    if(!TABS.find(function(t){return t.id===tab;})) setTab("profile");
+  }, [repData && repData.subscriptionStatus]);
 
   function _connectCfg(){ try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};} }
   function connectStripe(){
