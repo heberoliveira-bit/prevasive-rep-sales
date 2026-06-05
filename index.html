@@ -11100,9 +11100,90 @@ var EMAIL_TEMPLATES = [
   {id:"thankyou",label:"Thank You",subject:"Thank you for your order",body:"Hi {{customer_name}},\n\nThank you for your order. We appreciate your business!\n\nBest,\n{{rep_name}}"},
   {id:"custom",label:"Custom",subject:"",body:""},
 ];
-var EMAIL_VARS = ["{{customer_name}}","{{rep_name}}","{{order_id}}","{{date}}","{{company}}"];
+var EMAIL_VARS = ["{{customer_name}}","{{rep_name}}","{{rep_email}}","{{order_id}}","{{date}}","{{company}}"];
 
-function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showResult}) {
+/* ─── Promotional template generators (v81) ─────────────────────────────────
+   Single-product: one entry per active product.
+   Multi-product: full catalog / top sellers / custom selection.
+   Bodies use the standard {{vars}} so the existing fill() pipeline resolves them. */
+function buildSingleProductTemplate(product){
+  var price = "$"+((product.price||0).toFixed(2));
+  var desc  = String(product.description||"").trim();
+  if(desc.length > 200) desc = desc.substring(0,197).trim() + "…";
+  if(!desc) desc = "Premium-quality "+(product.category||"medical")+" product, trusted by practices nationwide.";
+  return {
+    id: "promo_single_"+product.id,
+    label: "Promote: "+product.name,
+    productId: product.id,
+    subject: "Introducing "+product.name+" — for {{customer_name}}",
+    body:
+      "Hi {{customer_name}},\n\n" +
+      "I wanted to share "+product.name+" with you — it's been getting great response from practices like yours.\n\n" +
+      desc + "\n\n" +
+      "Price: "+price+"\n\n" +
+      "Would you like me to set up a quick demo or send a quote? Just reply to this email or give me a call.\n\n" +
+      "Best,\n{{rep_name}}\n{{rep_email}}"
+  };
+}
+
+function formatMultiProductBlock(prods){
+  if(!prods || !prods.length) return "(no products selected)";
+  return prods.map(function(p){
+    var price = "$"+((p.price||0).toFixed(2));
+    var desc  = String(p.description||"").trim();
+    if(desc.length > 140) desc = desc.substring(0,137).trim() + "…";
+    if(!desc) desc = "Premium-quality "+(p.category||"medical")+" product.";
+    return "📦 "+p.name+" — "+price+"\n"+desc;
+  }).join("\n\n");
+}
+
+function buildMultiProductTemplate(kind, products, orders){
+  var active = (products||[]).filter(function(p){return p.active!==false;});
+  var sel = [];
+  var label = "";
+  if(kind === "all"){
+    sel = active;
+    label = "Full Catalog";
+  } else if(kind === "top_sellers"){
+    // Last 90 days, count line-item appearances
+    var cutoff = Date.now() - 90*24*60*60*1000;
+    var counts = {};
+    (orders||[]).forEach(function(o){
+      if(o.status==="Cancelled") return;
+      var ts = new Date(o.createdAt||"").getTime();
+      if(!ts || ts < cutoff) return;
+      (o.items||[]).forEach(function(it){
+        if(!it.prodId) return;
+        counts[it.prodId] = (counts[it.prodId]||0) + (it.qty||1);
+      });
+    });
+    sel = active.map(function(p){return Object.assign({}, p, {_count: counts[p.id]||0});})
+      .sort(function(a,b){return b._count - a._count;}).slice(0,5);
+    label = "Top Sellers (90d)";
+  } else if(kind === "custom"){
+    // products list is already pre-filtered by caller
+    sel = active;
+    label = "Custom Selection";
+  }
+  var block = formatMultiProductBlock(sel);
+  return {
+    id: "promo_multi_"+kind,
+    label: "Promote: "+label,
+    multiKind: kind,
+    productIds: sel.map(function(p){return p.id;}),
+    subject: "A few PreVasive products I think you'd find useful",
+    body:
+      "Hi {{customer_name}},\n\n" +
+      "I wanted to share a few products from our catalog that I think could be valuable for your practice:\n\n" +
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+      block + "\n\n" +
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n" +
+      "Happy to walk you through any of these or send a quote on the spot. What would be most helpful?\n\n" +
+      "Best,\n{{rep_name}}\n{{rep_email}}"
+  };
+}
+
+function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,addToast,showResult}) {
   const [toId,     setToId]     = useState("");
   const [toEmail,  setToEmail]  = useState("");
   const [subject,  setSubject]  = useState("");
@@ -11120,6 +11201,11 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
   const [loadThread, setLoadThread] = useState(false);
   const [threadErr,  setThreadErr]  = useState("");
   const [expanded,   setExpanded]   = useState(null);
+  // v81: CC the rep on every send (default ON)
+  const [ccRep, setCcRep] = useState(true);
+  // v81: Custom multi-product picker modal
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickedProductIds, setPickedProductIds] = useState([]);
 
   // Cache the email config read so we don't re-parse localStorage 100x per render
   var emailCfg = (function(){ try{ return JSON.parse(localStorage.getItem("__pv__emailCfg")||"null"); }catch(e){ return null; } })();
@@ -11130,12 +11216,73 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
   var selCust = myCusts.find(function(c2){return c2.id===toId;})||null;
   var filtCusts = search ? myCusts.filter(function(c2){var s=search.toLowerCase();return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.email||"").toLowerCase().indexOf(s)>=0;}) : myCusts;
 
-  function applyTemplate(t) {
-    setTmpl(t.id);
-    var rn=currentUser&&currentUser.name||""; var cn=selCust?selCust.name:"{{customer_name}}";
-    var dt=new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
-    function fill(s){var co2=JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";return s.replace(/\{\{customer_name\}\}/g,cn).replace(/\{\{rep_name\}\}/g,rn||currentUser&&currentUser.name||"").replace(/\{\{date\}\}/g,dt).replace(/\{\{company\}\}/g,co2).replace(/\{\{company_name\}\}/g,selCust&&selCust.company||"").replace(/\{\{order_id\}\}/g,"");}
-    setSubject(fill(t.subject)); setBody(fill(t.body));
+  // Resolve the rep record for CC email + sign-off
+  var myRep = (reps||[]).find(function(r){return r.id === (currentUser&&(currentUser.rep_id||currentUser.id));});
+  var repEmail = (myRep && myRep.email) || (currentUser && currentUser.email) || "";
+
+  // Available active products for promotional templates
+  var activeProducts = (products||[]).filter(function(p){return p.active!==false;});
+
+  function fillTemplate(template, contextProducts){
+    var rn = (currentUser && currentUser.name) || (myRep && myRep.name) || "";
+    var cn = selCust ? selCust.name : "{{customer_name}}";
+    var dt = new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"});
+    var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+    function fill(s){
+      return String(s||"")
+        .replace(/\{\{customer_name\}\}/g, cn)
+        .replace(/\{\{rep_name\}\}/g, rn)
+        .replace(/\{\{rep_email\}\}/g, repEmail)
+        .replace(/\{\{date\}\}/g, dt)
+        .replace(/\{\{company\}\}/g, co)
+        .replace(/\{\{company_name\}\}/g, (selCust && selCust.company)||"")
+        .replace(/\{\{order_id\}\}/g,"");
+    }
+    return { subject: fill(template.subject), body: fill(template.body) };
+  }
+
+  function applyTemplate(templateId){
+    setTmpl(templateId);
+    // Static / generic templates
+    var generic = EMAIL_TEMPLATES.find(function(t){return t.id===templateId;});
+    if(generic){ var f=fillTemplate(generic); setSubject(f.subject); setBody(f.body); return; }
+    // Single-product promo: promo_single_<productId>
+    if(templateId.indexOf("promo_single_")===0){
+      var pid = templateId.substring("promo_single_".length);
+      var prod = activeProducts.find(function(p){return p.id===pid;});
+      if(prod){
+        var t = buildSingleProductTemplate(prod);
+        var fr = fillTemplate(t); setSubject(fr.subject); setBody(fr.body);
+      }
+      return;
+    }
+    // Multi-product promo: promo_multi_all / top_sellers / custom
+    if(templateId === "promo_multi_all"){
+      var ta = buildMultiProductTemplate("all", activeProducts, orders);
+      var fa = fillTemplate(ta); setSubject(fa.subject); setBody(fa.body);
+      return;
+    }
+    if(templateId === "promo_multi_top_sellers"){
+      var tt = buildMultiProductTemplate("top_sellers", activeProducts, orders);
+      var ft = fillTemplate(tt); setSubject(ft.subject); setBody(ft.body);
+      return;
+    }
+    if(templateId === "promo_multi_custom"){
+      // Open the picker modal — body fills when user confirms selection
+      setShowPicker(true);
+      return;
+    }
+  }
+
+  // Called from the custom-picker modal when rep confirms
+  function applyCustomMultiTemplate(){
+    if(pickedProductIds.length < 2){ addToast("Pick at least 2 products","warning"); return; }
+    if(pickedProductIds.length > 10){ addToast("Cap is 10 products per email — trim a few","warning"); return; }
+    var picked = activeProducts.filter(function(p){return pickedProductIds.indexOf(p.id)>=0;});
+    var t = buildMultiProductTemplate("custom", picked, orders);
+    var f = fillTemplate(t);
+    setSubject(f.subject); setBody(f.body);
+    setShowPicker(false);
   }
 
   function insertVar(v){setBody(function(prev){return prev+v;});}
@@ -11159,6 +11306,7 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         to:toEmail.trim(),
+        cc: (ccRep && repEmail) ? repEmail : undefined,
         subject:subject,
         html:htmlBody,
         fromName:emailCfg.fromName||"PreVasive USA",
@@ -11167,13 +11315,13 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
     }).then(function(r){return r.json();}).then(function(d){
       setSending(false);
       if(d.ok){
-        var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
+        var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,cc:(ccRep&&repEmail)||"",subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
         setSentLog(function(prev){
           var next = [entry].concat(prev).slice(0,50);
           try{ localStorage.setItem(sentLogKey, JSON.stringify(next)); }catch(e){}
           return next;
         });
-        addToast("✓ Email sent to "+(selCust?selCust.name:toEmail),"success");
+        addToast("✓ Email sent to "+(selCust?selCust.name:toEmail)+(ccRep&&repEmail?" (CC: you)":""),"success");
         setToId(""); setToEmail(""); setSubject(""); setBody(""); setTmpl("custom");
       } else {
         addToast("Email failed: "+(d.error||"Unknown error"),"danger");
@@ -11223,12 +11371,33 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 340px",gap:20,alignItems:"start"}}>
         <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-          <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,display:"flex",gap:6,flexWrap:"wrap",alignItems:"center"}}>
-            <span style={{fontSize:11,fontWeight:600,color:C.dim,marginRight:4}}>TEMPLATE:</span>
-            {EMAIL_TEMPLATES.map(function(t){var sel=tmpl===t.id;return (
-              <button key={t.id} onClick={function(){applyTemplate(t);}}
-                style={{padding:"4px 10px",borderRadius:20,border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:sel?700:400,background:sel?C.accent+"18":"transparent",color:sel?C.accent:C.muted}}>{t.label}</button>
-            );})}
+          <div style={{padding:"12px 16px",borderBottom:"1px solid "+C.border,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+            <span style={{fontSize:11,fontWeight:600,color:C.dim,marginRight:2}}>TEMPLATE:</span>
+            <select value={tmpl} onChange={function(e){applyTemplate(e.target.value);}}
+              style={{padding:"6px 10px",borderRadius:7,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12,fontFamily:"inherit",minWidth:240,cursor:"pointer"}}>
+              <optgroup label="Generic">
+                {EMAIL_TEMPLATES.map(function(t){return (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                );})}
+              </optgroup>
+              {activeProducts.length>0 && (
+                <optgroup label={"Promotional — Single Product ("+activeProducts.length+")"}>
+                  {activeProducts.map(function(p){return (
+                    <option key={"sp_"+p.id} value={"promo_single_"+p.id}>Promote: {p.name}</option>
+                  );})}
+                </optgroup>
+              )}
+              {activeProducts.length>0 && (
+                <optgroup label="Promotional — Multi-Product">
+                  <option value="promo_multi_all">Full Catalog ({activeProducts.length} products)</option>
+                  <option value="promo_multi_top_sellers">Top Sellers (last 90 days)</option>
+                  <option value="promo_multi_custom">Custom Selection…</option>
+                </optgroup>
+              )}
+            </select>
+            {tmpl.indexOf("promo_multi_custom")===0 && pickedProductIds.length>0 && (
+              <span style={{fontSize:11,color:C.muted}}>· {pickedProductIds.length} products</span>
+            )}
           </div>
           <div style={{padding:"16px"}}>
             <div style={{marginBottom:12}}>
@@ -11257,6 +11426,14 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
                 )}
               </div>
             </div>
+            {/* v81: CC the rep on every send (default ON) */}
+            {repEmail && (
+              <label style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"7px 10px",background:C.bg,border:"1px solid "+C.border,borderRadius:7,cursor:"pointer"}}>
+                <input type="checkbox" checked={ccRep} onChange={function(e){setCcRep(e.target.checked);}}
+                  style={{accentColor:C.accent,cursor:"pointer"}}/>
+                <span style={{fontSize:11,color:C.muted}}>CC me at <strong style={{color:C.text}}>{repEmail}</strong></span>
+              </label>
+            )}
             <div style={{marginBottom:10}}>
               <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Subject</div>
               <input value={subject} onChange={function(e){setSubject(e.target.value);}} placeholder="Email subject…"
@@ -11376,6 +11553,61 @@ function EmailModule({currentUser,customers,orders,repId,isAdmin,addToast,showRe
           )}
         </div>
       </div>
+
+      {/* v81: Custom multi-product picker modal */}
+      {showPicker && (
+        <Modal title="Pick products to promote (2-10)"
+          onClose={function(){setShowPicker(false);}}
+          footer={<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",width:"100%"}}>
+            <div style={{fontSize:11,color:C.dim}}>
+              {pickedProductIds.length} of 10 selected
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <Btn variant="ghost" small onClick={function(){setShowPicker(false);}}>Cancel</Btn>
+              <Btn small disabled={pickedProductIds.length<2||pickedProductIds.length>10} onClick={applyCustomMultiTemplate}>
+                Use {pickedProductIds.length} selected →
+              </Btn>
+            </div>
+          </div>}>
+          <div style={{fontSize:12,color:C.muted,marginBottom:12,lineHeight:1.6}}>
+            Pick between 2 and 10 products to include in this promotional email. The picked products will be listed with their name, description, and price.
+          </div>
+          <div style={{maxHeight:340,overflowY:"auto",border:"1px solid "+C.border,borderRadius:8}}>
+            {activeProducts.length === 0 ? (
+              <div style={{padding:"32px 18px",textAlign:"center",color:C.dim,fontSize:12}}>No active products in the catalog.</div>
+            ) : activeProducts.map(function(p,i){
+              var picked = pickedProductIds.indexOf(p.id) >= 0;
+              return (
+                <label key={p.id}
+                  style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",
+                          borderBottom:i<activeProducts.length-1?"1px solid "+C.border:"none",
+                          background:picked?C.accent+"08":"transparent",cursor:"pointer"}}>
+                  <input type="checkbox" checked={picked}
+                    onChange={function(e){
+                      setPickedProductIds(function(prev){
+                        if(e.target.checked){
+                          if(prev.length >= 10) return prev; // hard cap
+                          return prev.concat([p.id]);
+                        }
+                        return prev.filter(function(id){return id !== p.id;});
+                      });
+                    }}
+                    style={{accentColor:C.accent,cursor:"pointer"}}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:C.text}}>{p.name}</div>
+                    {p.description && (
+                      <div style={{fontSize:10,color:C.muted,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                        {String(p.description).substring(0,80)}{p.description.length>80?"…":""}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.accent,fontFamily:"monospace",flexShrink:0}}>${(p.price||0).toFixed(2)}</div>
+                </label>
+              );
+            })}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -18423,7 +18655,7 @@ function App() {
         )}
         {/* Admin Modules */}
         {(activeTab==="email")&&(
-          <EmailModule currentUser={currentUser} customers={customers} orders={orders}
+          <EmailModule currentUser={currentUser} customers={customers} orders={orders} products={products} reps={reps}
             repId={effectiveUser.rep_id||effectiveUser.id}
             isAdmin={isAdmin} addToast={addToast} showResult={showResult}/>
         )}
