@@ -6,7 +6,28 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js" onerror="window.__babelCdnFailed=true"></script>
+<script>
+// v87: Fallback Babel loader — if cdnjs is blocked (ad-blocker, firewall, iframe sandbox),
+// try jsdelivr and unpkg before giving up.
+(function(){
+  if(window.Babel) return; // primary CDN worked
+  var fallbacks = [
+    "https://cdn.jsdelivr.net/npm/@babel/standalone@7.23.10/babel.min.js",
+    "https://unpkg.com/@babel/standalone@7.23.10/babel.min.js"
+  ];
+  function tryNext(){
+    if(!fallbacks.length) return;
+    var url = fallbacks.shift();
+    var s = document.createElement("script");
+    s.src = url;
+    s.onload = function(){ try{ console.info("[Babel] loaded via fallback: "+url); }catch(e){} };
+    s.onerror = tryNext;
+    document.head.appendChild(s);
+  }
+  tryNext();
+})();
+</script>
 <style>*{box-sizing:border-box;margin:0;padding:0}body{background:#09111f;color:#f0f4ff;font-family:"Inter",system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased;}#root{min-height:100vh}#err{display:none;position:fixed;top:0;left:0;right:0;background:#0d1826;color:#df1b41;padding:16px;font-size:11px;font-family:monospace;z-index:9999;white-space:pre-wrap;max-height:40vh;overflow:auto;border-bottom:2px solid #df1b41}input,button,select,textarea,details,summary{font-family:"Inter",system-ui,-apple-system,sans-serif;}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#1e2d40;border-radius:2px}::-webkit-scrollbar-thumb:hover{background:#635bff}@keyframes slideIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}@keyframes spin{to{transform:rotate(360deg)}}
 input[type="range"]{-webkit-appearance:none;appearance:none;height:36px;background:transparent;cursor:pointer;touch-action:manipulation;}
 input[type="range"]::-webkit-slider-runnable-track{height:10px;background:#1e2d40;border-radius:5px;}
@@ -6537,7 +6558,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               })()}
                 <div>
                   <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission %</div>
-                  <input type="range" min="0" max="25" step="0.5" value={commRate}
+                  <input type="range" min="0" max="150" step="0.5" value={commRate}
                     onChange={function(e){setCommRate(e.target.value);}}
                     style={{width:"100%",accentColor:C.accent,marginTop:8}}/>
                   <div style={{fontSize:12,fontWeight:700,color:C.gold,textAlign:"right"}}>{commRate}% = {fmtMoney(calcTotal()*(commRate/100))}</div>
@@ -7144,10 +7165,10 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                     <div>
                       <div style={{fontSize:10,color:C.dim,marginBottom:4}}>Default Rate</div>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <input type="number" min={0} max={100} step={0.5}
+                        <input type="number" min={0} max={150} step={0.5}
                           value={rep.defaultCommissionRate!=null?rep.defaultCommissionRate:10}
                           onChange={function(e){
-                            var v=Math.min(100,Math.max(0,parseFloat(e.target.value)||0));
+                            var v=Math.min(150,Math.max(0,parseFloat(e.target.value)||0));
                             var upd=Object.assign({},rep,{defaultCommissionRate:v});
                             setReps(function(prev){return prev.map(function(r){return r.id===rep.id?upd:r;});});
                             dbSave("crm_reps",rep.id,upd);
@@ -7159,16 +7180,16 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                     <div>
                       <div style={{fontSize:10,color:C.dim,marginBottom:4}}>Max Allowed</div>
                       <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <input type="number" min={0} max={100} step={0.5}
-                          value={rep.maxCommissionRate!=null?rep.maxCommissionRate:100}
+                        <input type="number" min={0} max={150} step={0.5}
+                          value={rep.maxCommissionRate!=null?rep.maxCommissionRate:150}
                           onChange={function(e){
-                            var v=Math.min(100,Math.max(0,parseFloat(e.target.value)||0));
+                            var v=Math.min(150,Math.max(0,parseFloat(e.target.value)||0));
                             var upd=Object.assign({},rep,{maxCommissionRate:v});
                             setReps(function(prev){return prev.map(function(r){return r.id===rep.id?upd:r;});});
                             dbSave("crm_reps",rep.id,upd);
                           }}
                           style={{width:"60px",border:"1px solid "+C.border,borderRadius:6,padding:"5px 8px",background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,textAlign:"center"}}/>
-                        <span style={{fontSize:12,color:C.muted,fontWeight:700}}>{rep.maxCommissionRate!=null?rep.maxCommissionRate:100}% cap</span>
+                        <span style={{fontSize:12,color:C.muted,fontWeight:700}}>{rep.maxCommissionRate!=null?rep.maxCommissionRate:150}% cap</span>
                       </div>
                     </div>
                   </div>
@@ -12913,7 +12934,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission Rate</div>
                 <div style={{display:"flex",alignItems:"center",gap:12}}>
-                  <input type="range" min="0" max={maxCommRate||25} step="0.5" value={commRate}
+                  <input type="range" min="0" max={maxCommRate||150} step="0.5" value={commRate}
                     onChange={function(e){setCommRate(e.target.value);}} style={{flex:1,accentColor:C.accent}}/>
                   <span style={{fontSize:14,fontWeight:800,color:C.gold,fontFamily:"monospace",minWidth:90,textAlign:"right"}}>
                     {commRate}% = {fmtMoney(totals.commission)}
@@ -14279,7 +14300,7 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
                   <Btn small variant="ghost" onClick={function(){openEdit(c2);}} fullWidth={true}>Edit</Btn>
                   {/* Commission Rate */}
                   {(function(){
-                    var maxRate = (repData&&repData.maxCommissionRate!=null) ? parseFloat(repData.maxCommissionRate) : 100;
+                    var maxRate = (repData&&repData.maxCommissionRate!=null) ? parseFloat(repData.maxCommissionRate) : 150;
                     var allowCustom = !repData || repData.allowCustomCommission!==false;
                     var repDefault = (repData&&repData.defaultCommissionRate!=null&&repData.defaultCommissionRate!=="") ? parseFloat(repData.defaultCommissionRate) : 10;
                     var hasOverride = c2.commissionRate!=null && c2.commissionRate!=="";
@@ -16672,7 +16693,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v86-shipping-and-email-cc</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v87-babel-fallback</div>
       </div>
     </div>
   );
@@ -17543,10 +17564,10 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
                   );
                 })}
               </div>
-              <input type="range" min="0" max="50" step="0.5" value={commRate} onChange={function(e){setCommRate(Number(e.target.value));}}
+              <input type="range" min="0" max="150" step="0.5" value={commRate} onChange={function(e){setCommRate(Number(e.target.value));}}
                 style={{width:"100%",marginBottom:6}}/>
               <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.dim}}>
-                <span>0%</span><span>25%</span><span>50%</span>
+                <span>0%</span><span>50%</span><span>100%</span><span>150%</span>
               </div>
               <div style={{fontSize:11,color:C.muted,marginTop:10,paddingTop:10,borderTop:"1px solid "+C.border,lineHeight:1.5}}>
                 {(function(){
@@ -18151,7 +18172,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v86-shipping-and-email-cc
+        BUILD: 2026-05-30-v87-babel-fallback
       </div>
     </div>
   );
@@ -19344,11 +19365,25 @@ var N=16;
 window.addEventListener('load',function(){
   var e=document.getElementById('err');
   function showErr(m){e.style.display='block';e.textContent=m;}
-  try{
-    var code='const {useState,useCallback,useRef,useEffect}=React;\n';
-    for(var i=0;i<N;i++){var src=document.getElementById('c'+i).textContent;code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';}
-    code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(App));';
-    new Function('React','ReactDOM',code)(React,ReactDOM);
-  }catch(ex){showErr('Error: '+ex.message+'\n\n'+(ex.stack||''));}
+  // v87: Wait up to 8 seconds for Babel to load (handles slow networks + fallback CDNs)
+  var waited = 0;
+  function tryStart(){
+    if(typeof Babel === "undefined"){
+      waited += 100;
+      if(waited >= 8000){
+        showErr("Failed to load Babel from any CDN (cdnjs, jsdelivr, unpkg). This usually means an ad-blocker or browser extension is blocking script CDNs on this site.\n\nFix: disable any content blocker for this domain and refresh. Or try in an incognito window with extensions disabled.");
+        return;
+      }
+      setTimeout(tryStart, 100);
+      return;
+    }
+    try{
+      var code='const {useState,useCallback,useRef,useEffect}=React;\n';
+      for(var i=0;i<N;i++){var src=document.getElementById('c'+i).textContent;code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';}
+      code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(App));';
+      new Function('React','ReactDOM',code)(React,ReactDOM);
+    }catch(ex){showErr('Error: '+ex.message+'\n\n'+(ex.stack||''));}
+  }
+  tryStart();
 });
 </script></body></html>
