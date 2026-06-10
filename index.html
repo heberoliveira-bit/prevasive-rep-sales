@@ -9154,7 +9154,7 @@ function AdminProducts({products,setProducts,addToast}) {
 }
 
 /* ─── Admin Customers ────────────────────────────────────────────────────── */
-function AdminCustomers({customers,setCustomers,reps,orders,addToast}) {
+function AdminCustomers({customers,setCustomers,reps,orders,addToast,currentUser}) {
   const [editCustModal2,setEditCustModal2] = useState(null);
   const [search,     setSearch]     = useState("");
   const [viewCust,   setViewCust]   = useState(null);
@@ -16480,7 +16480,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v84-tax-exempt-gate</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v84-tax-exempt-gate-hotfix</div>
       </div>
     </div>
   );
@@ -17959,7 +17959,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v84-tax-exempt-gate
+        BUILD: 2026-05-30-v84-tax-exempt-gate-hotfix
       </div>
     </div>
   );
@@ -19008,7 +19008,7 @@ function App() {
             returns={returns} setReturns={setReturns}/>
         )}
         {isAdmin&&activeTab==="customers"&&(
-          <AdminCustomers customers={customers} setCustomers={setCustomers} reps={reps} orders={orders} addToast={addToast}/>
+          <AdminCustomers customers={customers} setCustomers={setCustomers} reps={reps} orders={orders} addToast={addToast} currentUser={currentUser}/>
         )}
         {isAdmin&&activeTab==="products"&&(
           <AdminProducts products={products} setProducts={setProducts} addToast={addToast}/>
