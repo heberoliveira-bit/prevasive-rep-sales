@@ -14080,12 +14080,34 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
   const [sCity,  setSCity]  = useState(""); const [sState, setSState] = useState("");
   const [sZip,   setSZip]   = useState("");
   const [payTerms,setPayTerms] = useState(""); const [search, setSearch] = useState("");
+  // v84: Rep can fill tax-exempt info; admin verifies later via Tasks tab
+  const [taxExempt,     setTaxExempt]     = useState(false);
+  const [exemptType,    setExemptType]    = useState("gate");
+  const [exemptState,   setExemptState]   = useState("GA");
+  const [exemptNumber,  setExemptNumber]  = useState("");
+  const [exemptIssued,  setExemptIssued]  = useState("");
+  const [exemptExpires, setExemptExpires] = useState("");
+  const [exemptNotes,   setExemptNotes]   = useState("");
+  const [exemptCardName,setExemptCardName]= useState("");
+  const [exemptCardPath,setExemptCardPath]= useState("");
+  const [uploadingCard, setUploadingCard] = useState(false);
+  var REP_EXEMPT_TYPES = [
+    {id:"gate",       icon:"🌾", label:"GATE — GA Agricultural"},
+    {id:"resale",     icon:"🔄", label:"Resale Certificate"},
+    {id:"non_profit", icon:"🏛", label:"Non-Profit 501(c)(3)"},
+    {id:"federal",    icon:"🇺🇸", label:"Federal Government"},
+    {id:"other",      icon:"📄", label:"Other / Custom"},
+  ];
   var myCusts = customers.filter(function(c2){return c2.repId===repId;});
   var filtered = myCusts.filter(function(c2){
     if(!search) return true; var s=search.toLowerCase();
     return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.company||"").toLowerCase().indexOf(s)>=0;
   });
-  function openNew(){setEditCust(null);setName("");setEmail("");setCompany("");setPhone("");setAddr("");setCity("");setState2("");setZip("");setPayTerms("");setShowForm(true);}
+  function openNew(){
+    setEditCust(null);setName("");setEmail("");setCompany("");setPhone("");setAddr("");setCity("");setState2("");setZip("");setPayTerms("");
+    setTaxExempt(false);setExemptType("gate");setExemptState("GA");setExemptNumber("");setExemptIssued("");setExemptExpires("");setExemptNotes("");setExemptCardName("");setExemptCardPath("");
+    setShowForm(true);
+  }
   function openEdit(c2){
     setEditCust(c2);setName(c2.name||"");setEmail(c2.email||"");setCompany(c2.company||"");setPhone(c2.phone||"");
     setAddr(c2.billingAddress||c2.address||"");setAddr2(c2.billingAddress2||"");
@@ -14094,11 +14116,65 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
     setSameShip(same);
     setSAddr(c2.shippingAddress||"");setSAddr2(c2.shippingAddress2||"");
     setSCity(c2.shippingCity||"");setSState(c2.shippingState||"");setSZip(c2.shippingZip||"");
-    setPayTerms(c2.paymentTerms||"");setShowForm(true);
+    setPayTerms(c2.paymentTerms||"");
+    // v84: load existing tax-exempt info if present
+    var ex = c2.taxExemption || {};
+    setTaxExempt(c2.taxExempt===true);
+    setExemptType(ex.type||"gate");
+    setExemptState(ex.state||"GA");
+    setExemptNumber(ex.number||"");
+    setExemptIssued(ex.issuedAt ? ex.issuedAt.slice(0,10) : "");
+    setExemptExpires(ex.expiresAt ? ex.expiresAt.slice(0,10) : "");
+    setExemptNotes(ex.notes||"");
+    setExemptCardName(ex.cardFileName||"");
+    setExemptCardPath(ex.cardStoragePath||"");
+    setShowForm(true);
+  }
+
+  function handleRepCardSelect(e){
+    var f = e.target.files && e.target.files[0];
+    if(!f) return;
+    if(f.size > 10*1024*1024){ addToast("File too large (max 10 MB)","warning"); return; }
+    var custId = editCust ? editCust.id : ("cust_pending_"+Date.now());
+    setExemptCardName(f.name);
+    setUploadingCard(true);
+    var sb=getSB(); if(!sb){ setUploadingCard(false); addToast("Storage unavailable","danger"); return; }
+    var docId = genId("exempt");
+    var path = "tax-exemptions/"+custId+"/"+docId+"-"+f.name.replace(/[^\w.-]/g,"_");
+    sb.storage.from("tax-exemptions").upload(path, f, {upsert:true}).then(function(res){
+      setUploadingCard(false);
+      if(res && res.error){ addToast("Upload failed: "+res.error.message,"danger"); return; }
+      setExemptCardPath(path);
+      addToast("✓ Certificate uploaded — admin will review","success");
+    }).catch(function(err){
+      setUploadingCard(false);
+      addToast("Upload failed: "+((err&&err.message)||"unknown"),"danger");
+    });
   }
   function save(){
     if(!name.trim()) return;
     var id=editCust?editCust.id:genId("cust");
+    var taxExemptionObj = null;
+    if(taxExempt){
+      // Rep-submitted: verifiedAt/verifiedBy stay null so it lands in admin Tasks queue as "Unverified"
+      var existing = (editCust && editCust.taxExemption) || {};
+      taxExemptionObj = {
+        type: exemptType,
+        state: (exemptState||"").toUpperCase(),
+        number: exemptNumber.trim(),
+        issuedAt: exemptIssued ? new Date(exemptIssued).toISOString() : null,
+        expiresAt: exemptExpires ? new Date(exemptExpires).toISOString() : null,
+        cardFileName: exemptCardName||"",
+        cardStoragePath: exemptCardPath||"",
+        // Preserve prior verification if the rep is editing an already-verified record
+        // (otherwise reps could re-trigger verification by editing other fields)
+        verifiedAt: existing.verifiedAt || null,
+        verifiedBy: existing.verifiedBy || null,
+        notes: exemptNotes.trim(),
+        submittedBy: (repData && repData.name) || "Rep",
+        submittedAt: existing.submittedAt || new Date().toISOString(),
+      };
+    }
     var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),
       billingAddress:addr.trim(),billingAddress2:addr2.trim(),
       billingCity:city.trim(),billingState:state2.trim(),billingZip:zip.trim(),
@@ -14109,13 +14185,19 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
       shippingCity:sameShip?city.trim():sCity.trim(),
       shippingState:sameShip?state2.trim():sState.trim(),
       shippingZip:sameShip?zip.trim():sZip.trim(),
+      taxExempt: taxExempt,
+      taxExemption: taxExemptionObj,
       updatedAt:new Date().toISOString()};
     if(editCust&&editCust.termsStatus) data.termsStatus=editCust.termsStatus;
     if(editCust&&editCust.termsType) data.termsType=editCust.termsType;
     if(editCust&&editCust.termsLimit) data.termsLimit=editCust.termsLimit;
     if(!editCust) data.createdAt=new Date().toISOString();
     setCustomers(function(prev){return editCust?prev.map(function(c2){return c2.id===editCust.id?data:c2;}):[data].concat(prev);});
-    dbSave("crm_customers",id,data); addToast(editCust?"Customer updated":"Customer added","success"); setShowForm(false);
+    dbSave("crm_customers",id,data);
+    var msg = editCust?"Customer updated":"Customer added";
+    if(taxExempt && !(taxExemptionObj && taxExemptionObj.verifiedAt)) msg += " — tax exemption pending admin approval";
+    addToast(msg,"success");
+    setShowForm(false);
   }
   return (
     <div>
@@ -14274,6 +14356,88 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
                 </div>
                 <span style={{fontSize:10,color:C.dim,fontStyle:"italic"}}>Set by admin only</span>
               </div>
+            </div>
+
+            {/* v84: Tax Exempt — rep submits, admin verifies */}
+            <div style={{gridColumn:"1/-1",padding:"14px 16px",background:C.surface2,borderRadius:10}}>
+              <label style={{display:"flex",alignItems:"center",gap:10,cursor:"pointer",marginBottom:taxExempt?14:0}}>
+                <input type="checkbox" checked={taxExempt} onChange={function(e){setTaxExempt(e.target.checked);}}
+                  style={{accentColor:C.accent,cursor:"pointer"}}/>
+                <span style={{fontSize:12,fontWeight:700,color:C.text}}>🌾 Tax-exempt customer</span>
+                {taxExempt && editCust && editCust.taxExemption && editCust.taxExemption.verifiedAt && (
+                  <span style={{padding:"2px 8px",borderRadius:20,background:C.success+"20",color:C.success,fontSize:10,fontWeight:700}}>✓ Verified by admin</span>
+                )}
+                {taxExempt && (!editCust || !editCust.taxExemption || !editCust.taxExemption.verifiedAt) && (
+                  <span style={{padding:"2px 8px",borderRadius:20,background:C.warning+"20",color:C.warning,fontSize:10,fontWeight:700}}>⏳ Awaiting admin verification</span>
+                )}
+              </label>
+
+              {taxExempt && (
+                <div>
+                  <div style={{padding:"8px 12px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,marginBottom:12,fontSize:11,color:C.muted,lineHeight:1.6}}>
+                    ℹ Fill in the certificate info and upload the card. Admin will review and approve before tax exemption applies to orders.
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Exemption type</div>
+                      <select value={exemptType}
+                        onChange={function(e){
+                          setExemptType(e.target.value);
+                          if(e.target.value==="gate") setExemptState("GA");
+                        }}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",cursor:"pointer"}}>
+                        {REP_EXEMPT_TYPES.map(function(t){return <option key={t.id} value={t.id}>{t.icon} {t.label}</option>;})}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Applicable state</div>
+                      <input value={exemptState} onChange={function(e){setExemptState(e.target.value.toUpperCase().substring(0,2));}}
+                        placeholder="GA" maxLength={2}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div style={{gridColumn:"1/-1"}}>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Certificate number</div>
+                      <input value={exemptNumber} onChange={function(e){setExemptNumber(e.target.value);}}
+                        placeholder={exemptType==="gate"?"GA1234567":"Certificate #"}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"monospace",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Issued</div>
+                      <input type="date" value={exemptIssued} onChange={function(e){setExemptIssued(e.target.value);}}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Expires</div>
+                      <input type="date" value={exemptExpires} onChange={function(e){setExemptExpires(e.target.value);}}
+                        style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none"}}/>
+                    </div>
+                  </div>
+
+                  <div style={{padding:"10px 12px",background:C.bg,borderRadius:8,marginBottom:10}}>
+                    <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>📎 Certificate upload (PDF or image, max 10MB)</div>
+                    {exemptCardName ? (
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{fontSize:12,color:C.text,fontFamily:"monospace",flex:1,overflow:"hidden",textOverflow:"ellipsis"}}>📄 {exemptCardName}</span>
+                        <Btn small variant="ghost" onClick={function(){
+                          var inp=document.getElementById("rep-exempt-card-input"); if(inp) inp.click();
+                        }}>Replace</Btn>
+                      </div>
+                    ) : (
+                      <Btn small variant="ghost" onClick={function(){
+                        var inp=document.getElementById("rep-exempt-card-input"); if(inp) inp.click();
+                      }}>{uploadingCard ? "Uploading…" : "Choose file"}</Btn>
+                    )}
+                    <input id="rep-exempt-card-input" type="file" accept="application/pdf,image/*" style={{display:"none"}} onChange={handleRepCardSelect}/>
+                  </div>
+
+                  <div>
+                    <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Notes for admin (optional)</div>
+                    <textarea value={exemptNotes} onChange={function(e){setExemptNotes(e.target.value);}} rows={2}
+                      placeholder="Anything admin should know about this certificate…"
+                      style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:7,padding:"8px 12px",color:C.text,fontSize:13,fontFamily:"inherit",boxSizing:"border-box",outline:"none",resize:"vertical",lineHeight:1.5}}/>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </Modal>
@@ -16480,7 +16644,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v84-tax-exempt-gate-hotfix</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v85-rep-tax-exempt-submission</div>
       </div>
     </div>
   );
@@ -17959,7 +18123,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v84-tax-exempt-gate-hotfix
+        BUILD: 2026-05-30-v85-rep-tax-exempt-submission
       </div>
     </div>
   );
