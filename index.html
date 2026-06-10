@@ -11605,7 +11605,9 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
   }
 
   function send() {
-    if(!toEmail.trim()||!body.trim()) return;
+    if(!toEmail.trim()){ addToast("No recipient — pick a customer or type an email","warning"); return; }
+    if(!body.trim()){ addToast("Empty message — write something before sending","warning"); return; }
+    if(!subject.trim()){ addToast("Subject is required — Microsoft Graph won't accept an empty subject","warning"); return; }
     if(!emailReady){
       addToast("Email not configured — go to Admin → Settings → Email","warning");
       return;
@@ -11614,19 +11616,26 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
     // Escape HTML in body before sending — preserves user's intent while preventing
     // injection of <script>/<style> through the rep's compose box
     var htmlBody = escapeHtml(body).split("\n").join("<br/>");
+    // v86: build the payload explicitly; only include cc when actually set so
+    // the edge function doesn't see an empty string and reject it
+    var payload = {
+      to: toEmail.trim(),
+      subject: subject.trim(),
+      html: htmlBody,
+      fromName: emailCfg.fromName||"PreVasive USA",
+      fromEmail: emailCfg.fromEmail,
+    };
+    if(ccRep && repEmail){
+      payload.cc = repEmail;   // edge function accepts string OR array
+    }
+    try{ console.info("[send-email] POST payload (preview):", {to:payload.to, subject:payload.subject, htmlLen:payload.html.length, cc:payload.cc||null}); }catch(e){}
     fetch(emailCfg.edgeFnUrl,{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        to:toEmail.trim(),
-        cc: (ccRep && repEmail) ? repEmail : undefined,
-        subject:subject,
-        html:htmlBody,
-        fromName:emailCfg.fromName||"PreVasive USA",
-        fromEmail:emailCfg.fromEmail,
-      }),
-    }).then(function(r){return r.json();}).then(function(d){
+      body:JSON.stringify(payload),
+    }).then(function(r){return r.json().then(function(d){return {status:r.status, data:d};});}).then(function(res){
       setSending(false);
+      var d = res.data || {};
       if(d.ok){
         var entry={id:genId("em"),to:toEmail,toName:selCust?selCust.name:toEmail,cc:(ccRep&&repEmail)||"",subject:subject,sentAt:new Date().toISOString(),sentBy:currentUser&&currentUser.name};
         setSentLog(function(prev){
@@ -11637,10 +11646,13 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
         addToast("✓ Email sent to "+(selCust?selCust.name:toEmail)+(ccRep&&repEmail?" (CC: you)":""),"success");
         setToId(""); setToEmail(""); setSubject(""); setBody(""); setTmpl("custom");
       } else {
-        addToast("Email failed: "+(d.error||"Unknown error"),"danger");
+        // Surface the EXACT edge function error for diagnosis (often "Missing 'subject'" or "Invalid 'to' email format")
+        try{ console.error("[send-email] HTTP "+res.status+" — "+(d.error||"no error message"), d); }catch(e){}
+        addToast("Email failed ("+res.status+"): "+(d.error||"Unknown error"),"danger");
       }
-    }).catch(function(){
+    }).catch(function(err){
       setSending(false);
+      try{ console.error("[send-email] network error:", err); }catch(e){}
       addToast("Could not reach email server — check Settings → Email","danger");
     });
   }
@@ -16660,7 +16672,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v86-shipping-rate-refetch</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v86-shipping-and-email-cc</div>
       </div>
     </div>
   );
@@ -18139,7 +18151,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v86-shipping-rate-refetch
+        BUILD: 2026-05-30-v86-shipping-and-email-cc
       </div>
     </div>
   );
