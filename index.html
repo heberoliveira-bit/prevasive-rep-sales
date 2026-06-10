@@ -6131,6 +6131,8 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                        currentUser,isAdmin,addToast,showResult}) {
   const [showForm,  setShowForm]  = useState(false);
   const [viewQuote, setViewQuote] = useState(null);
+  // v88: edit-quote / resend-quote
+  const [editingQuoteId, setEditingQuoteId] = useState(null);
   const [filter,    setFilter]    = useState("all");
   const [custId,    setCustId]    = useState("");
   const [items,     setItems]     = useState([{prodId:"",qty:1}]);
@@ -6164,9 +6166,63 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   function calcTax() { var ti=quoteTaxInfo(); return ti ? Math.round(calcCustomerSub()*ti.rate*100)/100 : 0; }
   function calcGrand() { return Math.round((calcCustomerSub()+(parseFloat(quoteShip)||0)+calcTax())*100)/100; }
 
+  // v88: a quote can only be sent or resent if the customer has a complete
+  // shipping address (street + city + state + zip). Falls back to billing
+  // address if shipping fields are empty — mirrors how sendQuote actually
+  // populates the email's shipAddress block.
+  function hasShippingAddr(cust){
+    if(!cust) return false;
+    var addr  = (cust.shippingAddress || cust.address || "").trim();
+    var city  = (cust.shippingCity    || cust.city    || "").trim();
+    var state = (cust.shippingState   || cust.state   || "").trim();
+    var zip   = (cust.shippingZip     || cust.zip     || "").trim();
+    return !!(addr && city && state && zip);
+  }
+
+  // v88: open the New Quote form in edit mode, pre-filling everything from the existing record
+  function openEditQuote(quote){
+    if(!quote) return;
+    setEditingQuoteId(quote.id);
+    setCustId(quote.custId || "");
+    setItems((quote.items && quote.items.length > 0)
+      ? quote.items.map(function(it){return {prodId:it.prodId, qty:it.qty, variantId:it.variantId||"", variantName:it.variantName||""};})
+      : [{prodId:"", qty:1}]);
+    setNotes(quote.notes || "");
+    setCommRate(quote.commissionRate || 10);
+    // Validity recomputed from the existing expiry → days-from-now
+    if(quote.validUntil){
+      var daysLeft = Math.max(1, Math.round((new Date(quote.validUntil).getTime() - Date.now()) / (24*60*60*1000)));
+      setValidDays(String(daysLeft));
+    } else {
+      setValidDays("30");
+    }
+    // Shipping rate — restore if it was a parcel quote
+    if(quote.shipping > 0 && quote.shippingType !== "freight"){
+      setQuoteRate({carrierName: quote.shippingService||"", serviceName:"", shipmentCost: quote.shipping});
+      setQuoteShip(quote.shipping);
+    } else {
+      setQuoteRate(null); setQuoteShip(0);
+    }
+    // Freight choice
+    if(quote.shippingType === "freight"){
+      setQuoteShippingChoice("freight");
+      if(quote.freightDetails){
+        setQuoteFreightAcc(quote.freightDetails.accessorials || {residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
+        setQuoteFreightNotes(quote.freightDetails.notesForCarrier || "");
+      }
+    } else {
+      setQuoteShippingChoice(null);
+      setQuoteFreightAcc({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
+      setQuoteFreightNotes("");
+    }
+    setViewQuote(null);   // close view modal
+    setShowForm(true);    // open form modal
+  }
+
   function saveQuote() {
     if(!custId||!items.some(function(it){return it.prodId;})) return;
-    var id = genId("qt");
+    var isEdit = !!editingQuoteId;
+    var id = isEdit ? editingQuoteId : genId("qt");
     var expiry = new Date(Date.now()+(parseInt(validDays)||30)*24*60*60*1000).toISOString();
     var rate3 = parseFloat(commRate)||0;
     var productBase = calcTotal();
@@ -6180,8 +6236,10 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var quoteIsFreight = quoteQualifies && ((quoteShippingChoice || "freight")==="freight");
     var ship = quoteIsFreight ? 0 : (parseFloat(quoteShip)||0);
     var grand = Math.round((productCustomer+ship+tax)*100)/100;
-    var q = {id:id,repId:currentUser&&(currentUser.rep_id||currentUser.id),
-              repName:currentUser&&currentUser.name,
+    // Find existing quote (for edit) to preserve createdAt, status, sentAt, quoteToken
+    var existing = isEdit ? quotes.find(function(q){return q.id===id;}) : null;
+    var q = {id:id,repId:(existing&&existing.repId) || (currentUser&&(currentUser.rep_id||currentUser.id)),
+              repName:(existing&&existing.repName) || (currentUser&&currentUser.name),
               shipping:ship,
               shippingService: quoteIsFreight ? "TBD — Freight" : (quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):""),
               shippingType: quoteIsFreight ? "freight" : "parcel",
@@ -6207,11 +6265,23 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               tax:tax,taxRate:taxRate,
               total:grand,commissionRate:commRate,
               notes:notes,validUntil:expiry,
-              status:"draft",createdAt:new Date().toISOString()};
-    setQuotes(function(prev){return [q].concat(prev);});
+              // v88: preserve original status when editing a sent quote — admin/rep can resend after
+              status: existing ? existing.status : "draft",
+              createdAt: existing ? existing.createdAt : new Date().toISOString(),
+              updatedAt: new Date().toISOString()};
+    if(existing && existing.sentAt) q.sentAt = existing.sentAt;
+    if(existing && existing.quoteToken) q.quoteToken = existing.quoteToken;
+    if(existing && existing.acceptLink) q.acceptLink = existing.acceptLink;
+
+    if(isEdit){
+      setQuotes(function(prev){return prev.map(function(p){return p.id===id?q:p;});});
+    } else {
+      setQuotes(function(prev){return [q].concat(prev);});
+    }
     dbSave("crm_quotes",id,q);
-    addToast("Quote "+id+(quoteIsFreight?" (freight) ":" ")+"created","success");
-    setShowForm(false); setCustId(""); setItems([{prodId:"",qty:1}]); setNotes("");
+    addToast("Quote "+id+(isEdit?" updated":" created")+(quoteIsFreight?" (freight)":""),"success");
+    setShowForm(false); setEditingQuoteId(null);
+    setCustId(""); setItems([{prodId:"",qty:1}]); setNotes("");
     setQuoteRate(null); setQuoteShip(0);
     setQuoteFreightAcc({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
     setQuoteFreightNotes("");
@@ -6311,6 +6381,11 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
 
   function sendQuote(quote) {
     var cust = customers.find(function(c2){return c2.id===quote.custId;})||{};
+    // v88: shipping address required before send or resend
+    if(!hasShippingAddr(cust)){
+      addToast("Cannot send: customer has no shipping address. Open the customer and add street + city + state + zip first.","danger");
+      return;
+    }
     var custEmail = cust.email||"";
     var repObj = reps.find(function(r){return r.id===quote.repId;})||{};
     var repEmail = repObj.email||(currentUser&&currentUser.email)||"";
@@ -6405,7 +6480,13 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
 
       {/* New Quote Form */}
       {showForm&&(
-        <Modal title="New Quote" wide={true} onClose={function(){setShowForm(false);}}
+        <Modal title={editingQuoteId ? ("Edit Quote — "+editingQuoteId) : "New Quote"} wide={true}
+          onClose={function(){
+            setShowForm(false); setEditingQuoteId(null);
+            setCustId(""); setItems([{prodId:"",qty:1}]); setNotes("");
+            setQuoteRate(null); setQuoteShip(0);
+            setQuoteShippingChoice(null);
+          }}
           footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn>
             <Btn onClick={saveQuote} disabled={!custId}>Save Quote</Btn>
@@ -6652,11 +6733,46 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewQuote.total||0)}</span></div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                {(viewQuote.status==="draft"||viewQuote.status==="sent")&&(
-                  <Btn onClick={function(){convertToOrder(viewQuote);}}>→ Convert to Order</Btn>
-                )}
-                {viewQuote.status==="draft"&&<Btn variant="ghost" onClick={function(){sendQuote(viewQuote);}}>Send Quote</Btn>}
+                {/* v88: edit, send, resend, convert — with shipping-address gating on send/resend */}
+                {(function(){
+                  var qCust = customers.find(function(c2){return c2.id===viewQuote.custId;})||{};
+                  var addrOk = hasShippingAddr(qCust);
+                  var addrWarning = addrOk ? "" : "⚠ Add shipping address to this customer before sending";
+                  return (
+                    <React.Fragment>
+                      {(viewQuote.status==="draft"||viewQuote.status==="sent")&&(
+                        <Btn onClick={function(){convertToOrder(viewQuote);}}>→ Convert to Order</Btn>
+                      )}
+                      {(viewQuote.status==="draft"||viewQuote.status==="sent")&&(
+                        <Btn variant="ghost" onClick={function(){openEditQuote(viewQuote);}}>✏ Edit Quote</Btn>
+                      )}
+                      {viewQuote.status==="draft" && (
+                        <Btn variant={addrOk?"default":"ghost"} disabled={!addrOk} title={addrWarning}
+                          onClick={function(){sendQuote(viewQuote);}}>
+                          {addrOk ? "📧 Send Quote" : "📧 Send Quote (address required)"}
+                        </Btn>
+                      )}
+                      {viewQuote.status==="sent" && (
+                        <Btn variant={addrOk?"default":"ghost"} disabled={!addrOk} title={addrWarning}
+                          onClick={function(){sendQuote(viewQuote);}}>
+                          {addrOk ? "📧 Resend Quote" : "📧 Resend Quote (address required)"}
+                        </Btn>
+                      )}
+                    </React.Fragment>
+                  );
+                })()}
               </div>
+              {/* Address-missing inline warning */}
+              {(function(){
+                var qCust = customers.find(function(c2){return c2.id===viewQuote.custId;})||{};
+                if(hasShippingAddr(qCust)) return null;
+                if(viewQuote.status!=="draft" && viewQuote.status!=="sent") return null;
+                return (
+                  <div style={{marginTop:10,padding:"10px 12px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:8,fontSize:11,color:C.warning,lineHeight:1.6}}>
+                    <strong>⚠ Shipping address required.</strong> {qCust.name||"This customer"} doesn't have a complete shipping address on file. Open the customer record (Customers tab → {qCust.name||"customer"}) and add street + city + state + zip before sending the quote.
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </Modal>
@@ -16693,7 +16809,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v87-babel-fallback</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v88-quote-edit-resend-addr</div>
       </div>
     </div>
   );
@@ -18172,7 +18288,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v87-babel-fallback
+        BUILD: 2026-05-30-v88-quote-edit-resend-addr
       </div>
     </div>
   );
