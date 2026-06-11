@@ -6615,6 +6615,20 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       addToast("Cannot send: customer has no shipping address. Open the customer and add street + city + state + zip first.","danger");
       return;
     }
+    // v94b: enrich line items with current product names before sending — so old quotes
+    // (created before name-snapshotting was added) don't email "prod_005" to customers.
+    // Also catches cases where the snapshotted name was empty or equal to the prodId.
+    var enrichedItems = (quote.items || []).map(function(it){
+      var prod = (products || []).find(function(p){return p.id === it.prodId;}) || {};
+      var resolvedName = prod.name && prod.name !== it.prodId
+        ? prod.name
+        : (it.name && it.name !== it.prodId ? it.name : (prod.name || it.prodId || "Item"));
+      return Object.assign({}, it, {
+        name: resolvedName,
+        sku: it.sku || prod.sku || "",
+      });
+    });
+    var enrichedQuote = Object.assign({}, quote, {items: enrichedItems});
     var custEmail = cust.email||"";
     var repObj = reps.find(function(r){return r.id===quote.repId;})||{};
     var repEmail = repObj.email||(currentUser&&currentUser.email)||"";
@@ -6623,17 +6637,18 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       ? {address:cust.shippingAddress||"",address2:cust.shippingAddress2||"",city:cust.shippingCity||"",state:cust.shippingState||"",zip:cust.shippingZip||"",label:"Shipping"}
       : (cust.address?{address:cust.address,city:cust.city,state:cust.state,zip:cust.zip,label:"Primary"}:null);
     var token = quote.id+"_q_"+Math.random().toString(36).slice(2,9);
-    var snap = {token:token,status:"sent",quote:quote,company:company,
-      custId:quote.custId,custName:quote.custName||cust.name||"",custEmail:custEmail,
-      repId:quote.repId,repName:quote.repName||"",repEmail:repEmail,
+    var snap = {token:token,status:"sent",quote:enrichedQuote,company:company,
+      custId:enrichedQuote.custId,custName:enrichedQuote.custName||cust.name||"",custEmail:custEmail,
+      repId:enrichedQuote.repId,repName:enrichedQuote.repName||"",repEmail:repEmail,
       shipAddress:shipAddr,createdAt:new Date().toISOString()};
     try{localStorage.setItem("__pv__quote_"+token,JSON.stringify(snap));}catch(e){}
     var sbq=getSB();if(sbq){sbq.from("crm_quote_tokens").upsert({id:token,data:snap,created_at:snap.createdAt}).then(function(){});}
     var link = getSiteUrl()+"#quote="+token;
     var emailCfg2=null; try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
 
-    // v94: track quote as sent immediately so it's saved regardless of email outcome
-    var updated = Object.assign({},quote,{status:"sent",sentAt:new Date().toISOString(),quoteToken:token,acceptLink:link});
+    // v94: track quote as sent immediately so it's saved regardless of email outcome.
+    // v94b: also persist the enriched items so the in-app view stops showing prod_005.
+    var updated = Object.assign({},enrichedQuote,{status:"sent",sentAt:new Date().toISOString(),quoteToken:token,acceptLink:link});
     setQuotes(function(prev){return prev.map(function(q){return q.id===quote.id?updated:q;});});
     dbSave("crm_quotes",quote.id,updated);
     setViewQuote(updated);
@@ -6663,8 +6678,8 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     // v94: build the payload — CC rep so they always get a copy of what the customer received
     var payload = {
       to: custEmail,
-      subject: "Your quote from "+company+" — "+quote.id,
-      html: buildQuoteEmail(quote, company, link),
+      subject: "Your quote from "+company+" — "+enrichedQuote.id,
+      html: buildQuoteEmail(enrichedQuote, company, link),
       fromName: emailCfg2.fromName||company,
       fromEmail: emailCfg2.fromEmail,
       tenantId: emailCfg2.tenantId,
@@ -6674,7 +6689,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     if(repEmail && repEmail.toLowerCase() !== custEmail.toLowerCase()){
       payload.cc = repEmail;  // edge function v86+ supports cc as string or array
     }
-    try{ console.info("[sendQuote] →", {to: payload.to, cc: payload.cc||null, subject: payload.subject, quoteId: quote.id}); }catch(e){}
+    try{ console.info("[sendQuote] →", {to: payload.to, cc: payload.cc||null, subject: payload.subject, quoteId: enrichedQuote.id, itemNames: enrichedItems.map(function(it){return it.name;})}); }catch(e){}
 
     fetch(emailCfg2.edgeFnUrl,{
       method:"POST", headers:{"Content-Type":"application/json"},
@@ -17173,7 +17188,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94-quote-product-name</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94b-name-enrich-on-send</div>
       </div>
     </div>
   );
@@ -18670,7 +18685,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v94-quote-product-name
+        BUILD: 2026-05-30-v94b-name-enrich-on-send
       </div>
     </div>
   );
