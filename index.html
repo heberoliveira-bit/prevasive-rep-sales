@@ -17100,7 +17100,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v92-shipping-diagnostics</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v93-shipstation-full-sync</div>
       </div>
     </div>
   );
@@ -18597,7 +18597,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v92-shipping-diagnostics
+        BUILD: 2026-05-30-v93-shipstation-full-sync
       </div>
     </div>
   );
@@ -19009,11 +19009,33 @@ function App() {
         var sc = d.shipStationCreds;
         setShipStationCfg(function(prev){
           var p = prev || {};
+          // v93: remote-first precedence so stale local values (like a leftover
+          // carrierFilter) get replaced by what the admin most recently published.
+          // Use `sc.x != null` not `||` so empty-string-from-remote correctly clears
+          // the local value (e.g. clearing carrierFilter has to propagate).
+          function pick(localVal, remoteVal){
+            return (remoteVal != null && remoteVal !== "") ? remoteVal
+                 : (remoteVal === "" ? "" : (localVal != null ? localVal : ""));
+          }
           return Object.assign({}, p, {
-            apiKey:    p.apiKey    || sc.apiKey    || "",
-            apiSecret: p.apiSecret || sc.apiSecret || "",
-            storeUser: p.storeUser || sc.storeUser || "",
-            storePass: p.storePass || sc.storePass || "",
+            apiKey:          pick(p.apiKey,          sc.apiKey),
+            apiSecret:       pick(p.apiSecret,       sc.apiSecret),
+            storeUser:       pick(p.storeUser,       sc.storeUser),
+            storePass:       pick(p.storePass,       sc.storePass),
+            // v93: now-synced config fields
+            carrierFilter:   sc.carrierFilter   != null ? sc.carrierFilter   : (p.carrierFilter   || ""),
+            warehouseAddress:pick(p.warehouseAddress,sc.warehouseAddress),
+            warehouseCity:   pick(p.warehouseCity,   sc.warehouseCity),
+            warehouseState:  pick(p.warehouseState,  sc.warehouseState),
+            warehouseZip:    pick(p.warehouseZip,    sc.warehouseZip),
+            defaultWeight:   pick(p.defaultWeight,   sc.defaultWeight),
+            weightUnit:      pick(p.weightUnit,      sc.weightUnit),
+            dimL:            pick(p.dimL,            sc.dimL),
+            dimW:            pick(p.dimW,            sc.dimW),
+            dimH:            pick(p.dimH,            sc.dimH),
+            ratesFnUrl:      pick(p.ratesFnUrl,      sc.ratesFnUrl),
+            edgeFnUrl:       pick(p.edgeFnUrl,       sc.edgeFnUrl),
+            enabled:         (typeof sc.enabled === "boolean") ? sc.enabled : !!p.enabled,
           });
         });
       }
@@ -19068,16 +19090,30 @@ function App() {
         edgeFnUrl:    (emailCfg&&emailCfg.edgeFnUrl)    || "",
       },
       shipStationCreds: {
-        apiKey:    (shipStationCfg&&shipStationCfg.apiKey)    || "",
-        apiSecret: (shipStationCfg&&shipStationCfg.apiSecret) || "",
-        storeUser: (shipStationCfg&&shipStationCfg.storeUser) || "",
-        storePass: (shipStationCfg&&shipStationCfg.storePass) || "",
+        apiKey:           (shipStationCfg&&shipStationCfg.apiKey)           || "",
+        apiSecret:        (shipStationCfg&&shipStationCfg.apiSecret)        || "",
+        storeUser:        (shipStationCfg&&shipStationCfg.storeUser)        || "",
+        storePass:        (shipStationCfg&&shipStationCfg.storePass)        || "",
+        // v93: now-synced config fields — single source of truth across browsers
+        carrierFilter:    (shipStationCfg&&shipStationCfg.carrierFilter)    || "",
+        warehouseAddress: (shipStationCfg&&shipStationCfg.warehouseAddress) || "",
+        warehouseCity:    (shipStationCfg&&shipStationCfg.warehouseCity)    || "",
+        warehouseState:   (shipStationCfg&&shipStationCfg.warehouseState)   || "",
+        warehouseZip:     (shipStationCfg&&shipStationCfg.warehouseZip)     || "",
+        defaultWeight:    (shipStationCfg&&shipStationCfg.defaultWeight)    || "",
+        weightUnit:       (shipStationCfg&&shipStationCfg.weightUnit)       || "",
+        dimL:             (shipStationCfg&&shipStationCfg.dimL)             || "",
+        dimW:             (shipStationCfg&&shipStationCfg.dimW)             || "",
+        dimH:             (shipStationCfg&&shipStationCfg.dimH)             || "",
+        ratesFnUrl:       (shipStationCfg&&shipStationCfg.ratesFnUrl)       || "",
+        edgeFnUrl:        (shipStationCfg&&shipStationCfg.edgeFnUrl)        || "",
+        enabled:          !!(shipStationCfg&&shipStationCfg.enabled),
       },
     };
     var s; try{ s = JSON.stringify(row); }catch(e){ return; }
     if(s === adminSecretsLastWritten.current) return;
     // Skip writing an empty row on first mount (before any load completes)
-    if(s === JSON.stringify({emailCreds:{tenantId:"",clientId:"",clientSecret:"",fromName:"",fromEmail:"",edgeFnUrl:""},shipStationCreds:{apiKey:"",apiSecret:"",storeUser:"",storePass:""}})) return;
+    if(s === JSON.stringify({emailCreds:{tenantId:"",clientId:"",clientSecret:"",fromName:"",fromEmail:"",edgeFnUrl:""},shipStationCreds:{apiKey:"",apiSecret:"",storeUser:"",storePass:"",carrierFilter:"",warehouseAddress:"",warehouseCity:"",warehouseState:"",warehouseZip:"",defaultWeight:"",weightUnit:"",dimL:"",dimW:"",dimH:"",ratesFnUrl:"",edgeFnUrl:"",enabled:false}})) return;
     adminSecretsLastWritten.current = s;
     sb.from("crm_settings").upsert({id:"admin_secrets",data:row,updated_at:new Date().toISOString()}).then(function(){});
   },[emailCfg,shipStationCfg,currentUser,viewAsRep]);
