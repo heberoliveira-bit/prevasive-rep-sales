@@ -6182,7 +6182,18 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   // Customer-facing goods subtotal (base + commission markup), tax, and grand total
   function calcCustomerSub() { return Math.round(calcTotal()*(1+(parseFloat(commRate)||0)/100)*100)/100; }
   function quoteTaxInfo() { return (selCust&&selCust.zip) ? getGaTaxRate(selCust.zip) : null; }
-  function calcTax() { var ti=quoteTaxInfo(); return ti ? Math.round(calcCustomerSub()*ti.rate*100)/100 : 0; }
+  // v89: Active tax exemption — verified + not expired + matching ship state.
+  // Mirrors OrderForm's computeTotals exemption handling.
+  function activeQuoteExemption(){
+    if(!selCust) return null;
+    var shipState = (selCust.shippingState || selCust.state || "").toUpperCase();
+    return getActiveTaxExemption(selCust, shipState);
+  }
+  function calcTax() {
+    if(activeQuoteExemption()) return 0; // GATE / resale / non-profit / federal exempt → no state tax
+    var ti=quoteTaxInfo();
+    return ti ? Math.round(calcCustomerSub()*ti.rate*100)/100 : 0;
+  }
   function calcGrand() { return Math.round((calcCustomerSub()+(parseFloat(quoteShip)||0)+calcTax())*100)/100; }
 
   // v88: a quote can only be sent or resent if the customer has a complete
@@ -6249,7 +6260,10 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     // Freight detection — honor rep's explicit choice
     var ti = (selCust&&selCust.zip) ? getGaTaxRate(selCust.zip) : null;
     var taxRate = ti ? ti.rate : 0;
-    var tax = Math.round(productCustomer*taxRate*100)/100;
+    // v89: apply tax exemption (verified + not expired + matching ship state) — zero tax
+    var shipStateForExempt = selCust ? ((selCust.shippingState || selCust.state || "").toUpperCase()) : "";
+    var activeExemption = selCust ? getActiveTaxExemption(selCust, shipStateForExempt) : null;
+    var tax = activeExemption ? 0 : Math.round(productCustomer*taxRate*100)/100;
     var quoteQualifies = isOrderFreight(items, products, selCust, productCustomer+tax);
     var quoteLocked = quoteQualifies && isOrderFreightLocked(items, products, selCust);
     var quoteIsFreight = quoteQualifies && ((quoteShippingChoice || "freight")==="freight");
@@ -6282,6 +6296,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
               productBase:productBase,productCustomer:productCustomer,
               commission:Math.round(productBase*rate3/100*100)/100,
               tax:tax,taxRate:taxRate,
+              taxExempt: !!activeExemption,
+              taxExemptionType: activeExemption?activeExemption.type:null,
+              taxExemptionNumber: activeExemption?activeExemption.number:null,
               total:grand,commissionRate:commRate,
               notes:notes,validUntil:expiry,
               // v88: preserve original status when editing a sent quote — admin/rep can resend after
@@ -6320,7 +6337,10 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var subtotal = Math.round(base*(1+commR/100)*100)/100;
     var ti = qCust.zip ? getGaTaxRate(qCust.zip) : null;
     var taxRate = ti ? ti.rate : 0;
-    var tax = Math.round(subtotal*taxRate*100)/100;
+    // v89: tax-exempt customers (verified + non-expired + matching ship state) get state tax zeroed
+    var convShipState = ((qCust.shippingState || qCust.state || "")).toUpperCase();
+    var convActiveExemption = getActiveTaxExemption(qCust, convShipState);
+    var tax = convActiveExemption ? 0 : Math.round(subtotal*taxRate*100)/100;
     var grand = Math.round((subtotal+ship+tax)*100)/100;
     var commission = Math.round(base*(commR/100)*100)/100;
     var shipAddr = (qCust.shippingAddress||qCust.shippingCity)
@@ -6349,6 +6369,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       shipAddress:quote.shipAddress||shipAddr,
       totals:{baseSubtotal:base,subtotal:subtotal,shipping:ship,tax:tax,taxRate:taxRate,
               grand:grand,commission:commission,commRate:commR,
+              taxExempt: !!convActiveExemption,
+              taxExemptionType: convActiveExemption?convActiveExemption.type:null,
+              taxExemptionNumber: convActiveExemption?convActiveExemption.number:null,
               shippingService: isFreightConv ? "TBD — Freight" : (quote.shippingService||"")},
       shippingType: isFreightConv ? "freight" : "parcel",
       freightDetails: freightDetails,
@@ -6720,6 +6743,17 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                     <span>Sales Tax ({((quoteTaxInfo()&&quoteTaxInfo().rate||0)*100).toFixed(1)}%)</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcTax())}</span>
                   </div>
                 )}
+                {/* v89: show exempt indicator live in form totals */}
+                {(function(){
+                  var ex = activeQuoteExemption();
+                  if(!ex) return null;
+                  return (
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,color:C.success,fontWeight:600,marginBottom:6,padding:"4px 0",background:C.success+"08",paddingLeft:8,paddingRight:8,borderRadius:6}}>
+                      <span>🌾 {ex.type==="gate"?"GATE Tax-Exempt":"Tax-Exempt"}{ex.number?" (#"+ex.number+")":""}</span>
+                      <span style={{fontFamily:"monospace"}}>$0.00</span>
+                    </div>
+                  );
+                })()}
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:16,color:C.accent,paddingTop:8,borderTop:"1px solid "+C.border}}>
                   <span>Quote Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(calcGrand())}</span>
                 </div>
@@ -6759,6 +6793,12 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 )}
                 {(viewQuote.tax||0)>0&&(
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>Sales Tax</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(viewQuote.tax)}</span></div>
+                )}
+                {viewQuote.taxExempt && (
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border,color:C.success,fontWeight:600}}>
+                    <span>🌾 {viewQuote.taxExemptionType==="gate"?"GATE Tax-Exempt":"Tax-Exempt"}{viewQuote.taxExemptionNumber?" (#"+viewQuote.taxExemptionNumber+")":""}</span>
+                    <span style={{fontFamily:"monospace"}}>$0.00</span>
+                  </div>
                 )}
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewQuote.total||0)}</span></div>
               </div>
@@ -8998,21 +9038,31 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               {/* Totals */}
               <div style={{fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".07em",marginBottom:10}}>Financials</div>
               <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",marginBottom:14}}>
-                {[
-                  ["Subtotal", fmtMoney(viewOrder.totals&&viewOrder.totals.subtotal||0)],
-                  ["Shipping", fmtMoney(viewOrder.totals&&viewOrder.totals.shipping||0)],
-                  ["Tax", fmtMoney(viewOrder.totals&&viewOrder.totals.tax||0)],
-                  ["Grand Total", fmtMoney(viewOrder.totals&&viewOrder.totals.grand||0)],
-                  ["Commission ("+( viewOrder.commissionRate||0)+"%)", fmtMoney(viewOrder.totals&&viewOrder.totals.commission||0)],
-                ].map(function(row,i){return (
-                  <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
-                                       padding:"5px 0",borderBottom:i<4?"1px solid "+C.border:"none",
-                                       fontWeight:i===3||i===4?700:400,
-                                       color:i===3?C.accent:i===4?C.gold:C.text}}>
-                    <span style={{color:i<3?C.muted:undefined}}>{row[0]}</span>
-                    <span style={{fontFamily:"monospace"}}>{row[1]}</span>
-                  </div>
-                );})}
+                {(function(){
+                  var t = viewOrder.totals || {};
+                  var rows = [
+                    ["Subtotal", fmtMoney(t.subtotal||0)],
+                    ["Shipping", fmtMoney(t.shipping||0)],
+                  ];
+                  if(t.taxExempt){
+                    rows.push(["🌾 "+(t.taxExemptionType==="gate"?"GATE Tax-Exempt":"Tax-Exempt")+(t.taxExemptionNumber?" (#"+t.taxExemptionNumber+")":""), "$0.00"]);
+                  } else {
+                    rows.push(["Tax", fmtMoney(t.tax||0)]);
+                  }
+                  rows.push(["Grand Total", fmtMoney(t.grand||0)]);
+                  rows.push(["Commission ("+(viewOrder.commissionRate||0)+"%)", fmtMoney(t.commission||0)]);
+                  return rows.map(function(row,i){
+                    var isExemptRow = t.taxExempt && i===2;
+                    return (
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,
+                                           padding:"5px 0",borderBottom:i<rows.length-1?"1px solid "+C.border:"none",
+                                           fontWeight:isExemptRow||i===3||i===4?700:400,
+                                           color:isExemptRow?C.success:(i===3?C.accent:C.text)}}>
+                        <span>{row[0]}</span><span style={{fontFamily:"monospace"}}>{row[1]}</span>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
 
               {/* Return window indicator */}
@@ -16839,7 +16889,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v88-quote-commission-sync</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v89-tax-exempt-totals</div>
       </div>
     </div>
   );
@@ -17116,7 +17166,10 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   // Sales tax only applies to deliveries inside Georgia. getGaTaxRate returns null for non-GA ZIPs.
   var taxInfo = (shipAddr && shipAddr.zip) ? getGaTaxRate(shipAddr.zip) : null;
   var taxRate = taxInfo ? taxInfo.rate : 0;
-  var tax = Math.round(subtotal * taxRate * 100) / 100;
+  // v89: Tax-exempt customers (verified GATE / resale / etc. matching ship state) get state tax zeroed
+  var mobShipState = (shipAddr && shipAddr.state) ? shipAddr.state.toUpperCase() : "";
+  var mobActiveExemption = selCust ? getActiveTaxExemption(selCust, mobShipState) : null;
+  var tax = mobActiveExemption ? 0 : Math.round(subtotal * taxRate * 100) / 100;
   // Determine if freight is the active mode so shipping shows TBD ($0) regardless of any
   // previously-picked parcel rate left in selectedRate.
   var _shipFreightItems = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
@@ -17747,6 +17800,12 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.gold}}><span>+ Commission ({commRate}%)</span><span>{fmtMoney(commission)}</span></div>
             <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.text,fontWeight:600,paddingTop:6,borderTop:"1px dashed "+C.border}}><span>Customer subtotal</span><span>{fmtMoney(subtotal)}</span></div>
             {tax>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Tax{taxInfo&&taxInfo.county?(" · "+taxInfo.county):""} ({(taxRate*100).toFixed(2).replace(/\.?0+$/,"")}%)</span><span>{fmtMoney(tax)}</span></div>}
+            {mobActiveExemption && (
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.success,fontWeight:700,padding:"4px 8px",background:C.success+"08",borderRadius:6}}>
+                <span>🌾 {mobActiveExemption.type==="gate"?"GATE Tax-Exempt":"Tax-Exempt"}{mobActiveExemption.number?" (#"+mobActiveExemption.number+")":""}</span>
+                <span>$0.00</span>
+              </div>
+            )}
             {shipping>0&&<div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.muted}}><span>Shipping</span><span>{fmtMoney(shipping)}</span></div>}
             {shipping===0 && _mobileIsFreight && <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.warning,fontWeight:700}}><span>Shipping</span><span>TBD</span></div>}
             {shipping===0 && !_mobileIsFreight && !selectedRate && hasLines && <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6,color:C.warning,fontWeight:700}}><span>Shipping</span><span>TBD — pick a rate</span></div>}
@@ -18318,7 +18377,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v88-quote-commission-sync
+        BUILD: 2026-05-30-v89-tax-exempt-totals
       </div>
     </div>
   );
