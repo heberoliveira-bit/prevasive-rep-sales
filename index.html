@@ -3623,18 +3623,47 @@ function CustomerEditModal({customer,onSave,onClose,addToast,currentUser}) {
     });
   }
 
+  function buildExemptionFromState(verifiedAt, verifiedBy){
+    return {
+      type: exemptType,
+      state: (exemptState||"").toUpperCase(),
+      number: exemptNumber.trim(),
+      issuedAt: exemptIssued ? new Date(exemptIssued).toISOString() : null,
+      expiresAt: exemptExpires ? new Date(exemptExpires).toISOString() : null,
+      cardFileName: exemptCardName || "",
+      cardStoragePath: exemptCardPath || "",
+      verifiedAt: verifiedAt,
+      verifiedBy: verifiedBy,
+      notes: exemptNotes.trim(),
+    };
+  }
+  // v89: persist verification immediately — don't require the modal-level Save click.
+  // Admin clicked "Mark Verified" → it should be DONE, sync'd across browsers via Supabase realtime.
   function markVerified(){
     var now = new Date().toISOString();
     var actor = (currentUser && currentUser.name) || "Admin";
     setExemptVerified(true);
     setExemptVerifiedAt(now);
     setExemptVerifiedBy(actor);
-    addToast("✓ Verified — exemption will apply to future orders","success");
+    var updated = Object.assign({}, customer, {
+      taxExempt: true,
+      taxExemption: buildExemptionFromState(now, actor),
+      updatedAt: new Date().toISOString(),
+    });
+    onSave(updated);
+    addToast("✓ Verified and saved — exemption applies to future orders","success");
   }
   function clearVerified(){
     setExemptVerified(false);
     setExemptVerifiedAt(null);
     setExemptVerifiedBy("");
+    var updated = Object.assign({}, customer, {
+      taxExempt: true,
+      taxExemption: buildExemptionFromState(null, null),
+      updatedAt: new Date().toISOString(),
+    });
+    onSave(updated);
+    addToast("⏳ Verification cleared — exemption no longer applies until re-verified","info");
   }
   function openLookup(){
     if(!typeMeta.lookupUrl){ addToast("No lookup URL for this exemption type — verify manually","info"); return; }
@@ -16889,7 +16918,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v89-tax-exempt-totals</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v90-cross-browser-sync</div>
       </div>
     </div>
   );
@@ -18377,7 +18406,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v89-tax-exempt-totals
+        BUILD: 2026-05-30-v90-cross-browser-sync
       </div>
     </div>
   );
@@ -18763,6 +18792,43 @@ function App() {
     }).catch(function(){});
   },[]);
 
+  // v89: admin-only secrets row — syncs email Microsoft Graph creds + ShipStation keys
+  // across an admin's browsers. RLS on crm_settings.id='admin_secrets' MUST restrict SELECT
+  // to admin role so reps/customers can't read these. Reps don't read this row at all.
+  useEffect(function(){
+    if(!currentUser || currentUser.role!=="admin") return;
+    var sb=getSB(); if(!sb) return;
+    sb.from("crm_settings").select("data").eq("id","admin_secrets").single().then(function(r){
+      var d = r && r.data && r.data.data; if(!d) return;
+      if(d.emailCreds){
+        var e = d.emailCreds;
+        setEmailCfg(function(prev){
+          var p = prev || {};
+          return Object.assign({}, p, {
+            tenantId:     p.tenantId     || e.tenantId     || "",
+            clientId:     p.clientId     || e.clientId     || "",
+            clientSecret: p.clientSecret || e.clientSecret || "",
+            fromName:     p.fromName     || e.fromName     || "",
+            fromEmail:    p.fromEmail    || e.fromEmail    || "",
+            edgeFnUrl:    p.edgeFnUrl    || e.edgeFnUrl    || "",
+          });
+        });
+      }
+      if(d.shipStationCreds){
+        var sc = d.shipStationCreds;
+        setShipStationCfg(function(prev){
+          var p = prev || {};
+          return Object.assign({}, p, {
+            apiKey:    p.apiKey    || sc.apiKey    || "",
+            apiSecret: p.apiSecret || sc.apiSecret || "",
+            storeUser: p.storeUser || sc.storeUser || "",
+            storePass: p.storePass || sc.storePass || "",
+          });
+        });
+      }
+    }).catch(function(){});
+  },[currentUser]);
+
   // Publish shared settings whenever an admin changes them (never from rep/customer sessions).
   // Guards against the load→publish echo loop: each effect run JSON.stringifies the row and only
   // writes when the content has actually changed from the last write. Without this, the load
@@ -18794,6 +18860,36 @@ function App() {
     publicSettingsLastWritten.current = serialized;
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
   },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
+
+  // v89: publish admin-only secrets so they sync across admin browsers.
+  // Same anti-echo pattern as public_settings.
+  var adminSecretsLastWritten = useRef(null);
+  useEffect(function(){
+    if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
+    var sb=getSB(); if(!sb) return;
+    var row = {
+      emailCreds: {
+        tenantId:     (emailCfg&&emailCfg.tenantId)     || "",
+        clientId:     (emailCfg&&emailCfg.clientId)     || "",
+        clientSecret: (emailCfg&&emailCfg.clientSecret) || "",
+        fromName:     (emailCfg&&emailCfg.fromName)     || "",
+        fromEmail:    (emailCfg&&emailCfg.fromEmail)    || "",
+        edgeFnUrl:    (emailCfg&&emailCfg.edgeFnUrl)    || "",
+      },
+      shipStationCreds: {
+        apiKey:    (shipStationCfg&&shipStationCfg.apiKey)    || "",
+        apiSecret: (shipStationCfg&&shipStationCfg.apiSecret) || "",
+        storeUser: (shipStationCfg&&shipStationCfg.storeUser) || "",
+        storePass: (shipStationCfg&&shipStationCfg.storePass) || "",
+      },
+    };
+    var s; try{ s = JSON.stringify(row); }catch(e){ return; }
+    if(s === adminSecretsLastWritten.current) return;
+    // Skip writing an empty row on first mount (before any load completes)
+    if(s === JSON.stringify({emailCreds:{tenantId:"",clientId:"",clientSecret:"",fromName:"",fromEmail:"",edgeFnUrl:""},shipStationCreds:{apiKey:"",apiSecret:"",storeUser:"",storePass:""}})) return;
+    adminSecretsLastWritten.current = s;
+    sb.from("crm_settings").upsert({id:"admin_secrets",data:row,updated_at:new Date().toISOString()}).then(function(){});
+  },[emailCfg,shipStationCfg,currentUser,viewAsRep]);
 
 
   // Apply theme
