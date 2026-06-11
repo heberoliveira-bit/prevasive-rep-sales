@@ -6617,17 +6617,36 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     }
     // v94b: enrich line items with current product names before sending — so old quotes
     // (created before name-snapshotting was added) don't email "prod_005" to customers.
-    // Also catches cases where the snapshotted name was empty or equal to the prodId.
+    // v94c: explicit diagnostic logging + "Item" fallback (never expose raw prodId in customer email)
+    var lookupReport = [];
     var enrichedItems = (quote.items || []).map(function(it){
-      var prod = (products || []).find(function(p){return p.id === it.prodId;}) || {};
-      var resolvedName = prod.name && prod.name !== it.prodId
-        ? prod.name
-        : (it.name && it.name !== it.prodId ? it.name : (prod.name || it.prodId || "Item"));
+      var prod = (products || []).find(function(p){return p.id === it.prodId;});
+      var found = !!prod;
+      var prodName = prod && typeof prod.name === "string" ? prod.name.trim() : "";
+      var nameValid = !!prodName && prodName !== it.prodId;
+      var storedName = it.name && typeof it.name === "string" ? it.name.trim() : "";
+      var storedValid = !!storedName && storedName !== it.prodId;
+      var resolvedName = nameValid ? prodName
+                       : storedValid ? storedName
+                       : "Item";   // never leak prod_005 into the email
+      lookupReport.push({
+        prodId: it.prodId,
+        productFound: found,
+        productNameInCatalog: prod ? (prod.name||"(empty)") : "(product missing from catalog)",
+        storedNameOnQuote: it.name || "(none)",
+        resolved: resolvedName,
+      });
       return Object.assign({}, it, {
         name: resolvedName,
-        sku: it.sku || prod.sku || "",
+        sku: it.sku || (prod && prod.sku) || "",
       });
     });
+    try{ console.info("[sendQuote] item enrichment report:", lookupReport); }catch(e){}
+    // Surface the issue to the rep if a line couldn't be resolved
+    var unresolvable = lookupReport.filter(function(r){return r.resolved === "Item";});
+    if(unresolvable.length){
+      addToast("⚠ "+unresolvable.length+" line item(s) have no product name in your catalog. Check Products tab — open console (F12) for details.","warning");
+    }
     var enrichedQuote = Object.assign({}, quote, {items: enrichedItems});
     var custEmail = cust.email||"";
     var repObj = reps.find(function(r){return r.id===quote.repId;})||{};
@@ -17188,7 +17207,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94b-name-enrich-on-send</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94c-name-diagnostic</div>
       </div>
     </div>
   );
@@ -18685,7 +18704,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v94b-name-enrich-on-send
+        BUILD: 2026-05-30-v94c-name-diagnostic
       </div>
     </div>
   );
