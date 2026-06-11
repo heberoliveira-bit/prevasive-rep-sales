@@ -6138,7 +6138,26 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   const [items,     setItems]     = useState([{prodId:"",qty:1}]);
   const [notes,     setNotes]     = useState("");
   const [validDays, setValidDays] = useState("30");
-  const [commRate,  setCommRate]  = useState(10);
+  const [commRate,  setCommRate]  = useState(function(){
+    // v88: initialize from rep's default commission rate
+    var rep = (reps||[]).find(function(r){return r.id===(currentUser&&(currentUser.rep_id||currentUser.id));});
+    if(rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") return parseFloat(rep.defaultCommissionRate)||10;
+    return 10;
+  });
+
+  // v88: sync commRate with customer's per-customer override → rep default fallback.
+  // Skip when in edit mode (editingQuoteId set) so editing a saved quote preserves
+  // the rate originally chosen.
+  useEffect(function(){
+    if(editingQuoteId) return;
+    var rep = (reps||[]).find(function(r){return r.id===(currentUser&&(currentUser.rep_id||currentUser.id));});
+    var repDefault = (rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") ? parseFloat(rep.defaultCommissionRate)||10 : 10;
+    if(custId){
+      var c = (customers||[]).find(function(x){return x.id===custId;});
+      if(c && c.commissionRate!=null && c.commissionRate!=="") { setCommRate(parseFloat(c.commissionRate)||0); return; }
+    }
+    setCommRate(repDefault);
+  }, [custId, customers, reps]);
   const [quoteRate, setQuoteRate] = useState(null);
   const [quoteShip, setQuoteShip] = useState(0);
   // Freight on quotes — same triggers as orders
@@ -6489,7 +6508,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
           }}
           footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn>
-            <Btn onClick={saveQuote} disabled={!custId}>Save Quote</Btn>
+            <Btn onClick={saveQuote} disabled={!custId}>{editingQuoteId ? "💾 Save Changes" : "Save Quote"}</Btn>
           </div>}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <div>
@@ -6638,7 +6657,18 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                 );
               })()}
                 <div>
-                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission %</div>
+                  <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <span>Commission %</span>
+                    {(function(){
+                      // v88: show source of current rate so rep knows if it's coming from customer override
+                      if(!custId) return null;
+                      var c = (customers||[]).find(function(x){return x.id===custId;});
+                      if(c && c.commissionRate!=null && c.commissionRate!=="" && parseFloat(c.commissionRate)===parseFloat(commRate)){
+                        return <span style={{fontSize:9,fontWeight:700,color:C.accent,padding:"2px 6px",border:"1px solid "+C.accent,borderRadius:4}}>FROM CUSTOMER</span>;
+                      }
+                      return null;
+                    })()}
+                  </div>
                   <input type="range" min="0" max="150" step="0.5" value={commRate}
                     onChange={function(e){setCommRate(e.target.value);}}
                     style={{width:"100%",accentColor:C.accent,marginTop:8}}/>
@@ -16809,7 +16839,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v88-quote-edit-resend-addr</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v88-quote-commission-sync</div>
       </div>
     </div>
   );
@@ -18288,7 +18318,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v88-quote-edit-resend-addr
+        BUILD: 2026-05-30-v88-quote-commission-sync
       </div>
     </div>
   );
