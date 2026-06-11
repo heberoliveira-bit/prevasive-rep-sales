@@ -6469,8 +6469,16 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
         var p=products.find(function(x){return x.id===it.prodId;})||{price:0};
         var v=prodVariant(p,it);
         var base=lineUnit(p,it);
-        return Object.assign({},it,{unitPrice:base,customerPrice:Math.round(base*(1+rate3/100)*100)/100,
-          variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""});
+        // v94: snapshot product/variant name + sku at save time so the email/view template
+        // shows "PreVasive Botanical Disinfectant" instead of the raw "prod_005" id, and the
+        // name stays stable even if the product is later renamed
+        return Object.assign({},it,{
+          name: p.name || it.name || it.prodId,
+          sku:  p.sku  || it.sku  || "",
+          unitPrice:base,
+          customerPrice:Math.round(base*(1+rate3/100)*100)/100,
+          variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""
+        });
       }),
               productBase:productBase,productCustomer:productCustomer,
               commission:Math.round(productBase*rate3/100*100)/100,
@@ -12772,8 +12780,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         var rate3=parseFloat(commRate)||0;
         var v=prodVariant(p,it);
         var base=lineUnit(p,it);
-        return Object.assign({},it,{unitPrice:base,customerPrice:Math.round(base*(1+rate3/100)*100)/100,
-          variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""});
+        // v94: snapshot name + sku for email templates and customer-facing views
+        return Object.assign({},it,{
+          name: p.name || it.name || it.prodId,
+          sku:  p.sku  || it.sku  || "",
+          unitPrice:base,
+          customerPrice:Math.round(base*(1+rate3/100)*100)/100,
+          variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""
+        });
       }),
       totals:totals, commissionRate:parseFloat(commRate)||0,
       payMethod:payMethod, discountCode:discApplied?discApplied.code:null,
@@ -15653,9 +15667,16 @@ function generateReceiptToken(order, customer, payRef, company){
 }
 
 function buildQuoteEmail(quote, company, link){
+  // v94: show real product name (snapshotted on the quote line at save time);
+  // include variant + sku if present
+  function escHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   var rows=(quote.items||[]).map(function(it){
     var lp=it.customerPrice||it.unitPrice||0;
-    return "<tr><td style='padding:6px 0;color:#4a5568'>"+(it.qty||1)+"&times; "+(it.name||it.prodId||"Item")+"</td><td style='padding:6px 0;text-align:right;color:#1a1a2e'>$"+(lp*(it.qty||1)).toFixed(2)+"</td></tr>";
+    var label = it.name || it.prodId || "Item";
+    var variant = it.variantName ? " — " + it.variantName : "";
+    var sku = (it.variantSku || it.sku) ? " <span style='color:#a0aec0;font-size:11px;font-family:monospace'>("+escHtml(it.variantSku||it.sku)+")</span>" : "";
+    return "<tr><td style='padding:6px 0;color:#4a5568'>"+(it.qty||1)+"&times; "+escHtml(label)+escHtml(variant)+sku+"</td>"
+         + "<td style='padding:6px 0;text-align:right;color:#1a1a2e'>$"+(lp*(it.qty||1)).toFixed(2)+"</td></tr>";
   }).join("");
   var isFreightEmail = quote.shippingType==="freight" || !!quote.freightDetails;
   var totalLabel = isFreightEmail ? "Subtotal" : "Total";
@@ -15810,9 +15831,12 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
           <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>Order summary</div>
           {items.map(function(it,i){
             var lp=it.customerPrice||it.unitPrice||0;
+            var label = it.name || it.prodId || "Item";
+            var variant = it.variantName ? " — " + it.variantName : "";
+            var sku = (it.variantSku || it.sku) ? " (" + (it.variantSku||it.sku) + ")" : "";
             return (
               <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:8}}>
-                <span>{(it.qty||1)}× {it.name||it.prodId||"Item"}</span>
+                <span>{(it.qty||1)}× {label}{variant}<span style={{color:"#a0aec0",fontSize:11,fontFamily:"monospace"}}>{sku}</span></span>
                 <span style={{fontWeight:600,color:"#1a1a2e"}}>{money(lp*(it.qty||1))}</span>
               </div>
             );
@@ -17149,7 +17173,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94-quote-email-cc-rep</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94-quote-product-name</div>
       </div>
     </div>
   );
@@ -18646,7 +18670,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v94-quote-email-cc-rep
+        BUILD: 2026-05-30-v94-quote-product-name
       </div>
     </div>
   );
