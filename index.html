@@ -14426,52 +14426,61 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
     });
   }
   function save(){
-    if(!name.trim()) return;
-    var id=editCust?editCust.id:genId("cust");
-    var taxExemptionObj = null;
-    if(taxExempt){
-      // Rep-submitted: verifiedAt/verifiedBy stay null so it lands in admin Tasks queue as "Unverified"
-      var existing = (editCust && editCust.taxExemption) || {};
-      taxExemptionObj = {
-        type: exemptType,
-        state: (exemptState||"").toUpperCase(),
-        number: exemptNumber.trim(),
-        issuedAt: exemptIssued ? new Date(exemptIssued).toISOString() : null,
-        expiresAt: exemptExpires ? new Date(exemptExpires).toISOString() : null,
-        cardFileName: exemptCardName||"",
-        cardStoragePath: exemptCardPath||"",
-        // Preserve prior verification if the rep is editing an already-verified record
-        // (otherwise reps could re-trigger verification by editing other fields)
-        verifiedAt: existing.verifiedAt || null,
-        verifiedBy: existing.verifiedBy || null,
-        notes: exemptNotes.trim(),
-        submittedBy: (repData && repData.name) || "Rep",
-        submittedAt: existing.submittedAt || new Date().toISOString(),
-      };
+    if(!name.trim()){ addToast("Customer name is required","warning"); return; }
+    try{
+      var id=editCust?editCust.id:genId("cust");
+      var taxExemptionObj = null;
+      if(taxExempt){
+        // Rep-submitted: verifiedAt/verifiedBy stay null so it lands in admin Tasks queue as "Unverified"
+        var existing = (editCust && editCust.taxExemption) || {};
+        taxExemptionObj = {
+          type: exemptType,
+          state: (exemptState||"").toUpperCase(),
+          number: (exemptNumber||"").trim(),
+          issuedAt: exemptIssued ? new Date(exemptIssued).toISOString() : null,
+          expiresAt: exemptExpires ? new Date(exemptExpires).toISOString() : null,
+          cardFileName: exemptCardName||"",
+          cardStoragePath: exemptCardPath||"",
+          // Preserve prior verification if the rep is editing an already-verified record
+          verifiedAt: existing.verifiedAt || null,
+          verifiedBy: existing.verifiedBy || null,
+          notes: (exemptNotes||"").trim(),
+          submittedBy: (repData && repData.name) || "Rep",
+          submittedAt: existing.submittedAt || new Date().toISOString(),
+        };
+      }
+      var data={id:id,repId:repId,name:name.trim(),email:(email||"").trim(),company:(company||"").trim(),phone:(phone||"").trim(),
+        billingAddress:(addr||"").trim(),billingAddress2:(addr2||"").trim(),
+        billingCity:(city||"").trim(),billingState:(state2||"").trim(),billingZip:(zip||"").trim(),
+        address:(addr||"").trim(),city:(city||"").trim(),state:(state2||"").trim(),zip:(zip||"").trim(),
+        shippingSameAsBilling:sameShip,
+        shippingAddress:sameShip?(addr||"").trim():(sAddr||"").trim(),
+        shippingAddress2:sameShip?(addr2||"").trim():(sAddr2||"").trim(),
+        shippingCity:sameShip?(city||"").trim():(sCity||"").trim(),
+        shippingState:sameShip?(state2||"").trim():(sState||"").trim(),
+        shippingZip:sameShip?(zip||"").trim():(sZip||"").trim(),
+        taxExempt: !!taxExempt,
+        taxExemption: taxExemptionObj,
+        updatedAt:new Date().toISOString()};
+      if(editCust&&editCust.termsStatus) data.termsStatus=editCust.termsStatus;
+      if(editCust&&editCust.termsType) data.termsType=editCust.termsType;
+      if(editCust&&editCust.termsLimit) data.termsLimit=editCust.termsLimit;
+      if(!editCust) data.createdAt=new Date().toISOString();
+      setCustomers(function(prev){return editCust?prev.map(function(c2){return c2.id===editCust.id?data:c2;}):[data].concat(prev);});
+      dbSave("crm_customers",id,data).then(function(r){
+        if(!r.ok){
+          console.error("[RepCustomers.save] dbSave failed:", r.error);
+          addToast("Saved locally but server write failed: "+((r.error&&r.error.message)||"unknown"),"danger");
+        }
+      });
+      var msg = editCust?"Customer updated":"Customer added";
+      if(taxExempt && !(taxExemptionObj && taxExemptionObj.verifiedAt)) msg += " — tax exemption pending admin approval";
+      addToast(msg,"success");
+      setShowForm(false);
+    }catch(err){
+      try{ console.error("[RepCustomers.save] threw:", err); }catch(e){}
+      addToast("Save failed: "+((err&&err.message)||"unknown error"),"danger");
     }
-    var data={id:id,repId:repId,name:name.trim(),email:email.trim(),company:company.trim(),phone:phone.trim(),
-      billingAddress:addr.trim(),billingAddress2:addr2.trim(),
-      billingCity:city.trim(),billingState:state2.trim(),billingZip:zip.trim(),
-      address:addr.trim(),city:city.trim(),state:state2.trim(),zip:zip.trim(),
-      shippingSameAsBilling:sameShip,
-      shippingAddress:sameShip?addr.trim():sAddr.trim(),
-      shippingAddress2:sameShip?addr2.trim():sAddr2.trim(),
-      shippingCity:sameShip?city.trim():sCity.trim(),
-      shippingState:sameShip?state2.trim():sState.trim(),
-      shippingZip:sameShip?zip.trim():sZip.trim(),
-      taxExempt: taxExempt,
-      taxExemption: taxExemptionObj,
-      updatedAt:new Date().toISOString()};
-    if(editCust&&editCust.termsStatus) data.termsStatus=editCust.termsStatus;
-    if(editCust&&editCust.termsType) data.termsType=editCust.termsType;
-    if(editCust&&editCust.termsLimit) data.termsLimit=editCust.termsLimit;
-    if(!editCust) data.createdAt=new Date().toISOString();
-    setCustomers(function(prev){return editCust?prev.map(function(c2){return c2.id===editCust.id?data:c2;}):[data].concat(prev);});
-    dbSave("crm_customers",id,data);
-    var msg = editCust?"Customer updated":"Customer added";
-    if(taxExempt && !(taxExemptionObj && taxExemptionObj.verifiedAt)) msg += " — tax exemption pending admin approval";
-    addToast(msg,"success");
-    setShowForm(false);
   }
   return (
     <div>
@@ -14638,10 +14647,12 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
                 <input type="checkbox" checked={taxExempt} onChange={function(e){setTaxExempt(e.target.checked);}}
                   style={{accentColor:C.accent,cursor:"pointer"}}/>
                 <span style={{fontSize:12,fontWeight:700,color:C.text}}>🌾 Tax-exempt customer</span>
-                {taxExempt && editCust && editCust.taxExemption && editCust.taxExemption.verifiedAt && (
+                {/* v90: only show status badges when there's a SAVED exemption on disk —
+                    the rep just checking the box doesn't mean "awaiting" until they actually save */}
+                {editCust && editCust.taxExempt && editCust.taxExemption && editCust.taxExemption.verifiedAt && (
                   <span style={{padding:"2px 8px",borderRadius:20,background:C.success+"20",color:C.success,fontSize:10,fontWeight:700}}>✓ Verified by admin</span>
                 )}
-                {taxExempt && (!editCust || !editCust.taxExemption || !editCust.taxExemption.verifiedAt) && (
+                {editCust && editCust.taxExempt && editCust.taxExemption && !editCust.taxExemption.verifiedAt && (
                   <span style={{padding:"2px 8px",borderRadius:20,background:C.warning+"20",color:C.warning,fontSize:10,fontWeight:700}}>⏳ Awaiting admin verification</span>
                 )}
               </label>
@@ -16918,7 +16929,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v90-cross-browser-sync</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v91-rep-customer-save-fix</div>
       </div>
     </div>
   );
@@ -18406,7 +18417,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v90-cross-browser-sync
+        BUILD: 2026-05-30-v91-rep-customer-save-fix
       </div>
     </div>
   );
