@@ -1830,7 +1830,11 @@ function ApplyForm({onSubmit,onCancel}) {
 
       <div style={sec}>Business &amp; address</div>
       <div style={{marginBottom:10}}>{F("Company / business name *",company,setCompany,"Acme Medical Supply")}</div>
-      <div style={{marginBottom:10}}>{F("Street address *",address,setAddress,"123 Main St")}</div>
+      <div style={{marginBottom:10}}>
+        <PlacesAutocomplete label="Street address *" value={address} onChange={setAddress}
+          onSelect={function(p){ setAddress(p.street||""); if(p.city) setCity(p.city); if(p.state) setState(p.state); if(p.zip) setZip(p.zip); }}
+          placeholder="123 Main St"/>
+      </div>
       <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:10,marginBottom:16}}>
         {F("City *",city,setCity,"Atlanta")}
         {F("State *",state,setState,"GA")}
@@ -3728,7 +3732,11 @@ function CustomerEditModal({customer,onSave,onClose,addToast,currentUser}) {
       <div style={{marginBottom:12}}>
         <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Address</div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
-          <div style={{gridColumn:"1/-1"}}><Field label="Street Address" value={bAddr} onChange={setBAddr} placeholder="123 Main St"/></div>
+          <div style={{gridColumn:"1/-1"}}>
+            <PlacesAutocomplete label="Street Address" value={bAddr} onChange={setBAddr}
+              onSelect={function(p){ setBAddr(p.street||""); if(p.city) setBCity(p.city); if(p.state) setBState(p.state); if(p.zip) setBZip(p.zip); }}
+              placeholder="123 Main St"/>
+          </div>
           <div style={{gridColumn:"1/-1"}}><Field label="Suite / Floor" value={bAddr2} onChange={setBAddr2} placeholder="Suite 400 (optional)"/></div>
           <Field label="City" value={bCity} onChange={setBCity} placeholder="Atlanta"/>
           <Field label="State" value={bState} onChange={setBState} placeholder="GA"/>
@@ -3745,7 +3753,11 @@ function CustomerEditModal({customer,onSave,onClose,addToast,currentUser}) {
         <div style={{background:C.surface2,borderRadius:10,padding:"14px 16px",border:"1px solid "+C.border}}>
           <div style={{fontSize:11,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:10}}>📦 Shipping Address</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div style={{gridColumn:"1/-1"}}><Field label="Street" value={sAddr} onChange={setSAddr} placeholder="456 Industrial Blvd"/></div>
+            <div style={{gridColumn:"1/-1"}}>
+              <PlacesAutocomplete label="Street" value={sAddr} onChange={setSAddr}
+                onSelect={function(p){ setSAddr(p.street||""); if(p.city) setSCity(p.city); if(p.state) setSState(p.state); if(p.zip) setSZip(p.zip); }}
+                placeholder="456 Industrial Blvd"/>
+            </div>
             <Field label="City" value={sCity} onChange={setSCity} placeholder="Duluth"/>
             <Field label="State" value={sState} onChange={setSState} placeholder="GA"/>
             <Field label="ZIP" value={sZip} onChange={setSZip} placeholder="30097"/>
@@ -11143,8 +11155,16 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                   onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{apiSecret:v}));}} placeholder="ss_api_secret" type="password"/>
               </div>
               <div style={{fontWeight:700,fontSize:11,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Ship From (Warehouse)</div>
-              <Field label="Street Address" value={(shipStationCfg&&shipStationCfg.warehouseAddress)||""}
-                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseAddress:v}));}}/>
+              <PlacesAutocomplete label="Street Address" value={(shipStationCfg&&shipStationCfg.warehouseAddress)||""}
+                onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseAddress:v}));}}
+                onSelect={function(p){
+                  onSaveShipStation(Object.assign({},shipStationCfg,{
+                    warehouseAddress:p.street||"",
+                    warehouseCity:p.city||shipStationCfg.warehouseCity||"",
+                    warehouseState:p.state||shipStationCfg.warehouseState||"",
+                    warehouseZip:p.zip||shipStationCfg.warehouseZip||"",
+                  }));
+                }}/>
               <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:12,marginBottom:12}}>
                 <Field label="City" value={(shipStationCfg&&shipStationCfg.warehouseCity)||""}
                   onChange={function(v){onSaveShipStation(Object.assign({},shipStationCfg,{warehouseCity:v}));}}/>
@@ -14606,7 +14626,11 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
             <Field label="Phone" value={phone} onChange={setPhone} placeholder="555-1234"/>
             <div style={{gridColumn:"1/-1"}}><Field label="Company" value={company} onChange={setCompany} placeholder="Smith Medical Group"/></div>
             <div style={{gridColumn:"1/-1",height:1,background:C.border}}/>
-            <Field label="Street Address" value={addr} onChange={setAddr} placeholder="123 Main St"/>
+            <div style={{gridColumn:"1/-1"}}>
+              <PlacesAutocomplete label="Street Address" value={addr} onChange={setAddr}
+                onSelect={function(p){ setAddr(p.street||""); if(p.city) setCity(p.city); if(p.state) setState2(p.state); if(p.zip) setZip(p.zip); }}
+                placeholder="123 Main St"/>
+            </div>
             <Field label="Suite / Floor" value={addr2} onChange={setAddr2} placeholder="Suite 400 (optional)"/>
             <Field label="City" value={city} onChange={setCity} placeholder="Atlanta"/>
             <Field label="State" value={state2} onChange={setState2} placeholder="GA"/>
@@ -14621,7 +14645,11 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
               <div style={{gridColumn:"1/-1",background:C.surface2,borderRadius:9,padding:"12px 14px",border:"1px solid "+C.border}}>
                 <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:10,textTransform:"uppercase",letterSpacing:".06em"}}>📦 Shipping Address</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  <div style={{gridColumn:"1/-1"}}><Field label="Street" value={sAddr} onChange={setSAddr} placeholder="456 Industrial Blvd"/></div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    <PlacesAutocomplete label="Street" value={sAddr} onChange={setSAddr}
+                      onSelect={function(p){ setSAddr(p.street||""); if(p.city) setSCity(p.city); if(p.state) setSState(p.state); if(p.zip) setSZip(p.zip); }}
+                      placeholder="456 Industrial Blvd"/>
+                  </div>
                   <Field label="City" value={sCity} onChange={setSCity} placeholder="Duluth"/>
                   <Field label="State" value={sState} onChange={setSState} placeholder="GA"/>
                   <Field label="ZIP" value={sZip} onChange={setSZip} placeholder="30097"/>
@@ -16934,7 +16962,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v91-rep-customer-string-coerce</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v91-places-autocomplete</div>
       </div>
     </div>
   );
@@ -18351,7 +18379,16 @@ function MobileCustomers({myCustomers, setCustomers, repData, myOrders, selected
           <Field label="Name *" value={newCust.name} onChange={function(v){setNewCust(Object.assign({},newCust,{name:v}));}}/>
           <Field label="Email" value={newCust.email} onChange={function(v){setNewCust(Object.assign({},newCust,{email:v}));}}/>
           <Field label="Phone" value={newCust.phone} onChange={function(v){setNewCust(Object.assign({},newCust,{phone:v}));}}/>
-          <Field label="Address" value={newCust.address} onChange={function(v){setNewCust(Object.assign({},newCust,{address:v}));}}/>
+          <PlacesAutocomplete label="Address" value={newCust.address}
+            onChange={function(v){setNewCust(Object.assign({},newCust,{address:v}));}}
+            onSelect={function(p){
+              setNewCust(Object.assign({},newCust,{
+                address: p.street||"",
+                city:    p.city  || newCust.city  || "",
+                state:   p.state || newCust.state || "",
+                zip:     p.zip   || newCust.zip   || "",
+              }));
+            }}/>
           <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8}}>
             <Field label="City" value={newCust.city} onChange={function(v){setNewCust(Object.assign({},newCust,{city:v}));}}/>
             <Field label="State" value={newCust.state} onChange={function(v){setNewCust(Object.assign({},newCust,{state:v}));}}/>
@@ -18422,7 +18459,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v91-rep-customer-string-coerce
+        BUILD: 2026-05-30-v91-places-autocomplete
       </div>
     </div>
   );
