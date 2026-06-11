@@ -896,9 +896,59 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
   const [error,    setError]    = useState("");
   const [fetched,  setFetched]  = useState("");
   const [debug,    setDebug]    = useState(null);
+  // v92: full diagnostic capture — request payload, HTTP status, raw response body, timing, error
+  const [diag,     setDiag]     = useState(null);
+  const [showDiag, setShowDiag] = useState(false);
+  const [forceCounter, setForceCounter] = useState(0); // bumped by Retry button to re-trigger useEffect
 
   function getSS(){
     try{return JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"{}");}catch(e){return {};}
+  }
+
+  // v92: Wraps fetch() to capture status, headers, raw body, parsed body, timing, errors.
+  // Reads response.text() so we can capture the raw body even if JSON.parse fails.
+  function instrumentedFetch(url, opts, label){
+    var t0 = Date.now();
+    var payload = null;
+    try{ payload = opts.body ? JSON.parse(opts.body) : null; }catch(e){}
+    // Redact secrets before display
+    var safePayload = payload ? Object.assign({}, payload, {
+      apiKey: payload.apiKey ? "REDACTED("+payload.apiKey.length+"chars)" : "(empty)",
+      apiSecret: payload.apiSecret ? "REDACTED("+payload.apiSecret.length+"chars)" : "(empty)",
+    }) : null;
+    try{ console.info("[ship-rate] →", label||"request", {url:url, payload:safePayload}); }catch(e){}
+    return fetch(url, opts).then(function(r){
+      var ms = Date.now() - t0;
+      var status = r.status;
+      var ok = r.ok;
+      return r.text().then(function(text){
+        var parsed = null;
+        try{ parsed = text ? JSON.parse(text) : null; }catch(e){}
+        try{ console.info("[ship-rate] ←", label||"response", {status:status, ms:ms, body: parsed||text}); }catch(e){}
+        return {
+          ok: ok && parsed && parsed.ok !== false,
+          status: status,
+          ms: ms,
+          body: parsed,
+          rawText: text,
+          payload: safePayload,
+          label: label || "",
+        };
+      });
+    }).catch(function(err){
+      var ms = Date.now() - t0;
+      try{ console.error("[ship-rate] ✗", label||"network error", err); }catch(e){}
+      return {
+        ok: false,
+        status: 0,
+        ms: ms,
+        body: null,
+        rawText: null,
+        payload: safePayload,
+        label: label || "",
+        error: (err && err.message) || "network error",
+      };
+    });
   }
 
   // v86: Build a signature from EVERY input that affects the rate result.
@@ -907,9 +957,9 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
   // changing products or qty"). New behaviour: any change to weight, packages,
   // or dimensions triggers a refetch and a re-match of the previously selected
   // service in the new results.
-  var rateSig = (toZip||"") + "|" + (toState||"") + "|" + (totalWeight||"") + "|" +
-    (packages ? packages.map(function(p){return (p.weight||0)+"x"+(p.qty||0)+":"+(p.dimL||"")+"x"+(p.dimW||"")+"x"+(p.dimH||"");}).join(",") : "") + "|" +
-    (pkgDimL||"") + "|" + (pkgDimW||"") + "|" + (pkgDimH||"");
+    var rateSig = (toZip||"") + "|" + (toState||"") + "|" + (totalWeight||"") + "|" +
+      (packages ? packages.map(function(p){return (p.weight||0)+"x"+(p.qty||0)+":"+(p.dimL||"")+"x"+(p.dimW||"")+"x"+(p.dimH||"");}).join(",") : "") + "|" +
+      (pkgDimL||"") + "|" + (pkgDimW||"") + "|" + (pkgDimH||"") + "|f"+forceCounter;
 
   useEffect(function(){
     if(!toZip||rateSig===fetched) return;
@@ -937,8 +987,8 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
     if(packages && packages.length > 0) {
       var totalPkgCount = packages.reduce(function(s, p){return s + (p.qty||0);}, 0);
       if(totalPkgCount > 1) {
-        var requests = packages.map(function(line){
-          return fetch(rfn,{
+        var requests = packages.map(function(line, i){
+          return instrumentedFetch(rfn,{
             method:"POST", headers:{"Content-Type":"application/json"},
             body:JSON.stringify({
               apiKey:ss.apiKey, apiSecret:ss.apiSecret,
@@ -951,19 +1001,34 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
               dimH: parseFloat(line.dimH)||parseFloat(ss.dimH||ss.defaultH)||6,
               carrierCodes: carrierCodes,
             }),
-          }).then(function(r){return r.json();})
-           .then(function(d){return {response:d, qty:line.qty, weight:line.weight};})
-           .catch(function(e){return {response:{ok:false,error:"Could not reach shipping server: "+e.message}, qty:line.qty, weight:line.weight};});
+          }, "package "+(i+1)+"/"+packages.length).then(function(r){return {response:r.body||{}, status:r.status, ms:r.ms, rawText:r.rawText, payload:r.payload, error:r.error, qty:line.qty, weight:line.weight, label:r.label};});
         });
 
         Promise.all(requests).then(function(results){
           setLoading(false);
           var first = (results[0]&&results[0].response) || {};
           setDebug(Object.assign({}, first, {packageCount: totalPkgCount, lineCount: packages.length}));
+          // v92: store full diagnostic snapshot (all per-line calls)
+          setDiag({
+            mode: "multi-package",
+            timestamp: new Date().toISOString(),
+            totalPkgCount: totalPkgCount,
+            lineCount: packages.length,
+            carrierFilter: carrierCodes,
+            fromZip: ss.warehouseZip,
+            toZip: toZip,
+            toState: toState || "",
+            calls: results.map(function(r){return {
+              label: r.label, status: r.status, ms: r.ms, error: r.error || null,
+              payload: r.payload,
+              body: r.response,
+              rawText: r.rawText && r.rawText.length > 2000 ? (r.rawText.slice(0,2000)+"...[truncated]") : r.rawText,
+            };}),
+          });
 
           var allFailed = results.every(function(r){return !r.response || !r.response.ok;});
           if(allFailed){
-            var firstErr = (results[0] && results[0].response && results[0].response.error) || "Failed to get rates";
+            var firstErr = (results[0] && results[0].response && results[0].response.error) || (results[0]&&results[0].error) || "Failed to get rates";
             setError(firstErr);
             setRates([]);
             return;
@@ -1004,7 +1069,7 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
     var dimL = parseFloat(pkgDimL)||parseFloat(ss.dimL||ss.defaultL)||12;
     var dimW = parseFloat(pkgDimW)||parseFloat(ss.dimW||ss.defaultW)||10;
     var dimH = parseFloat(pkgDimH)||parseFloat(ss.dimH||ss.defaultH)||6;
-    fetch(rfn,{
+    instrumentedFetch(rfn,{
       method:"POST", headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
         apiKey:ss.apiKey, apiSecret:ss.apiSecret,
@@ -1014,23 +1079,90 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
         dimL: dimL, dimW: dimW, dimH: dimH,
         carrierCodes: carrierCodes,
       }),
-    }).then(function(r){return r.json();}).then(function(d){
+    }, "single-package").then(function(r){
       setLoading(false);
+      var d = r.body || {};
       setDebug(d);
+      // v92: full diagnostic snapshot
+      setDiag({
+        mode: "single-package",
+        timestamp: new Date().toISOString(),
+        carrierFilter: carrierCodes,
+        fromZip: ss.warehouseZip,
+        toZip: toZip,
+        toState: toState || "",
+        calls: [{
+          label: r.label, status: r.status, ms: r.ms, error: r.error || null,
+          payload: r.payload,
+          body: d,
+          rawText: r.rawText && r.rawText.length > 2000 ? (r.rawText.slice(0,2000)+"...[truncated]") : r.rawText,
+        }],
+      });
       if(d.ok){
         var allRates = d.rates||[];
         var seen = {};
-        var deduped = allRates.filter(function(r){
-          var key = r.serviceCode+"_"+r.shipmentCost;
+        var deduped = allRates.filter(function(rt){
+          var key = rt.serviceCode+"_"+rt.shipmentCost;
           if(seen[key]) return false;
           seen[key] = true;
           return true;
         });
         setRates(deduped);
         rematchSelection(deduped);
-      } else { setError(d.error||"Failed to get rates"); setRates([]); }
-    }).catch(function(e){setLoading(false);setError("Could not reach shipping server: "+e.message);setRates([]);});
+      } else {
+        setError(d.error || r.error || ("HTTP "+r.status+" returned no rates"));
+        setRates([]);
+      }
+    });
   }, [rateSig]);
+
+  // v92: shared diagnostics panel — shown under error or empty states; copy-to-clipboard for sharing
+  function DiagnosticsPanel(){
+    if(!diag) return null;
+    function copy(){
+      try{
+        var text = "ShipStation diagnostic — "+(diag.timestamp||"")+"\n"+JSON.stringify(diag, null, 2);
+        navigator.clipboard.writeText(text).then(function(){
+          console.info("[ship-rate] diagnostic copied to clipboard");
+        });
+      }catch(e){}
+    }
+    return (
+      <div style={{marginTop:10,border:"1px solid "+C.border,borderRadius:8,background:C.surface2,fontSize:11}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 12px",cursor:"pointer",userSelect:"none"}}
+             onClick={function(){setShowDiag(!showDiag);}}>
+          <span style={{fontWeight:700,color:C.muted}}>🔬 Diagnostics ({diag.mode}, {diag.calls.length} call{diag.calls.length!==1?"s":""})</span>
+          <span style={{color:C.muted,fontSize:14}}>{showDiag?"▾":"▸"}</span>
+        </div>
+        {showDiag && (
+          <div style={{padding:"10px 12px",borderTop:"1px solid "+C.border,maxHeight:360,overflowY:"auto",fontFamily:"monospace",fontSize:10,lineHeight:1.5,color:C.text}}>
+            <div style={{marginBottom:8,fontSize:10,color:C.muted}}>
+              {diag.timestamp} · from {diag.fromZip} → {diag.toZip} {diag.toState?"("+diag.toState+")":""} · filter: {diag.carrierFilter && diag.carrierFilter.length ? diag.carrierFilter.join(", ") : "(none — all carriers)"}
+            </div>
+            {diag.calls.map(function(call, i){
+              var statusColor = call.status >= 200 && call.status < 300 ? C.success : (call.status === 0 ? C.danger : C.warning);
+              return (
+                <div key={i} style={{marginBottom:10,paddingBottom:10,borderBottom:i<diag.calls.length-1?"1px dashed "+C.border:"none"}}>
+                  <div style={{fontWeight:700,marginBottom:4}}>
+                    <span style={{color:statusColor}}>● HTTP {call.status||"NETWORK_ERROR"}</span> · {call.ms}ms · {call.label}
+                  </div>
+                  {call.error && <div style={{color:C.danger,marginBottom:4}}>error: {call.error}</div>}
+                  <div style={{color:C.muted,marginBottom:2}}>→ request payload</div>
+                  <pre style={{margin:"0 0 6px 0",padding:6,background:C.bg,borderRadius:4,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{JSON.stringify(call.payload, null, 2)}</pre>
+                  <div style={{color:C.muted,marginBottom:2}}>← response body</div>
+                  <pre style={{margin:0,padding:6,background:C.bg,borderRadius:4,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{call.body ? JSON.stringify(call.body, null, 2) : (call.rawText || "(empty)")}</pre>
+                </div>
+              );
+            })}
+            <div style={{marginTop:8,display:"flex",gap:8}}>
+              <button onClick={copy} style={{padding:"5px 10px",fontSize:11,background:C.accent,color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>📋 Copy diagnostic</button>
+              <button onClick={function(){setForceCounter(forceCounter+1);}} style={{padding:"5px 10px",fontSize:11,background:C.surface,color:C.text,border:"1px solid "+C.border,borderRadius:6,cursor:"pointer",fontFamily:"inherit"}}>🔁 Retry now</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   if(loading) return (
     <div style={{padding:"12px",background:C.surface2,borderRadius:10,fontSize:12,color:C.muted}}>
@@ -1038,18 +1170,24 @@ function ShippingRatePicker({toZip, toState, totalWeight, pkgDimL, pkgDimW, pkgD
     </div>
   );
   if(error) return (
-    <div style={{padding:"12px",background:C.danger+"10",borderRadius:10,fontSize:11,color:C.danger}}>{error}</div>
+    <div>
+      <div style={{padding:"12px",background:C.danger+"10",borderRadius:10,fontSize:11,color:C.danger}}>{error}</div>
+      <DiagnosticsPanel/>
+    </div>
   );
   if(rates.length===0) {
     var tried = (debug && Array.isArray(debug.carriers) && debug.carriers.length) ? debug.carriers.join(", ") : "";
     return (
-      <div style={{padding:"10px 14px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:10,fontSize:11,color:C.muted,lineHeight:1.5}}>
-        <div style={{fontWeight:600,color:C.warning,marginBottom:4}}>No live rates returned</div>
-        {tried
-          ? <div>Tried: {tried}. None returned a rate to {toZip}. Check that those carriers are connected in ShipStation and that the package weight/dimensions are valid.</div>
-          : <div>The rate function returned no carriers. Confirm ShipStation has at least one connected carrier, and that <code>SHIPSTATION_API_KEY</code> / <code>SHIPSTATION_API_SECRET</code> are set as Supabase function secrets (or admin's keys are filled in Settings → Shipping).</div>
-        }
-        <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>
+      <div>
+        <div style={{padding:"10px 14px",background:C.surface2,border:"1px dashed "+C.border,borderRadius:10,fontSize:11,color:C.muted,lineHeight:1.5}}>
+          <div style={{fontWeight:600,color:C.warning,marginBottom:4}}>No live rates returned</div>
+          {tried
+            ? <div>Tried: {tried}. None returned a rate to {toZip}. Check that those carriers are connected in ShipStation and that the package weight/dimensions are valid.</div>
+            : <div>The rate function returned no carriers. Confirm ShipStation has at least one connected carrier, and that <code>SHIPSTATION_API_KEY</code> / <code>SHIPSTATION_API_SECRET</code> are set as Supabase function secrets (or admin's keys are filled in Settings → Shipping).</div>
+          }
+          <div style={{marginTop:4,fontSize:10,color:C.dim}}>Falling back to manual shipping below.</div>
+        </div>
+        <DiagnosticsPanel/>
       </div>
     );
   }
@@ -16962,7 +17100,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v91-places-autocomplete</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v92-shipping-diagnostics</div>
       </div>
     </div>
   );
@@ -18459,7 +18597,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v91-places-autocomplete
+        BUILD: 2026-05-30-v92-shipping-diagnostics
       </div>
     </div>
   );
