@@ -6623,22 +6623,71 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var sbq=getSB();if(sbq){sbq.from("crm_quote_tokens").upsert({id:token,data:snap,created_at:snap.createdAt}).then(function(){});}
     var link = getSiteUrl()+"#quote="+token;
     var emailCfg2=null; try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
-    var emailed=false;
-    if(emailCfg2&&emailCfg2.edgeFnUrl&&custEmail&&(emailCfg2.clientSecret||emailCfg2.pass)&&notifEnabled("quoteReady")){
-      fetch(emailCfg2.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({to:custEmail,subject:"Your quote from "+company+" — "+quote.id,html:buildQuoteEmail(quote,company,link),
-          fromName:emailCfg2.fromName||company,fromEmail:emailCfg2.fromEmail,
-          tenantId:emailCfg2.tenantId,clientId:emailCfg2.clientId,clientSecret:emailCfg2.clientSecret})
-      }).then(function(){}).catch(function(){});
-      emailed=true;
-    }
+
+    // v94: track quote as sent immediately so it's saved regardless of email outcome
     var updated = Object.assign({},quote,{status:"sent",sentAt:new Date().toISOString(),quoteToken:token,acceptLink:link});
     setQuotes(function(prev){return prev.map(function(q){return q.id===quote.id?updated:q;});});
     dbSave("crm_quotes",quote.id,updated);
-    if(emailed){ addToast("Quote emailed to "+(custEmail||quote.custName),"success"); }
-    else { try{navigator.clipboard.writeText(link);}catch(e){}
-      addToast(custEmail?"Quote saved. Configure Settings → Email to auto-send — accept link copied.":"No customer email on file — accept link copied to clipboard.","warning"); }
     setViewQuote(updated);
+
+    // v94: validate email config BEFORE attempting send, surface specific reasons it can't go out
+    if(!notifEnabled("quoteReady")){
+      try{navigator.clipboard.writeText(link);}catch(e){}
+      addToast("Quote saved. Quote-Ready email notification is disabled in Settings → Notifications — accept link copied to clipboard.","warning");
+      return;
+    }
+    if(!emailCfg2 || !emailCfg2.edgeFnUrl){
+      try{navigator.clipboard.writeText(link);}catch(e){}
+      addToast("Quote saved. Email function URL not configured (Settings → Email) — accept link copied.","warning");
+      return;
+    }
+    if(!(emailCfg2.clientSecret||emailCfg2.pass)){
+      try{navigator.clipboard.writeText(link);}catch(e){}
+      addToast("Quote saved. Email credentials not configured (Settings → Email) — accept link copied.","warning");
+      return;
+    }
+    if(!custEmail){
+      try{navigator.clipboard.writeText(link);}catch(e){}
+      addToast("Quote saved. No customer email on file — accept link copied to clipboard.","warning");
+      return;
+    }
+
+    // v94: build the payload — CC rep so they always get a copy of what the customer received
+    var payload = {
+      to: custEmail,
+      subject: "Your quote from "+company+" — "+quote.id,
+      html: buildQuoteEmail(quote, company, link),
+      fromName: emailCfg2.fromName||company,
+      fromEmail: emailCfg2.fromEmail,
+      tenantId: emailCfg2.tenantId,
+      clientId: emailCfg2.clientId,
+      clientSecret: emailCfg2.clientSecret,
+    };
+    if(repEmail && repEmail.toLowerCase() !== custEmail.toLowerCase()){
+      payload.cc = repEmail;  // edge function v86+ supports cc as string or array
+    }
+    try{ console.info("[sendQuote] →", {to: payload.to, cc: payload.cc||null, subject: payload.subject, quoteId: quote.id}); }catch(e){}
+
+    fetch(emailCfg2.edgeFnUrl,{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(payload),
+    }).then(function(r){
+      return r.json().then(function(d){return {status:r.status, data:d};});
+    }).then(function(res){
+      var d = res.data || {};
+      if(d.ok){
+        try{ console.info("[sendQuote] ✓ sent — cc:"+(d.cc||0)+" bcc:"+(d.bcc||0), d); }catch(e){}
+        addToast("Quote emailed to "+custEmail + (payload.cc ? " (CC: "+payload.cc+")" : ""),"success");
+      } else {
+        try{ console.error("[sendQuote] ✗ HTTP "+res.status+" — "+(d.error||"no error message"), d); }catch(e){}
+        try{navigator.clipboard.writeText(link);}catch(e){}
+        addToast("Email failed ("+res.status+"): "+(d.error||"unknown error")+". Accept link copied — share manually.","danger");
+      }
+    }).catch(function(err){
+      try{ console.error("[sendQuote] ✗ network error:", err); }catch(e){}
+      try{navigator.clipboard.writeText(link);}catch(e){}
+      addToast("Could not reach email server: "+(err&&err.message||"network error")+". Accept link copied — share manually.","danger");
+    });
   }
 
   var STATUS_COLORS = {draft:{c:C.muted,bg:C.surface2},sent:{c:C.accent,bg:C.accent+"15"},
@@ -17100,7 +17149,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v93-shipstation-full-sync</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94-quote-email-cc-rep</div>
       </div>
     </div>
   );
@@ -18597,7 +18646,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v93-shipstation-full-sync
+        BUILD: 2026-05-30-v94-quote-email-cc-rep
       </div>
     </div>
   );
