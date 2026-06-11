@@ -14383,14 +14383,17 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
     setShowForm(true);
   }
   function openEdit(c2){
-    setEditCust(c2);setName(c2.name||"");setEmail(c2.email||"");setCompany(c2.company||"");setPhone(c2.phone||"");
-    setAddr(c2.billingAddress||c2.address||"");setAddr2(c2.billingAddress2||"");
-    setCity(c2.billingCity||c2.city||"");setState2(c2.billingState||c2.state||"");setZip(c2.billingZip||c2.zip||"");
+    // v91: helper — addresses on older customer records may have been stored as {street,city,state,zip}
+    // objects rather than strings; coerce here to prevent .trim() crashes downstream
+    function s(v){ return (v==null) ? "" : (typeof v === "string" ? v : (typeof v === "number" ? String(v) : "")); }
+    setEditCust(c2);setName(s(c2.name));setEmail(s(c2.email));setCompany(s(c2.company));setPhone(s(c2.phone));
+    setAddr(s(c2.billingAddress||c2.address));setAddr2(s(c2.billingAddress2));
+    setCity(s(c2.billingCity||c2.city));setState2(s(c2.billingState||c2.state));setZip(s(c2.billingZip||c2.zip));
     var same=c2.shippingSameAsBilling!==false&&!c2.shippingAddress;
     setSameShip(same);
-    setSAddr(c2.shippingAddress||"");setSAddr2(c2.shippingAddress2||"");
-    setSCity(c2.shippingCity||"");setSState(c2.shippingState||"");setSZip(c2.shippingZip||"");
-    setPayTerms(c2.paymentTerms||"");
+    setSAddr(s(c2.shippingAddress));setSAddr2(s(c2.shippingAddress2));
+    setSCity(s(c2.shippingCity));setSState(s(c2.shippingState));setSZip(s(c2.shippingZip));
+    setPayTerms(s(c2.paymentTerms));
     // v84: load existing tax-exempt info if present
     var ex = c2.taxExemption || {};
     setTaxExempt(c2.taxExempt===true);
@@ -14426,8 +14429,10 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
     });
   }
   function save(){
-    if(!name.trim()){ addToast("Customer name is required","warning"); return; }
+    if(!String(name||"").trim()){ addToast("Customer name is required","warning"); return; }
     try{
+      // v91: helper to safely trim a value that might be a string, null, or accidentally an object
+      function st(v){ return (v==null) ? "" : String(v).trim(); }
       var id=editCust?editCust.id:genId("cust");
       var taxExemptionObj = null;
       if(taxExempt){
@@ -14435,30 +14440,30 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
         var existing = (editCust && editCust.taxExemption) || {};
         taxExemptionObj = {
           type: exemptType,
-          state: (exemptState||"").toUpperCase(),
-          number: (exemptNumber||"").trim(),
+          state: st(exemptState).toUpperCase(),
+          number: st(exemptNumber),
           issuedAt: exemptIssued ? new Date(exemptIssued).toISOString() : null,
           expiresAt: exemptExpires ? new Date(exemptExpires).toISOString() : null,
-          cardFileName: exemptCardName||"",
-          cardStoragePath: exemptCardPath||"",
+          cardFileName: st(exemptCardName),
+          cardStoragePath: st(exemptCardPath),
           // Preserve prior verification if the rep is editing an already-verified record
           verifiedAt: existing.verifiedAt || null,
           verifiedBy: existing.verifiedBy || null,
-          notes: (exemptNotes||"").trim(),
+          notes: st(exemptNotes),
           submittedBy: (repData && repData.name) || "Rep",
           submittedAt: existing.submittedAt || new Date().toISOString(),
         };
       }
-      var data={id:id,repId:repId,name:name.trim(),email:(email||"").trim(),company:(company||"").trim(),phone:(phone||"").trim(),
-        billingAddress:(addr||"").trim(),billingAddress2:(addr2||"").trim(),
-        billingCity:(city||"").trim(),billingState:(state2||"").trim(),billingZip:(zip||"").trim(),
-        address:(addr||"").trim(),city:(city||"").trim(),state:(state2||"").trim(),zip:(zip||"").trim(),
+      var data={id:id,repId:repId,name:st(name),email:st(email),company:st(company),phone:st(phone),
+        billingAddress:st(addr),billingAddress2:st(addr2),
+        billingCity:st(city),billingState:st(state2),billingZip:st(zip),
+        address:st(addr),city:st(city),state:st(state2),zip:st(zip),
         shippingSameAsBilling:sameShip,
-        shippingAddress:sameShip?(addr||"").trim():(sAddr||"").trim(),
-        shippingAddress2:sameShip?(addr2||"").trim():(sAddr2||"").trim(),
-        shippingCity:sameShip?(city||"").trim():(sCity||"").trim(),
-        shippingState:sameShip?(state2||"").trim():(sState||"").trim(),
-        shippingZip:sameShip?(zip||"").trim():(sZip||"").trim(),
+        shippingAddress:sameShip?st(addr):st(sAddr),
+        shippingAddress2:sameShip?st(addr2):st(sAddr2),
+        shippingCity:sameShip?st(city):st(sCity),
+        shippingState:sameShip?st(state2):st(sState),
+        shippingZip:sameShip?st(zip):st(sZip),
         taxExempt: !!taxExempt,
         taxExemption: taxExemptionObj,
         updatedAt:new Date().toISOString()};
@@ -16929,7 +16934,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v91-rep-customer-save-fix</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v91-rep-customer-string-coerce</div>
       </div>
     </div>
   );
@@ -18417,7 +18422,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v91-rep-customer-save-fix
+        BUILD: 2026-05-30-v91-rep-customer-string-coerce
       </div>
     </div>
   );
