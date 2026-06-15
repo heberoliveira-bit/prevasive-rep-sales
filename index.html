@@ -3355,6 +3355,8 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
             mode: stripeMode,
             orderId:(payData&&payData.orderId)||(order&&order.id)||"",
             payToken:payToken||"",
+            // v96c: customer name lets the edge function include it in rep/admin notifications
+            customerName: (customer && customer.name) || (payData && payData.custName) || "",
             description:company+" — Order "+(payData.orderId||order.id)})
         }).then(function(r){return r.json();}).then(function(d){
           if(d.ok){
@@ -17287,7 +17289,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v96b-paytoken-fix</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v96c-paid-notif-and-status</div>
       </div>
     </div>
   );
@@ -18784,7 +18786,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v96b-paytoken-fix
+        BUILD: 2026-05-30-v96c-paid-notif-and-status
       </div>
     </div>
   );
@@ -19593,21 +19595,50 @@ function App() {
           localStorage.setItem("__pv__pay_"+payToken, JSON.stringify(paidPayload));
           // Mark order in Supabase as Paid, then auto-bump to Waiting Shipping if enabled
           var sb = getSB();
-          if(sb && payData2.order && payData2.order.id) {
-            var paidOrder = Object.assign({},payData2.order,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken});
+          var ord = payData2.order;
+          var orderId = ord && ord.id;
+          var custName = (payData2.customer && payData2.customer.name) || payData2.custName || "customer";
+          var orderRepId = ord && ord.repId;
+          var amtStr = "$"+(((ord && ord.totals && ord.totals.grand) || 0)).toFixed(2);
+          if(sb && orderId) {
+            var paidOrder = Object.assign({},ord,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken});
             var finalOrder = autoFulfillIfPaid(paidOrder, "Customer (online payment)");
-            sb.from("crm_orders").update({data:finalOrder,updated_at:new Date().toISOString()}).eq("id",payData2.order.id);
+            sb.from("crm_orders").update({data:finalOrder,updated_at:new Date().toISOString()}).eq("id",orderId);
             // Also update in-memory orders if admin is viewing
             setOrders(function(prev){return prev.map(function(o){
-              return o.id===payData2.order.id ? Object.assign({},o,finalOrder) : o;
+              return o.id===orderId ? Object.assign({},o,finalOrder) : o;
             });});
           } else {
             setOrders(function(prev){return prev.map(function(o){
-              if(o.id!==(payData2.order&&payData2.order.id)) return o;
+              if(o.id!==orderId) return o;
               var paid = Object.assign({},o,{status:"Paid",paidAt:result.paidAt,receiptToken:rToken});
               return autoFulfillIfPaid(paid, "Customer (online payment)");
             });});
           }
+          // v96c: notify the rep + admin so they actually know payment came in.
+          // Without these the order quietly flips to Paid in the DB but nobody sees it.
+          try{
+            if(orderRepId){
+              _writeNotifRow({
+                ts:new Date().toISOString(),
+                type:"success",
+                repId: orderRepId,
+                msg:"💰 Order "+orderId+" PAID by "+custName+" — "+amtStr,
+                link:"orders",
+                orderId: orderId,
+                read:false,
+              });
+            }
+            _writeNotifRow({
+              ts:new Date().toISOString(),
+              type:"success",
+              adminNotify: true,
+              msg:"💰 Order "+orderId+" paid by "+custName+" — "+amtStr+" (ready to ship)",
+              link:"orders",
+              orderId: orderId,
+              read:false,
+            });
+          }catch(e){ try{ console.error("[onPaid] notif write failed:", e); }catch(_){} }
         },
         onDecline: function(){ setPayToken(null); if(window.history) window.history.replaceState(null,"",window.location.pathname); },
       });
