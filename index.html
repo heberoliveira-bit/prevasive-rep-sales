@@ -17554,7 +17554,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v97c-sent-log-scoped</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v98-email-creds-sync</div>
       </div>
     </div>
   );
@@ -19051,7 +19051,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v97c-sent-log-scoped
+        BUILD: 2026-05-30-v98-email-creds-sync
       </div>
     </div>
   );
@@ -19444,18 +19444,44 @@ function App() {
     if(!currentUser || currentUser.role!=="admin") return;
     var sb=getSB(); if(!sb) return;
     sb.from("crm_settings").select("data").eq("id","admin_secrets").single().then(function(r){
+      // v98: explicit logging so admin can verify cross-browser sync is working.
+      // Look for these in F12 console on a fresh browser to see whether the load fired
+      // and what came back from admin_secrets.
+      try{
+        var dRaw = r && r.data && r.data.data;
+        console.info("[admin_secrets] load result:", {
+          hasRow: !!dRaw,
+          emailCreds: dRaw && dRaw.emailCreds ? {
+            tenantId: dRaw.emailCreds.tenantId ? "set("+dRaw.emailCreds.tenantId.length+" chars)" : "(empty)",
+            clientId: dRaw.emailCreds.clientId ? "set("+dRaw.emailCreds.clientId.length+" chars)" : "(empty)",
+            clientSecret: dRaw.emailCreds.clientSecret ? "set("+dRaw.emailCreds.clientSecret.length+" chars)" : "(empty)",
+            fromName: dRaw.emailCreds.fromName || "(empty)",
+            fromEmail: dRaw.emailCreds.fromEmail || "(empty)",
+            edgeFnUrl: dRaw.emailCreds.edgeFnUrl || "(empty)",
+          } : "(not in row)",
+          shipStationCreds: dRaw && dRaw.shipStationCreds ? "(present)" : "(not in row)",
+        });
+      }catch(e){}
       var d = r && r.data && r.data.data; if(!d) return;
       if(d.emailCreds){
         var e = d.emailCreds;
         setEmailCfg(function(prev){
           var p = prev || {};
+          // v98: remote-first precedence (was local-first pre-v98).
+          // Matches v93 ShipStation pattern — single source of truth across browsers.
+          // empty-string from remote clears local (so admin removing a field on
+          // browser A propagates the clear to browser B on next load).
+          function pick(localVal, remoteVal){
+            return (remoteVal != null && remoteVal !== "") ? remoteVal
+                 : (remoteVal === "" ? "" : (localVal != null ? localVal : ""));
+          }
           return Object.assign({}, p, {
-            tenantId:     p.tenantId     || e.tenantId     || "",
-            clientId:     p.clientId     || e.clientId     || "",
-            clientSecret: p.clientSecret || e.clientSecret || "",
-            fromName:     p.fromName     || e.fromName     || "",
-            fromEmail:    p.fromEmail    || e.fromEmail    || "",
-            edgeFnUrl:    p.edgeFnUrl    || e.edgeFnUrl    || "",
+            tenantId:     pick(p.tenantId,     e.tenantId),
+            clientId:     pick(p.clientId,     e.clientId),
+            clientSecret: pick(p.clientSecret, e.clientSecret),
+            fromName:     pick(p.fromName,     e.fromName),
+            fromEmail:    pick(p.fromEmail,    e.fromEmail),
+            edgeFnUrl:    pick(p.edgeFnUrl,    e.edgeFnUrl),
           });
         });
       }
@@ -19493,7 +19519,9 @@ function App() {
           });
         });
       }
-    }).catch(function(){});
+    }).catch(function(err){
+      try{ console.warn("[admin_secrets] load failed (RLS, network, or missing row):", err && (err.message||err)); }catch(e){}
+    });
   },[currentUser]);
 
   // Publish shared settings whenever an admin changes them (never from rep/customer sessions).
