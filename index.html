@@ -8649,8 +8649,11 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
   var sr = srArr[0];
 
   // Admin-only actions — reps see Charge Card and Send Link only.
+  // v99: account role also gains Mark Paid + manual reconciliation (finance work).
   // Detect role broadly: currentUser.role/userType being "admin" OR no rep linkage means admin.
   var isAdmin = !!(currentUser && (currentUser.role==="admin" || currentUser.userType==="admin" || currentUser.isAdmin));
+  var isAccount = !!(currentUser && currentUser.role==="account");
+  var isFinance = isAdmin || isAccount;
 
   useEffect(function(){
     if(mode!=="card"||!pubKey||!window.Stripe) return;
@@ -8728,7 +8731,7 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
         {mode==="card"&&<Btn onClick={chargeCard} disabled={charging||!pubKey||!cardComplete||!cardHolder.trim()}>
           {charging?"Charging…":"Charge $"+grand.toFixed(2)+" →"}
         </Btn>}
-        {mode==="manual"&&isAdmin&&<Btn variant="success" onClick={markPaid}>✓ Mark as Paid</Btn>}
+        {mode==="manual"&&isFinance&&<Btn variant="success" onClick={markPaid}>✓ Mark as Paid</Btn>}
       </div>}>
 
       {/* Header */}
@@ -8739,7 +8742,7 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
 
       {/* Mode tabs — Mark Paid is admin-only (cash/check reconciliation belongs to admin) */}
       <div style={{display:"flex",gap:8,marginBottom:16}}>
-        {(isAdmin
+        {(isFinance
           ? [["card","💳 Charge Card"],["link","📧 Send Link"],["manual","✓ Mark Paid"]]
           : [["card","💳 Charge Card"],["link","📧 Send Link"]]
         ).map(function(m){
@@ -17554,7 +17557,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v98-email-creds-sync</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v99-account-role</div>
       </div>
     </div>
   );
@@ -19051,7 +19054,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v98-email-creds-sync
+        BUILD: 2026-05-30-v99-account-role
       </div>
     </div>
   );
@@ -20070,6 +20073,12 @@ function App() {
   var _imRep = viewAsRep ? (reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData||{}) : null;
   var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName,email:(_imRep&&_imRep.email)||viewAsRep.repEmail||currentUser.email,_isImpersonated:true}) : currentUser;
   var isAdmin = !viewAsRep && currentUser.role==="admin";
+  // v99: account role — financial-only access. Can mark paid, refund, approve
+  // commission payouts, verify tax exemptions, but cannot edit products or reps.
+  var isAccount = !viewAsRep && currentUser.role==="account";
+  // isFinance is the union — actions both admin and account can take.
+  // Use this for: mark order paid, process refund, approve payout, verify tax exempt.
+  var isFinance = isAdmin || isAccount;
   var myRepData = isAdmin ? null : (viewAsRep ? reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData : reps.find(function(r){return r.id===currentUser.rep_id||r.email===currentUser.email;})||null);
 
   // Legal docs signing gate (v77: only requires && published count toward compliance)
@@ -20189,7 +20198,26 @@ function App() {
     {id:"profile",    name:"My Profile",  icon:"👤"},
   ];
 
-  var modules = isAdmin ? adminModules : repModules;
+  // v99: account role — finance-focused subset of admin. No Products/Reps/Pricing
+  // (catalog and HR are admin territory). Keeps Orders, Quotes, Customers, Commissions
+  // (with payout approval), Returns (refund processing), Tasks (financial compliance),
+  // Settings (read-only).
+  var accountModules = [
+    {label:"General"},
+    {id:"dashboard",  name:"Dashboard",   icon:"◉"},
+    {id:"email",      name:"Email",       icon:"✉️"},
+    {id:"orders",     name:"Orders",      icon:"📦"},
+    {id:"quotes",     name:"Quotes",      icon:"📝"},
+    {id:"customers",  name:"Customers",   icon:"👥"},
+    {divider:true},
+    {label:"Finance"},
+    {id:"tasks",       name:"Tasks",       icon:"✅", badge:true},
+    {id:"commissions",name:"Commissions", icon:"💰"},
+    {id:"returns",     name:"Returns",     icon:"↩️", badge:"returns"},
+    {id:"settings",   name:"Settings",    icon:"⚙️"},
+  ];
+
+  var modules = isAdmin ? adminModules : (isAccount ? accountModules : repModules);
 
   return (
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,
@@ -20248,18 +20276,18 @@ function App() {
             onSaveDiscountCodes={setDiscountCodes} addToast={addToast}/>
         )}
 
-        {isAdmin&&activeTab==="dashboard"&&(
+        {(isAdmin||isAccount)&&activeTab==="dashboard"&&(
           <AdminDashboard orders={orders} reps={reps} customers={customers} products={products}
             commissions={commissions} payoutRequests={payoutRequests} applications={applications}
             termsRequests={termsRequests} returns={returns} onNav={setActiveTab}/>
         )}
-        {isAdmin&&activeTab==="orders"&&(
+        {(isAdmin||isAccount)&&activeTab==="orders"&&(
           <AdminOrders orders={orders} reps={reps} customers={customers} products={products}
             onUpdate={function(updated){setOrders(function(prev){return prev.map(function(o){return o.id===updated.id?updated:o;});});}}
             addToast={addToast} showResult={showResult} currentUser={currentUser}
             returns={returns} setReturns={setReturns}/>
         )}
-        {isAdmin&&activeTab==="customers"&&(
+        {(isAdmin||isAccount)&&activeTab==="customers"&&(
           <AdminCustomers customers={customers} setCustomers={setCustomers} reps={reps} orders={orders} addToast={addToast} currentUser={currentUser}/>
         )}
         {isAdmin&&activeTab==="products"&&(
@@ -20277,7 +20305,7 @@ function App() {
         {isAdmin&&activeTab==="rep_activity"&&(
           <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast} realtimeStatus={realtimeStatus}/>
         )}
-        {isAdmin&&activeTab==="commissions"&&(
+        {(isAdmin||isAccount)&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} setOrders={setOrders} reps={reps} commissions={commissions}
             setCommissions={setCommissions} addToast={addToast} showResult={showResult}
             payoutRequests={payoutRequests} setPayoutRequests={setPayoutRequests} currentUser={currentUser}/>
@@ -20287,7 +20315,7 @@ function App() {
             signatures={signatures} setSignatures={setSignatures}
             reps={reps} addToast={addToast}/>
         )}
-        {isAdmin&&activeTab==="tasks"&&(
+        {(isAdmin||isAccount)&&activeTab==="tasks"&&(
           <AdminTasks reps={reps} setReps={setReps}
             applications={applications} setApplications={setApplications}
             termsRequests={termsRequests} setTermsRequests={setTermsRequests}
@@ -20296,7 +20324,7 @@ function App() {
             currentUser={currentUser}
             addToast={addToast} showResult={showResult}/>
         )}
-        {isAdmin&&activeTab==="settings"&&(
+        {(isAdmin||isAccount)&&activeTab==="settings"&&(
           <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg}
             discountCodes={discountCodes} onSaveDiscountCodes={setDiscountCodes}
             invoiceCfg={invoiceCfg} onSaveInvoice={setInvoiceCfg}
@@ -20318,7 +20346,7 @@ function App() {
             reps={reps} orders={orders} currentUser={currentUser} addToast={addToast}/>
         )}
 
-        {isAdmin&&activeTab==="returns"&&(
+        {(isAdmin||isAccount)&&activeTab==="returns"&&(
           <AdminReturns returns={returns} setReturns={setReturns} orders={orders} setOrders={setOrders}
             reps={reps} currentUser={currentUser} addToast={addToast}/>
         )}
