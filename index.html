@@ -6658,6 +6658,8 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var token = quote.id+"_q_"+Math.random().toString(36).slice(2,9);
     var snap = {token:token,status:"sent",quote:enrichedQuote,company:company,
       custId:enrichedQuote.custId,custName:enrichedQuote.custName||cust.name||"",custEmail:custEmail,
+      // v95: pass terms status to the accept page so it can match the email's pay-focused CTA
+      customerTermsStatus: cust.termsStatus || null,
       repId:enrichedQuote.repId,repName:enrichedQuote.repName||"",repEmail:repEmail,
       shipAddress:shipAddr,createdAt:new Date().toISOString()};
     try{localStorage.setItem("__pv__quote_"+token,JSON.stringify(snap));}catch(e){}
@@ -14312,6 +14314,9 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
   const [filter,        setFilter]        = useState("all");
   const [viewOrd,       setViewOrd]       = useState(null);
   const [showSendInv,   setShowSendInv]   = useState(false);
+  // v96: edit order + charge card directly from the order modal
+  const [editOrder,     setEditOrder]     = useState(null);
+  const [showCharge,    setShowCharge]    = useState(false);
   // Finish-order modal target — the order the rep is finalizing after admin's freight quote
   const [finishTarget,  setFinishTarget]  = useState(null);
 
@@ -14560,7 +14565,15 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
                 <Btn small variant="ghost" onClick={function(){generateInvoice(viewOrd,customers,products,currentUser);}}>⬇ Invoice</Btn>
                 <Btn small variant="ghost" onClick={function(){var w=window.open("","_blank");var h=generateInvoice(viewOrd,customers,products,currentUser,true);w.document.write(h);w.document.close();setTimeout(function(){w.print();},500);}}>🖨 Print</Btn>
-                <Btn small onClick={function(){setShowSendInv(true);}}>✉ Send to Customer</Btn>
+                {/* v96: edit existing order — opens OrderForm in edit mode */}
+                {["Submitted","Pending","Processing","Awaiting Freight Quote","Freight Quoted — Ready to Send to Customer"].indexOf(viewOrd.status)>=0 && !viewOrd.paidAt && (
+                  <Btn small variant="ghost" onClick={function(){setEditOrder(viewOrd); setShowForm(true); setViewOrd(null);}}>✏ Edit Order</Btn>
+                )}
+                {/* v96: charge credit card directly from the order modal (was hidden behind "Send to Customer") */}
+                {!viewOrd.paidAt && (
+                  <Btn small onClick={function(){setShowCharge(true);}}>💳 Charge Card</Btn>
+                )}
+                <Btn small variant="ghost" onClick={function(){setShowSendInv(true);}}>✉ Send to Customer</Btn>
                 {(function(){
                   var er=(returns||[]).find(function(r){return r.orderId===viewOrd.id;});
                   if(er){ var sm=returnStatusMeta(er.status); return <span style={{padding:"5px 12px",borderRadius:6,fontSize:11,fontWeight:700,background:sm.bg,color:sm.c,alignSelf:"center"}}>Refund: {sm.label}</span>; }
@@ -14583,10 +14596,19 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
           setOrders={function(fn){setOrders(fn);}}
           onClose={function(){setShowSendInv(false); setViewOrd(null);}}/>
       )}
+      {/* v96: dedicated card-charge modal (uses the same CollectPaymentModal in card mode) */}
+      {showCharge&&viewOrd&&(
+        <CollectPaymentModal order={viewOrd}
+          customers={customers} products={products}
+          currentUser={currentUser} addToast={addToast} showResult={showResult}
+          setOrders={function(fn){setOrders(fn);}}
+          onClose={function(){setShowCharge(false);}}/>
+      )}
       {showForm&&React.createElement(OrderForm,{repId:repId,repName:repName,products:products,customers:customers,
         setCustomers:setCustomers,setOrders:setOrders,
-        editOrder:null,onClose:function(){setShowForm(false);},
-        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,currentUser:currentUser,repData:repData,
+        editOrder:editOrder,
+        onClose:function(){setShowForm(false); setEditOrder(null);},
+        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,currentUser:currentUser,
       })}
     </div>
   );
@@ -15875,6 +15897,11 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
   var items=quote.items||[];
   var expired=quote.validUntil&&new Date(quote.validUntil)<new Date();
   var isFreightQuote = quote.shippingType==="freight" || !!quote.freightDetails;
+  // v95: mirror the email's CTA logic. Three states:
+  //   - Freight     → "Accept quote" (no payment until final rate)
+  //   - No terms    → "💳 Pay & place order" big primary (payment expected)
+  //   - Has terms   → "💳 Pay now" primary + "📄 Accept on NET-30 terms" secondary
+  var hasTerms = snap.customerTermsStatus === "approved";
   function money(n){return "$"+(Math.round((n||0)*100)/100).toFixed(2);}
   return (
     <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
@@ -15918,15 +15945,43 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
         </div>
         {!expired&&(
           <div style={{background:"#fff",borderRadius:12,padding:"20px",boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
-            <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
-              style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"14px",borderRadius:8,fontWeight:700,fontSize:15,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit"}}>
-              {busy?"Processing…":"Accept quote"}
-            </button>
+            {/* v95: button copy matches the email — pay-focused for no-terms customers */}
+            {isFreightQuote ? (
+              // Freight — total isn't final, no payment option here
+              <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+                style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"14px",borderRadius:8,fontWeight:700,fontSize:15,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit"}}>
+                {busy?"Processing…":"Accept quote"}
+              </button>
+            ) : hasTerms ? (
+              // Terms-approved — both options
+              <React.Fragment>
+                <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+                  style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"15px",borderRadius:8,fontWeight:800,fontSize:15,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit",marginBottom:8}}>
+                  {busy?"Processing…":"💳 Pay "+money(quote.total)+" now"}
+                </button>
+                <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+                  style={{width:"100%",background:"#fff",color:"#635bff",border:"1px solid #d0d7e2",padding:"12px",borderRadius:8,fontWeight:700,fontSize:13,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit"}}>
+                  📄 Accept on NET-30 terms
+                </button>
+              </React.Fragment>
+            ) : (
+              // No terms — single big pay button (matches email)
+              <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+                style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"16px",borderRadius:8,fontWeight:800,fontSize:16,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit",letterSpacing:".01em"}}>
+                {busy?"Processing…":"💳 Pay "+money(quote.total)+" & place order"}
+              </button>
+            )}
             <button disabled={busy} onClick={function(){if(busy)return;setBusy(true);onDecline();}}
               style={{width:"100%",background:"none",color:"#6b7c93",border:"none",padding:"12px",marginTop:6,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
               Decline
             </button>
-            <div style={{fontSize:10,color:"#a0aec0",textAlign:"center",marginTop:8}}>{isFreightQuote?"Accepting reserves your order. We'll email you the freight invoice within 1 business day.":"Accepting creates your order. We'll be in touch with next steps."}</div>
+            <div style={{fontSize:10,color:"#a0aec0",textAlign:"center",marginTop:8}}>
+              {isFreightQuote
+                ? "Accepting reserves your order. We'll email you the freight invoice within 1 business day."
+                : hasTerms
+                  ? "Pay now for immediate processing, or accept on NET-30 terms — we'll invoice you."
+                  : "We'll send you a secure payment link to complete the order."}
+            </div>
           </div>
         )}
       </div>
@@ -17229,7 +17284,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v95-quote-email-terms-cta</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v96-rep-edit-charge</div>
       </div>
     </div>
   );
@@ -18726,7 +18781,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v95-quote-email-terms-cta
+        BUILD: 2026-05-30-v96-rep-edit-charge
       </div>
     </div>
   );
