@@ -9409,6 +9409,36 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                     Advance → {ORDER_PIPELINE[ORDER_PIPELINE.indexOf(viewOrder.status)+1]}
                   </Btn>
                 )}
+                {/* v97: Refire payment notifications — also marks order Paid if not already.
+                     Idempotent. 5-min throttle. Useful for: (a) testing the email pipeline,
+                     (b) backfilling legacy paid orders that pre-date v96c auto-update,
+                     (c) resending a confirmation a customer claims they didn't receive. */}
+                <Btn variant="ghost" onClick={function(){
+                  var custObj = (customers||[]).find(function(c2){return c2.id===viewOrder.custId;}) || {id:viewOrder.custId, name:viewOrder.custName, email:viewOrder.custEmail};
+                  var repObj  = (reps||[]).find(function(r){return r.id===viewOrder.repId;}) || {id:viewOrder.repId, name:viewOrder.repName, email:""};
+                  // If the order isn't paid yet, mark it Paid before firing notifs.
+                  // (Backfill case — admin presses Refire on a "Submitted" order that was actually paid.)
+                  var orderForNotif = viewOrder;
+                  if(!viewOrder.paidAt){
+                    var ok = window.confirm("This order isn't marked Paid yet. Refiring will mark it Paid + send the confirmation. Proceed?");
+                    if(!ok) return;
+                    var nowIso = new Date().toISOString();
+                    orderForNotif = Object.assign({},viewOrder,{
+                      status:"Paid",paidAt:nowIso,
+                      payMethod: viewOrder.payMethod || "credit_card",
+                    });
+                    setOrders(function(prev){return prev.map(function(o){return o.id===viewOrder.id?orderForNotif:o;});});
+                    dbSave("crm_orders",viewOrder.id,orderForNotif);
+                    setViewOrder(orderForNotif);
+                  }
+                  // Force=true the second time if 5-min throttle blocks the resend
+                  firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: false}).then(function(res){
+                    if(res && res.skipped){
+                      var force = window.confirm("Email was sent recently. Send again anyway?");
+                      if(force) firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: true});
+                    }
+                  });
+                }}>🔔 Refire Notifications</Btn>
                 {viewOrder.status!=="Cancelled"&&viewOrder.status!=="Refunded"&&viewOrder.status!=="Paid"&&(
                   <Btn variant="danger" onClick={function(){cancel(viewOrder);}}>Cancel</Btn>
                 )}
@@ -15834,9 +15864,127 @@ function _writeNotifRow(o){
   var row=Object.assign({id:id,ts:new Date().toISOString(),read:false},o);
   sb.from("crm_notifications").upsert({id:id,data:row,created_at:row.ts}).then(function(){});
 }
-// Helper: parse an email-edge-fn response leniently. Treats any HTTP 2xx as success
-// unless the parsed body explicitly says {ok:false}. Matches the queue processor's behavior
-// so a transient response-shape mismatch can't trigger a duplicate queue+send.
+
+// v97: payment confirmation email — sent to customer, CC'd to rep so rep sees
+// exactly what customer received. No admin email (admins use the in-app notif
+// + the Refire button to test).
+function buildPaymentConfirmationEmail(order, customer, company, receiptUrl){
+  function escHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+  var custName = (customer && customer.name) || "";
+  var orderId  = order && order.id || "";
+  var total    = (order && order.totals && order.totals.grand) || 0;
+  var paidAt   = (order && order.paidAt) ? new Date(order.paidAt) : new Date();
+  var paidDateStr = paidAt.toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"}) + " at " + paidAt.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+  var brand = (order && order.cardRef && order.cardRef.brand) || "";
+  var last4 = (order && order.cardRef && order.cardRef.last4) || "";
+  var paymentLine = (brand && last4) ? (brand[0].toUpperCase()+brand.slice(1).toLowerCase()+" •••• "+last4) : "Credit card";
+  var receiptButton = receiptUrl
+    ? "<a href='"+receiptUrl+"' style='display:inline-block;background:#635bff;color:#fff;text-decoration:none;padding:14px 24px;border-radius:8px;font-weight:700;font-size:14px;margin-top:8px'>View official receipt →</a>"
+    : "";
+  return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
+    +"<div style='max-width:540px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
+    +"<div style='background:#1ea672;padding:24px 32px'><div style='color:#fff;font-size:20px;font-weight:800'>✓ Payment received</div>"
+    +"<div style='color:rgba(255,255,255,.85);font-size:12px'>"+escHtml(company)+" · Order "+escHtml(orderId)+"</div></div>"
+    +"<div style='padding:28px 32px'>"
+    +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:18px'>Hi "+escHtml(custName||"there")+",</div>"
+    +"<div style='font-size:14px;color:#4a5568;line-height:1.6;margin-bottom:18px'>Thank you — we've received your payment for order <strong>"+escHtml(orderId)+"</strong>. Your order is now in production and we'll email tracking information as soon as it ships.</div>"
+    +"<div style='background:#f6f9fc;border-radius:8px;padding:14px 16px;margin-bottom:18px;font-size:13px'>"
+    +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Amount paid</span><span style='font-weight:700;color:#1a1a2e'>$"+total.toFixed(2)+"</span></div>"
+    +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Date</span><span>"+paidDateStr+"</span></div>"
+    +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Payment method</span><span>"+escHtml(paymentLine)+"</span></div>"
+    +"</div>"
+    +(receiptButton ? "<div style='text-align:center;margin:8px 0'>"+receiptButton+"</div>" : "")
+    +"<div style='font-size:11px;color:#a0aec0;text-align:center;margin-top:22px;padding-top:18px;border-top:1px solid #e8ecef'>Questions about your order? Reply to this email and we'll help.</div>"
+    +"</div></div></body></html>";
+}
+
+// v97: full post-paid pipeline — updates order if needed, writes notifs, sends emails.
+// Used by both the Refire button (admin click) and the post-Stripe-charge auto-fire.
+// Idempotent — safe to call multiple times. Throttles email re-send by 5 minutes unless
+// opts.force === true.
+function firePaidNotifs(order, customer, rep, addToast, opts){
+  opts = opts || {};
+  var nowIso = new Date().toISOString();
+  var company = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  var orderId = (order && order.id) || "";
+  var custName = (customer && customer.name) || (order && order.custName) || "customer";
+  var custEmail = (customer && customer.email) || (order && order.custEmail) || "";
+  var repEmail = (rep && rep.email) || "";
+  var repName = (rep && rep.name) || (order && order.repName) || "";
+  var amtStr = "$"+(((order && order.totals && order.totals.grand) || 0)).toFixed(2);
+  // Throttle — don't re-send within 5 minutes unless force flag set
+  var lastSent = order && order.paymentEmailSentAt ? new Date(order.paymentEmailSentAt).getTime() : 0;
+  var minsSince = (Date.now() - lastSent) / 60000;
+  if(!opts.force && lastSent && minsSince < 5){
+    if(addToast) addToast("Email already sent "+Math.round(minsSince)+" min ago — wait 5 min or use Refire (force) option","warning");
+    return Promise.resolve({skipped:true, reason:"throttled"});
+  }
+  // 1. In-app notifs — rep + admin
+  try{
+    if(order.repId){
+      _writeNotifRow({ts:nowIso,type:"success",repId:order.repId,
+        msg:"💰 Order "+orderId+" PAID by "+custName+" — "+amtStr,
+        link:"orders",orderId:orderId,read:false});
+    }
+    _writeNotifRow({ts:nowIso,type:"success",adminNotify:true,
+      msg:"💰 Order "+orderId+" paid by "+custName+" — "+amtStr+" (ready to ship)",
+      link:"orders",orderId:orderId,read:false});
+  }catch(e){ try{console.error("[firePaidNotifs] notif write failed:",e);}catch(_){}}
+  // 2. Customer email + CC rep — uses the same edge function as the rest of the app
+  var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+  if(!custEmail){
+    if(addToast) addToast("Notifications fired (no customer email on file — skipped email)","warning");
+    return Promise.resolve({notifsOnly:true});
+  }
+  if(!cfg || !cfg.edgeFnUrl){
+    if(addToast) addToast("Notifications fired but email not configured — see Settings → Email","warning");
+    return Promise.resolve({notifsOnly:true});
+  }
+  var receiptUrl = (order && (order.receiptUrl || order.receiptLink)) || "";
+  var emailHtml = buildPaymentConfirmationEmail(order, customer, company, receiptUrl);
+  var payload = {
+    to: custEmail,
+    subject: "✓ Payment received — Order "+orderId,
+    html: emailHtml,
+    fromName: cfg.fromName || company,
+    fromEmail: cfg.fromEmail,
+    tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret,
+  };
+  if(repEmail && repEmail.toLowerCase() !== custEmail.toLowerCase()){
+    payload.cc = repEmail;
+  }
+  try{ console.info("[firePaidNotifs] →", {to:payload.to, cc:payload.cc||null, subject:payload.subject, orderId:orderId, force:!!opts.force}); }catch(e){}
+  return fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+    .then(function(r){return r.json().then(function(d){return {status:r.status,data:d};});})
+    .then(function(res){
+      var d = res.data || {};
+      if(d.ok){
+        // Mark email as sent for throttle tracking
+        try{
+          var sb=getSB();
+          if(sb && orderId){
+            sb.from("crm_orders").select("data").eq("id",orderId).single().then(function(rr){
+              var existing = (rr && rr.data && rr.data.data) || {};
+              var merged = Object.assign({},existing,{paymentEmailSentAt:nowIso});
+              sb.from("crm_orders").update({data:merged,updated_at:nowIso}).eq("id",orderId).then(function(){});
+            });
+          }
+        }catch(e){}
+        if(addToast) addToast("✓ Payment confirmation sent to "+custEmail+(payload.cc?" (CC: "+payload.cc+")":""),"success");
+        try{ console.info("[firePaidNotifs] ✓ sent",d); }catch(e){}
+        return {ok:true,response:d};
+      } else {
+        if(addToast) addToast("Email failed ("+res.status+"): "+(d.error||"unknown"),"danger");
+        try{ console.error("[firePaidNotifs] ✗",res.status,d); }catch(e){}
+        return {ok:false,error:d.error,status:res.status};
+      }
+    }).catch(function(err){
+      if(addToast) addToast("Email server unreachable: "+(err.message||"network error"),"danger");
+      try{ console.error("[firePaidNotifs] network err:",err); }catch(e){}
+      return {ok:false,error:err.message};
+    });
+}
+
 function _emailRespOk(r){
   return r.text().then(function(t){
     var d=null; try{d=JSON.parse(t);}catch(_){}
@@ -17289,7 +17437,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v96c-paid-notif-and-status</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v97-refire-paid-emails</div>
       </div>
     </div>
   );
@@ -18786,7 +18934,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v96c-paid-notif-and-status
+        BUILD: 2026-05-30-v97-refire-paid-emails
       </div>
     </div>
   );
