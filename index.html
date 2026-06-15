@@ -6727,10 +6727,14 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       if(d.ok){
         try{ console.info("[sendQuote] ✓ sent — cc:"+(d.cc||0)+" bcc:"+(d.bcc||0), d); }catch(e){}
         // v97b: log to shared Sent so it shows up in the Email tab's sidebar
+        // v97c: scope to the quote's rep so it's visible to them, and to admin via senderRole=admin
         try{ logSentEmail({
           to: payload.to, toName: cust.name||payload.to, cc: payload.cc||"",
           subject: payload.subject,
           sentBy: (currentUser && currentUser.name) || "",
+          senderId: (currentUser && (currentUser.rep_id || currentUser.id)) || "",
+          senderRole: (currentUser && currentUser.role) || "",
+          repId: enrichedQuote.repId || "",
           kind: "quote", quoteId: enrichedQuote.id,
           preview: "Quote total $"+(enrichedQuote.total||0).toFixed(2),
         }); }catch(e){}
@@ -12184,8 +12188,15 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
           return next;
         });
         // v97b: also write to the shared cross-feature log so the Sent sidebar
-        // shows this alongside quote sends and payment confirmations
-        try{ logSentEmail(Object.assign({}, entry, {kind:"compose", preview:(body||"").slice(0,120)})); }catch(e){}
+        // shows this alongside quote sends and payment confirmations.
+        // v97c: scoping fields so reps only see their own composes.
+        try{ logSentEmail(Object.assign({}, entry, {
+          kind:"compose",
+          preview:(body||"").slice(0,120),
+          senderId: (currentUser && (currentUser.rep_id || currentUser.id)) || "",
+          senderRole: (currentUser && currentUser.role) || "",
+          repId: (currentUser && currentUser.role==="rep") ? (currentUser.rep_id || currentUser.id) : "",
+        })); }catch(e){}
         addToast("✓ Email sent to "+(selCust?selCust.name:toEmail)+(ccRep&&repEmail?" (CC: you)":""),"success");
         setToId(""); setToEmail(""); setSubject(""); setBody(""); setTmpl("custom");
       } else {
@@ -12410,12 +12421,28 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
 {(function(){
   // v97b: combine per-user sentLog with the shared cross-feature log so admin
   // sees quote sends and payment confirmations alongside their own composes.
+  // v97c: filter by viewer — reps only see their own emails + system emails
+  // about their orders (payment confirmations for their customers). Admins see all.
   var sharedLog = [];
   try{ sharedLog = JSON.parse(localStorage.getItem("__pv__sentLog_shared")||"[]"); }catch(e){}
+  var viewerRole = (currentUser && currentUser.role) || "";
+  var viewerId   = (currentUser && (currentUser.rep_id || currentUser.id)) || "";
+  var viewerEmail= (currentUser && currentUser.email || "").toLowerCase();
+  function visibleToViewer(e){
+    if(!e) return false;
+    // Admins (and view-as-rep impersonation) see everything from their own browser
+    if(viewerRole === "admin") return true;
+    // Rep view: only show entries scoped to this rep
+    if(e.senderId && e.senderId === viewerId) return true;             // they sent it
+    if(e.repId && e.repId === viewerId) return true;                    // their order/quote/customer
+    if(e.cc && viewerEmail && e.cc.toLowerCase().indexOf(viewerEmail)>=0) return true;  // CC'd
+    return false;
+  }
   var seen = {};
   var merged = sentLog.concat(sharedLog).filter(function(e){
     if(!e || !e.id || seen[e.id]) return false;
-    seen[e.id]=true; return true;
+    seen[e.id]=true;
+    return visibleToViewer(e);
   }).sort(function(a,b){return new Date(b.sentAt) - new Date(a.sentAt);}).slice(0,15);
   if(merged.length===0) return null;
   function kindBadge(k){
@@ -15906,11 +15933,10 @@ function _writeNotifRow(o){
 
 // v97b: shared sent-email log so the Email tab's SENT sidebar shows ALL outgoing emails
 // (manual composer + quote sends + payment confirmations + future order receipts), not
-// just the ones composed from the Email tab. Stored under a SHARED key so it survives
-// across users on the same browser and shows the same history regardless of who logged in.
-// Optionally also writes to crm_email_log Supabase table for cross-browser sync.
+// just the ones composed from the Email tab. Stored under a SHARED key, but the UI
+// filters per-viewer so reps see only their own activity (v97c).
 //
-// entry: { to, toName, cc?, subject, sentAt, sentBy?, kind?, orderId?, quoteId? }
+// entry: { to, toName, cc?, subject, sentAt, sentBy?, senderId?, senderRole?, kind?, orderId?, quoteId?, repId? }
 // kind: "compose" | "quote" | "payment" | "invoice" | "receipt" | "notification"
 function logSentEmail(entry){
   if(!entry || !entry.to || !entry.subject) return;
@@ -15922,19 +15948,22 @@ function logSentEmail(entry){
     subject: entry.subject,
     sentAt: entry.sentAt || new Date().toISOString(),
     sentBy: entry.sentBy || "",
+    // v97c: filter scope. senderId = who clicked Send (rep id or admin user id);
+    // senderRole = "admin" | "rep" | "system"; repId = the rep whose customer/order this is about
+    senderId: entry.senderId || "",
+    senderRole: entry.senderRole || "",
+    repId: entry.repId || "",
     kind: entry.kind || "compose",
     orderId: entry.orderId || "",
     quoteId: entry.quoteId || "",
     preview: entry.preview || "",
   };
-  // Write to shared localStorage key (cross-user on same browser)
   try{
     var raw = localStorage.getItem("__pv__sentLog_shared");
     var arr = raw ? JSON.parse(raw) : [];
-    arr = [rec].concat(arr).slice(0, 200);  // cap at 200 most recent
+    arr = [rec].concat(arr).slice(0, 200);
     localStorage.setItem("__pv__sentLog_shared", JSON.stringify(arr));
   }catch(e){}
-  // Best-effort cross-browser sync via Supabase
   try{
     var sb = getSB();
     if(sb) sb.from("crm_email_log").upsert({id:rec.id, data:rec, created_at:rec.sentAt}).then(function(){});
@@ -16048,10 +16077,13 @@ function firePaidNotifs(order, customer, rep, addToast, opts){
           }
         }catch(e){}
         // v97b: log to shared Sent so admin can see payment confirmations in the Email tab sidebar
+        // v97c: system-fired, but scoped to the order's rep so they see "their" customer's payment
         try{ logSentEmail({
           to: payload.to, toName: custName, cc: payload.cc||"",
           subject: payload.subject,
           sentBy: "System (payment confirmation)",
+          senderRole: "system",
+          repId: (order && order.repId) || "",
           kind: "payment", orderId: orderId,
           preview: "Payment confirmation — "+amtStr,
         }); }catch(e){}
@@ -17522,7 +17554,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v97b-sent-log-orders</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v97c-sent-log-scoped</div>
       </div>
     </div>
   );
@@ -19019,7 +19051,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v97b-sent-log-orders
+        BUILD: 2026-05-30-v97c-sent-log-scoped
       </div>
     </div>
   );
