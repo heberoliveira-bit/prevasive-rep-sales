@@ -6698,7 +6698,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var payload = {
       to: custEmail,
       subject: "Your quote from "+company+" — "+enrichedQuote.id,
-      html: buildQuoteEmail(enrichedQuote, company, link),
+      html: buildQuoteEmail(enrichedQuote, company, link, cust),
       fromName: emailCfg2.fromName||company,
       fromEmail: emailCfg2.fromEmail,
       tenantId: emailCfg2.tenantId,
@@ -15700,9 +15700,13 @@ function generateReceiptToken(order, customer, payRef, company){
   return token;
 }
 
-function buildQuoteEmail(quote, company, link){
+function buildQuoteEmail(quote, company, link, customer){
   // v94: show real product name (snapshotted on the quote line at save time);
   // include variant + sku if present
+  // v95: terms-aware CTA. Customer object passed in so we can branch on customer.termsStatus.
+  //   - Freight quote        → "Review & accept" (existing behavior — no payment until final rate)
+  //   - No terms approved    → single "💳 Pay $X.XX & place order" button (payment required)
+  //   - Terms approved       → two buttons: "💳 Pay now" primary, "📄 Accept on NET-30 terms" secondary
   function escHtml(s){ return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
   var rows=(quote.items||[]).map(function(it){
     var lp=it.customerPrice||it.unitPrice||0;
@@ -15717,17 +15721,35 @@ function buildQuoteEmail(quote, company, link){
   var freightNote = isFreightEmail
     ? "<div style='margin:0 0 16px;padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;font-size:12px;color:#78350f;line-height:1.6'><strong>🚛 Freight shipping required.</strong> The subtotal above does not include shipping. We'll send you the final invoice with the carrier rate after you accept this quote, typically within 1 business day.</div>"
     : "";
+  // v95: decide which CTA(s) to show
+  var hasTerms = !!(customer && customer.termsStatus === "approved");
+  var totalDisplay = (quote.total||0).toFixed(2);
+  var introCopy, ctas;
+  if(isFreightEmail){
+    // Freight — keep existing accept-only flow since the total isn't final
+    introCopy = "Please review your quote below. Click to accept and we'll send the final invoice with the freight rate.";
+    ctas = "<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:14px;border-radius:8px;font-weight:700;font-size:15px'>Review &amp; accept quote</a>";
+  } else if(hasTerms){
+    // Terms-approved — let the customer choose: pay now (faster fulfillment) or use their credit terms
+    introCopy = "Please review your quote below. You're approved for credit terms — paying now is optional.";
+    ctas = "<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:14px;border-radius:8px;font-weight:800;font-size:15px;margin-bottom:8px'>💳 Pay $"+totalDisplay+" now</a>"
+         + "<a href='"+link+"' style='display:block;text-align:center;background:#fff;color:#635bff;text-decoration:none;padding:11px;border-radius:8px;font-weight:700;font-size:13px;border:1px solid #d0d7e2'>📄 Accept on NET-30 terms</a>";
+  } else {
+    // No terms — payment required. One big button.
+    introCopy = "Please review your quote below. Payment is required to place this order.";
+    ctas = "<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:16px;border-radius:8px;font-weight:800;font-size:16px;letter-spacing:.01em'>💳 Pay $"+totalDisplay+" &amp; place order</a>";
+  }
   return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
     +"<div style='max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
     +"<div style='background:#635bff;padding:24px 32px'><div style='color:#fff;font-size:20px;font-weight:800'>"+company+"</div>"
     +"<div style='color:rgba(255,255,255,.8);font-size:12px'>Quote "+quote.id+"</div></div>"
     +"<div style='padding:32px'>"
-    +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:20px'>Please review your quote below. Click to accept and we'll get your order started.</div>"
+    +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:20px'>"+introCopy+"</div>"
     +"<table style='width:100%;border-collapse:collapse;font-size:13px;border-bottom:1px solid #e8ecef;margin-bottom:8px'>"+rows+"</table>"
     +(isFreightEmail?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#b45309;margin:8px 0;font-weight:600'><span>🚛 Shipping (LTL freight)</span><span>TBD</span></div>":"")
-    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 16px'><span>"+totalLabel+"</span><span style='color:#635bff'>$"+((quote.total||0)).toFixed(2)+"</span></div>"
+    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 16px'><span>"+totalLabel+"</span><span style='color:#635bff'>$"+totalDisplay+"</span></div>"
     +freightNote
-    +"<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:14px;border-radius:8px;font-weight:700;font-size:15px'>Review &amp; accept quote</a>"
+    +ctas
     +"<div style='font-size:11px;color:#a0aec0;text-align:center;margin-top:16px'>Or open this link:<br>"+link+"</div>"
     +"</div></div></body></html>";
 }
@@ -17207,7 +17229,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v94c-name-diagnostic</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v95-quote-email-terms-cta</div>
       </div>
     </div>
   );
@@ -18704,7 +18726,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v94c-name-diagnostic
+        BUILD: 2026-05-30-v95-quote-email-terms-cta
       </div>
     </div>
   );
