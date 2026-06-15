@@ -3307,6 +3307,9 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
       totals=payData.totals||order.totals||{},
       items=payData.items||order.items||[],
       products=payData.products||[];
+  // v96b: payToken was used in the charge payload but never extracted from payData — caused
+  // "Payment error: payToken is not defined" when the customer hit Pay.
+  var payToken = payData.token || payData.payToken || (order && order.payToken) || "";
   var isTerms = customer.termsStatus==="active";
   var stripeConf=(function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");}catch(e){return {};}})();
   var stripeMode=stripeConf.stripeMode||"live";
@@ -17284,7 +17287,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v96-rep-edit-charge</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v96b-paytoken-fix</div>
       </div>
     </div>
   );
@@ -18781,7 +18784,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v96-rep-edit-charge
+        BUILD: 2026-05-30-v96b-paytoken-fix
       </div>
     </div>
   );
