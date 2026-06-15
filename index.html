@@ -237,7 +237,11 @@ var REP_PLANS = [
   {id:"starter", name:"Starter", price:100, ceiling:1000,  desc:"Up to $1,000/mo"},
   {id:"pro",     name:"Pro",     price:200, ceiling:10000, desc:"Up to $10,000/mo"},
 ];
-var ORDER_PIPELINE = ["Submitted","Processing","Shipped","Delivered","Paid"];
+// v100 #1: reordered so the Advance → button progresses through the real business flow.
+// Was ["Submitted","Processing","Shipped","Delivered","Paid"] which had Paid at the END,
+// implying "Delivered → Paid" — backwards from reality (customer pays BEFORE we ship).
+// Now: Submitted → Paid → Processing → Shipped → Delivered.
+var ORDER_PIPELINE = ["Submitted","Paid","Processing","Shipped","Delivered"];
 var STATUS_COLOR = {
   Submitted:          {c:"#635bff",bg:"rgba(99,91,255,.12)"},
   Paid:               {c:"#1ea672",bg:"rgba(30,166,114,.22)"},
@@ -285,14 +289,18 @@ function getFreightCfg(){
       // Persist the migrated value so settings UI and other readers see it,
       // and so we don't keep re-migrating on every getter call.
       try{ localStorage.setItem("__pv__freightCfg", JSON.stringify(merged)); }catch(e){}
-      try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:merged, updated_at:new Date().toISOString()}).then(function(){}); }catch(e){}
+      try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:merged, updated_at:new Date().toISOString()}).then(function(r){
+        if(r&&r.error){ try{console.warn("[freight_cfg] migrate save failed:",r.error.message);}catch(_){} }
+      }); }catch(e){}
     }
     return merged;
   }catch(e){ return DEFAULT_FREIGHT_CFG; }
 }
 function saveFreightCfg(cfg){
   try{ localStorage.setItem("__pv__freightCfg", JSON.stringify(cfg)); }catch(e){}
-  try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:cfg, updated_at:new Date().toISOString()}).then(function(){}); }catch(e){}
+  try{ var sb=getSB(); if(sb) sb.from("crm_settings").upsert({id:"freight_cfg", data:cfg, updated_at:new Date().toISOString()}).then(function(r){
+    if(r&&r.error){ try{console.warn("[freight_cfg] save failed:",r.error.message);}catch(_){} }
+  }); }catch(e){}
 }
 
 /* Sum weight (lbs), volume (cu ft), unit count, and pallet count from line items.
@@ -3647,7 +3655,9 @@ function OrderDupModal({order,products,customers,reps,setOrders,addToast,showRes
         <Btn onClick={function(){
           var newOrd=Object.assign({},order,{id:genId("ord"),custId:custId,custName:cust.name||order.custName,createdAt:new Date().toISOString(),status:"Submitted",paidAt:null,invoiceSentAt:null,trackingNum:null});
           setOrders(function(prev){return [newOrd].concat(prev);});
-          try{var sb=getSB();if(sb)sb.from("crm_orders").upsert({id:newOrd.id,data:newOrd}).then(function(){});}catch(e){}
+          try{var sb=getSB();if(sb)sb.from("crm_orders").upsert({id:newOrd.id,data:newOrd}).then(function(r){
+            if(r&&r.error){ try{console.error("[CustomerPaymentPage] order upsert failed (likely RLS — anon customer):",r.error.message);}catch(_){} }
+          });}catch(e){ try{console.error("[CustomerPaymentPage] order upsert threw:",e.message);}catch(_){} }
           addToast("Order duplicated: "+newOrd.id,"success");
           onClose();
         }}>Duplicate Order</Btn>
@@ -4909,12 +4919,14 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                   <div style={{display:"flex",gap:8,marginTop:8}}>
                     <Btn small onClick={function(){setFreightQuoteTarget(o);}}>📋 Enter Quote →</Btn>
                     <Btn small variant="ghost" onClick={function(){
-                      if(!window.confirm("Cancel this freight order? The rep will be notified.")) return;
-                      var cancelled = Object.assign({},o,{status:"Cancelled",cancelledAt:new Date().toISOString()});
-                      cancelled.auditLog = (o.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:"Cancelled by admin",detail:"Freight order — pre-quote"}]);
-                      setOrders(function(prev){return prev.map(function(x){return x.id===o.id?cancelled:x;});});
-                      dbSave("crm_orders",o.id,cancelled);
-                      addToast("Order "+o.id+" cancelled","warning");
+                      window.appConfirm("Cancel this freight order? The rep will be notified.", {okLabel:"Cancel order", danger:true}).then(function(ok){
+                        if(!ok) return;
+                        var cancelled = Object.assign({},o,{status:"Cancelled",cancelledAt:new Date().toISOString()});
+                        cancelled.auditLog = (o.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:"Cancelled by admin",detail:"Freight order — pre-quote"}]);
+                        setOrders(function(prev){return prev.map(function(x){return x.id===o.id?cancelled:x;});});
+                        dbSave("crm_orders",o.id,cancelled);
+                        addToast("Order "+o.id+" cancelled","warning");
+                      });
                     }}>Cancel Order</Btn>
                   </div>
                 </div>
@@ -4949,7 +4961,9 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             };
             try{
               localStorage.setItem("__pv__pay_"+payTok, JSON.stringify(payData));
-              var sb=getSB(); if(sb) sb.from("crm_pay_tokens").upsert({id:payTok, data:payData, created_at:payData.createdAt}).then(function(){});
+              var sb=getSB(); if(sb) sb.from("crm_pay_tokens").upsert({id:payTok, data:payData, created_at:payData.createdAt}).then(function(r){
+                if(r&&r.error){ try{console.error("[crm_pay_tokens] write failed — pay link may not work:",r.error.message);}catch(_){} }
+              });
             }catch(e){}
             var orderWithToken = Object.assign({},quoted,{payToken:payTok});
             setOrders(function(prev){return prev.map(function(x){return x.id===quoted.id?orderWithToken:x;});});
@@ -7486,19 +7500,22 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
   function revokeComp(){
     var adminName = (currentUser&&currentUser.name)||"Admin";
     var revertTo  = rep.previousSubscriptionStatus || "cancelled";
-    if(!window.confirm("Revoke "+rep.name+"'s free plan? They'll be moved back to \""+revertTo+"\" and will need to subscribe through Stripe to keep access if their trial has ended.")) return;
-    var entry = {
-      action:"Free plan revoked",
-      actor:adminName,
-      ts:new Date().toISOString(),
-      detail:"Reverted to "+revertTo
-    };
-    updateRep({
-      subscriptionStatus:revertTo,
-      compGrantedBy:null, compGrantedAt:null, compExpiresAt:null, previousSubscriptionStatus:null,
-      auditLog:(rep.auditLog||[]).concat([entry])
+    window.appConfirm("Revoke "+rep.name+"'s free plan? They'll be moved back to \""+revertTo+"\" and will need to subscribe through Stripe to keep access if their trial has ended.",
+      {okLabel:"Revoke", danger:true}).then(function(ok){
+      if(!ok) return;
+      var entry = {
+        action:"Free plan revoked",
+        actor:adminName,
+        ts:new Date().toISOString(),
+        detail:"Reverted to "+revertTo
+      };
+      updateRep({
+        subscriptionStatus:revertTo,
+        compGrantedBy:null, compGrantedAt:null, compExpiresAt:null, previousSubscriptionStatus:null,
+        auditLog:(rep.auditLog||[]).concat([entry])
+      });
+      addToast("Free plan revoked","info");
     });
-    addToast("Free plan revoked","info");
   }
 
   function saveNote() {
@@ -8696,7 +8713,9 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
               var paidOrder=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:"credit_card",chargeId:payRef.chargeId,status:"Paid"});
               var upd=autoFulfillIfPaid(paidOrder, "Admin");
               setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
-              try{var sb=getSB();if(sb)sb.from("crm_orders").update({data:upd,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
+              try{var sb=getSB();if(sb)sb.from("crm_orders").update({data:upd,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(r){
+                if(r&&r.error){ try{console.error("[CollectPaymentModal] charge → order update failed:",r.error.message);}catch(_){} }
+              });}catch(e){ try{console.error("[CollectPaymentModal] charge → order update threw:",e.message);}catch(_){} }
             }
             if(addToast) addToast("✓ $"+grand.toFixed(2)+" charged successfully","success");
             if(typeof showResult==="function") showResult({type:"payment",title:"Payment Collected!",subtitle:"Card charged successfully.",
@@ -8715,7 +8734,9 @@ function CollectPaymentModal({order, customers, products, currentUser, addToast,
       var paidOrder=Object.assign({},order,{paidAt:payRef.paidAt,payMethod:markMethod,status:"Paid"});
       var upd=autoFulfillIfPaid(paidOrder, "Admin");
       setOrders(function(prev){return prev.map(function(o){return o.id===order.id?upd:o;});});
-      try{var sb=getSB();if(sb)sb.from("crm_orders").update({data:upd,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(){});}catch(e){}
+      try{var sb=getSB();if(sb)sb.from("crm_orders").update({data:upd,updated_at:new Date().toISOString()}).eq("id",order.id).then(function(r){
+        if(r&&r.error){ try{console.error("[CollectPaymentModal] markPaid → order update failed:",r.error.message);}catch(_){} }
+      });}catch(e){ try{console.error("[CollectPaymentModal] markPaid → order update threw:",e.message);}catch(_){} }
     }
     if(addToast) addToast("Order marked as paid","success");
     onClose();
@@ -9433,26 +9454,31 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                   var repObj  = (reps||[]).find(function(r){return r.id===viewOrder.repId;}) || {id:viewOrder.repId, name:viewOrder.repName, email:""};
                   // If the order isn't paid yet, mark it Paid before firing notifs.
                   // (Backfill case — admin presses Refire on a "Submitted" order that was actually paid.)
-                  var orderForNotif = viewOrder;
-                  if(!viewOrder.paidAt){
-                    var ok = window.confirm("This order isn't marked Paid yet. Refiring will mark it Paid + send the confirmation. Proceed?");
-                    if(!ok) return;
-                    var nowIso = new Date().toISOString();
-                    orderForNotif = Object.assign({},viewOrder,{
-                      status:"Paid",paidAt:nowIso,
-                      payMethod: viewOrder.payMethod || "credit_card",
+                  function doRefire(orderForNotif){
+                    firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: false}).then(function(res){
+                      if(res && res.skipped){
+                        window.appConfirm("Email was sent recently. Send again anyway?", {okLabel:"Send again"}).then(function(force){
+                          if(force) firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: true});
+                        });
+                      }
                     });
-                    setOrders(function(prev){return prev.map(function(o){return o.id===viewOrder.id?orderForNotif:o;});});
-                    dbSave("crm_orders",viewOrder.id,orderForNotif);
-                    setViewOrder(orderForNotif);
                   }
-                  // Force=true the second time if 5-min throttle blocks the resend
-                  firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: false}).then(function(res){
-                    if(res && res.skipped){
-                      var force = window.confirm("Email was sent recently. Send again anyway?");
-                      if(force) firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: true});
-                    }
-                  });
+                  if(!viewOrder.paidAt){
+                    window.appConfirm("This order isn't marked Paid yet. Refiring will mark it Paid + send the confirmation. Proceed?", {okLabel:"Mark Paid + Refire"}).then(function(ok){
+                      if(!ok) return;
+                      var nowIso = new Date().toISOString();
+                      var orderForNotif = Object.assign({},viewOrder,{
+                        status:"Paid",paidAt:nowIso,
+                        payMethod: viewOrder.payMethod || "credit_card",
+                      });
+                      setOrders(function(prev){return prev.map(function(o){return o.id===viewOrder.id?orderForNotif:o;});});
+                      dbSave("crm_orders",viewOrder.id,orderForNotif);
+                      setViewOrder(orderForNotif);
+                      doRefire(orderForNotif);
+                    });
+                  } else {
+                    doRefire(viewOrder);
+                  }
                 }}>🔔 Refire Notifications</Btn>
                 {viewOrder.status!=="Cancelled"&&viewOrder.status!=="Refunded"&&viewOrder.status!=="Paid"&&(
                   <Btn variant="danger" onClick={function(){cancel(viewOrder);}}>Cancel</Btn>
@@ -10016,12 +10042,15 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
   }
 
   function deleteRep(rep) {
-    if(!window.confirm("Permanently delete \""+(rep.name||"this rep")+"\" ("+(rep.email||"")+")?\n\nThis removes the rep account. Past orders and commissions are kept for your records but will no longer link to an active rep. This cannot be undone."))return;
-    setReps(function(prev){return prev.filter(function(r){return r.id!==rep.id;});});
-    dbDel("crm_reps",rep.id);
-    // best-effort: remove the matching login role record so the orphaned account can't sign in
-    try{ var sb=getSB(); if(sb&&rep.email){ sb.from("crm_users").delete().eq("email",rep.email).then(function(){},function(){}); } }catch(e){}
-    addToast((rep.name||"Rep")+" deleted","warning");
+    window.appConfirm("Permanently delete \""+(rep.name||"this rep")+"\" ("+(rep.email||"")+")?\n\nThis removes the rep account. Past orders and commissions are kept for your records but will no longer link to an active rep. This cannot be undone.",
+      {okLabel:"Delete", danger:true}).then(function(ok){
+      if(!ok) return;
+      setReps(function(prev){return prev.filter(function(r){return r.id!==rep.id;});});
+      dbDel("crm_reps",rep.id);
+      // best-effort: remove the matching login role record so the orphaned account can't sign in
+      try{ var sb=getSB(); if(sb&&rep.email){ sb.from("crm_users").delete().eq("email",rep.email).then(function(){},function(){}); } }catch(e){}
+      addToast((rep.name||"Rep")+" deleted","warning");
+    });
   }
 
   function changePlan(rep, planId) {
@@ -15412,11 +15441,20 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
     var target=REP_PLANS.find(function(p){return p.id===newPlanId;});
     var cur=REP_PLANS.find(function(p){return p.id===repData.planId;});
     var isDowngrade=target&&cur&&target.price<cur.price;
-    if(isDowngrade&&!window.confirm("Switch to "+target.name+"? Your commission ceiling drops to "+fmtMoney(target.ceiling)+"/mo.")) return;
-    var updated=Object.assign({},repData,{planId:newPlanId});
-    setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
-    dbSave("crm_reps",repData.id,updated);
-    addToast("Switched to "+(target?target.name:newPlanId)+(repData.subscriptionStatus==="active"?" — confirm the new price in Stripe":" — activate billing to start"),isDowngrade?"info":"success");
+    function doSwitch(){
+      var updated=Object.assign({},repData,{planId:newPlanId});
+      setReps(function(prev){return prev.map(function(r){return r.id===repData.id?updated:r;});});
+      dbSave("crm_reps",repData.id,updated);
+      addToast("Switched to "+(target?target.name:newPlanId)+(repData.subscriptionStatus==="active"?" — confirm the new price in Stripe":" — activate billing to start"),isDowngrade?"info":"success");
+    }
+    if(isDowngrade){
+      window.appConfirm("Switch to "+target.name+"? Your commission ceiling drops to "+fmtMoney(target.ceiling)+"/mo.",
+        {okLabel:"Switch", danger:true}).then(function(ok){
+        if(ok) doSwitch();
+      });
+    } else {
+      doSwitch();
+    }
   }
   // v82: Hide the Subscription tab for comp ("🎁 Granted Free Plan") reps —
   // they don't need to manage billing. Other statuses (trial / active /
@@ -15931,7 +15969,9 @@ function _writeNotifRow(o){
   if(!o.to && !o.msg) return;
   var id="ntf_"+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
   var row=Object.assign({id:id,ts:new Date().toISOString(),read:false},o);
-  sb.from("crm_notifications").upsert({id:id,data:row,created_at:row.ts}).then(function(){});
+  sb.from("crm_notifications").upsert({id:id,data:row,created_at:row.ts}).then(function(r){
+    if(r&&r.error){ try{console.warn("[_writeNotifRow] notif write failed (likely RLS):",r.error.message);}catch(_){} }
+  });
 }
 
 // v97b: shared sent-email log so the Email tab's SENT sidebar shows ALL outgoing emails
@@ -15969,7 +16009,13 @@ function logSentEmail(entry){
   }catch(e){}
   try{
     var sb = getSB();
-    if(sb) sb.from("crm_email_log").upsert({id:rec.id, data:rec, created_at:rec.sentAt}).then(function(){});
+    if(sb) sb.from("crm_email_log").upsert({id:rec.id, data:rec, created_at:rec.sentAt}).then(function(r){
+      // If the table doesn't exist yet (optional Supabase table — localStorage version still works),
+      // suppress the error noise but log the first occurrence in case something else is wrong.
+      if(r&&r.error && r.error.message && r.error.message.indexOf("relation")<0){
+        try{console.warn("[crm_email_log] cross-browser sync write failed:",r.error.message);}catch(_){}
+      }
+    });
   }catch(e){}
   try{ console.info("[logSentEmail] "+rec.kind+" → "+rec.to+(rec.cc?" (CC: "+rec.cc+")":"")+" — "+rec.subject); }catch(e){}
 }
@@ -16573,7 +16619,13 @@ function AdminHelpDesk({tickets,setTickets,faqs,setFaqs,reps,orders,currentUser,
     }
     setEditFaq(null);
   }
-  function delFaq(f){ if(!window.confirm("Delete this article?"))return; setFaqs(function(prev){return prev.filter(function(x){return x.id!==f.id;});}); dbDel("crm_faq",f.id); }
+  function delFaq(f){
+    window.appConfirm("Delete this article?", {okLabel:"Delete", danger:true}).then(function(ok){
+      if(!ok) return;
+      setFaqs(function(prev){return prev.filter(function(x){return x.id!==f.id;});});
+      dbDel("crm_faq",f.id);
+    });
+  }
   var list=(tickets||[]).slice().sort(function(a,b){return (b.updatedAt||"").localeCompare(a.updatedAt||"");});
   if(fStatus!=="all") list=list.filter(function(t){return t.status===fStatus;});
   if(fRep!=="all") list=list.filter(function(t){return t.repId===fRep;});
@@ -16642,14 +16694,16 @@ function AdminHelpDesk({tickets,setTickets,faqs,setFaqs,reps,orders,currentUser,
         <div style={{padding:"40px 20px",textAlign:"center"}}>
           <div style={{color:C.dim,fontSize:13,marginBottom:18}}>No FAQ articles yet. Add one to help reps self-serve.</div>
           <Btn small onClick={function(){
-            if(!window.confirm("Load 18 default FAQ articles? You can edit or delete them after.")) return;
-            var now = new Date().toISOString();
-            var seed = FAQ_ITEMS.map(function(item,i){
-              return {id:genId("faq"), question:item.q, answer:item.a, category:item.cat||"Other", order:i+1, createdAt:now, updatedAt:now};
+            window.appConfirm("Load 18 default FAQ articles? You can edit or delete them after.", {okLabel:"Load articles"}).then(function(ok){
+              if(!ok) return;
+              var now = new Date().toISOString();
+              var seed = FAQ_ITEMS.map(function(item,i){
+                return {id:genId("faq"), question:item.q, answer:item.a, category:item.cat||"Other", order:i+1, createdAt:now, updatedAt:now};
+              });
+              seed.forEach(function(f){ dbSave("crm_faq", f.id, f); });
+              setFaqs(function(prev){return seed.concat(prev||[]);});
+              if(addToast) addToast("Loaded "+seed.length+" default FAQ articles","success");
             });
-            seed.forEach(function(f){ dbSave("crm_faq", f.id, f); });
-            setFaqs(function(prev){return seed.concat(prev||[]);});
-            if(addToast) addToast("Loaded "+seed.length+" default FAQ articles","success");
           }}>📚 Load 18 Default Articles</Btn>
         </div>
       ))}
@@ -17557,7 +17611,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v99-account-role</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v100-error-boundary-confirm-pipeline</div>
       </div>
     </div>
   );
@@ -19054,7 +19108,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v99-account-role
+        BUILD: 2026-05-30-v100-error-boundary-confirm-pipeline
       </div>
     </div>
   );
@@ -19065,6 +19119,25 @@ function App() {
   C = Object.assign({}, THEMES[theme]||THEMES.dark); // update theme tokens every render
   const isMobileUA = useState(function(){return isMobileDevice();})[0];
   const [preferDesktopOnMobile, setPreferDesktopOnMobile] = useState(false);
+  // v100 #11: app-wide confirm modal that replaces native window.confirm.
+  // Usage anywhere in the app: appConfirm("Delete this?").then(function(ok){ if(!ok) return; ... });
+  // The Promise resolves to true on OK, false on Cancel.
+  const [confirmReq, setConfirmReq] = useState(null);  // {title, message, okLabel, cancelLabel, danger, resolve}
+  useEffect(function(){
+    window.appConfirm = function(message, opts){
+      opts = opts || {};
+      return new Promise(function(resolve){
+        setConfirmReq({
+          title: opts.title || "Confirm",
+          message: message || "Are you sure?",
+          okLabel: opts.okLabel || "Confirm",
+          cancelLabel: opts.cancelLabel || "Cancel",
+          danger: !!opts.danger,
+          resolve: resolve,
+        });
+      });
+    };
+  },[]);
   // v77: compliance wall minimize state — MUST be declared at top of App, before any conditional
   // early-return paths (receipt/sign/quote/invite/loading) — moving it later violates the rules-of-hooks.
   const [complianceMinimized, setComplianceMinimized] = useState(false);
@@ -19556,7 +19629,9 @@ function App() {
     try{ serialized = JSON.stringify(row); }catch(e){ return; }
     if(serialized === publicSettingsLastWritten.current) return; // no actual change — skip the write
     publicSettingsLastWritten.current = serialized;
-    sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(){});
+    sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(r){
+      if(r&&r.error){ try{console.warn("[public_settings] sync write failed:",r.error.message);}catch(_){} }
+    });
   },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
   // v89: publish admin-only secrets so they sync across admin browsers.
@@ -19600,7 +19675,9 @@ function App() {
     // Skip writing an empty row on first mount (before any load completes)
     if(s === JSON.stringify({emailCreds:{tenantId:"",clientId:"",clientSecret:"",fromName:"",fromEmail:"",edgeFnUrl:""},shipStationCreds:{apiKey:"",apiSecret:"",storeUser:"",storePass:"",carrierFilter:"",warehouseAddress:"",warehouseCity:"",warehouseState:"",warehouseZip:"",defaultWeight:"",weightUnit:"",dimL:"",dimW:"",dimH:"",ratesFnUrl:"",edgeFnUrl:"",enabled:false}})) return;
     adminSecretsLastWritten.current = s;
-    sb.from("crm_settings").upsert({id:"admin_secrets",data:row,updated_at:new Date().toISOString()}).then(function(){});
+    sb.from("crm_settings").upsert({id:"admin_secrets",data:row,updated_at:new Date().toISOString()}).then(function(r){
+      if(r&&r.error){ try{console.warn("[admin_secrets] sync write failed (likely RLS — admin role required):",r.error.message);}catch(_){} }
+    });
   },[emailCfg,shipStationCfg,currentUser,viewAsRep]);
 
 
@@ -20400,6 +20477,17 @@ function App() {
       </div>
       {React.createElement(ToastStack,{toasts:toasts,setToasts:setToasts})}
       {resultModal&&React.createElement(ResultModal,{data:resultModal,onClose:function(){setResultModal(null);}})}
+      {/* v100 #11: confirm modal — replaces native window.confirm everywhere via appConfirm() */}
+      {confirmReq && (
+        <Modal title={confirmReq.title}
+          onClose={function(){ if(confirmReq.resolve) confirmReq.resolve(false); setConfirmReq(null); }}
+          footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn variant="ghost" onClick={function(){ confirmReq.resolve(false); setConfirmReq(null); }}>{confirmReq.cancelLabel}</Btn>
+            <Btn variant={confirmReq.danger?"danger":"primary"} onClick={function(){ confirmReq.resolve(true); setConfirmReq(null); }}>{confirmReq.okLabel}</Btn>
+          </div>}>
+          <div style={{padding:"4px 0",fontSize:14,color:C.text,lineHeight:1.5,whiteSpace:"pre-wrap"}}>{confirmReq.message}</div>
+        </Modal>
+      )}
       {isMobileUA && preferDesktopOnMobile && !isAdmin && (
         <button onClick={function(){setPreferDesktopOnMobile(false);}}
           style={{position:"fixed",bottom:16,right:16,zIndex:1000,
@@ -20446,8 +20534,35 @@ window.addEventListener('load',function(){
     }
     try{
       var code='const {useState,useCallback,useRef,useEffect}=React;\n';
+      // v100 #16: ErrorBoundary — isolates rendering crashes to a fallback UI instead of
+      // taking down the whole React tree. Without this, a single bad expression in any
+      // component blanks the entire app. Logs the error + stack so devs can diagnose.
+      code+="class ErrorBoundary extends React.Component {\n"
+          +"  constructor(p){ super(p); this.state={hasError:false, error:null, info:null}; this.reset=this.reset.bind(this); }\n"
+          +"  static getDerivedStateFromError(error){ return {hasError:true, error:error, info:null}; }\n"
+          +"  componentDidCatch(error, info){\n"
+          +"    try{ console.error('[ErrorBoundary] caught:', error); console.error('[ErrorBoundary] stack:', info && info.componentStack); }catch(_){}\n"
+          +"  }\n"
+          +"  reset(){ this.setState({hasError:false, error:null, info:null}); }\n"
+          +"  render(){\n"
+          +"    if(this.state.hasError){\n"
+          +"      var msg = (this.state.error && (this.state.error.message || String(this.state.error))) || 'Unknown error';\n"
+          +"      return React.createElement('div', {style:{padding:'40px 20px',maxWidth:560,margin:'40px auto',background:'#fff',borderRadius:12,boxShadow:'0 2px 14px rgba(0,0,0,.08)',fontFamily:\"-apple-system,Inter,sans-serif\"}},\n"
+          +"        React.createElement('div',{style:{fontSize:48,marginBottom:12,textAlign:'center'}},'⚠️'),\n"
+          +"        React.createElement('div',{style:{fontSize:18,fontWeight:700,color:'#1a1a2e',marginBottom:8,textAlign:'center'}},'Something went wrong'),\n"
+          +"        React.createElement('div',{style:{fontSize:13,color:'#6b7280',marginBottom:16,textAlign:'center',lineHeight:1.5}},'The app hit an unexpected error. You can try again, or reload the page if it persists.'),\n"
+          +"        React.createElement('div',{style:{background:'#fff5f5',border:'1px solid #fed7d7',borderRadius:8,padding:'10px 12px',marginBottom:16,fontSize:12,color:'#c53030',fontFamily:'monospace',wordBreak:'break-word'}}, msg),\n"
+          +"        React.createElement('div',{style:{display:'flex',gap:8,justifyContent:'center'}},\n"
+          +"          React.createElement('button',{onClick:this.reset,style:{padding:'10px 18px',background:'#635bff',color:'#fff',border:'none',borderRadius:8,fontWeight:600,fontSize:13,cursor:'pointer'}},'Try again'),\n"
+          +"          React.createElement('button',{onClick:function(){window.location.reload();},style:{padding:'10px 18px',background:'#fff',color:'#635bff',border:'1px solid #d0d7e2',borderRadius:8,fontWeight:600,fontSize:13,cursor:'pointer'}},'Reload page')\n"
+          +"        )\n"
+          +"      );\n"
+          +"    }\n"
+          +"    return this.props.children;\n"
+          +"  }\n"
+          +"}\n";
       for(var i=0;i<N;i++){var src=document.getElementById('c'+i).textContent;code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';}
-      code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(App));';
+      code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(ErrorBoundary, null, React.createElement(App)));';
       new Function('React','ReactDOM',code)(React,ReactDOM);
     }catch(ex){showErr('Error: '+ex.message+'\n\n'+(ex.stack||''));}
   }
