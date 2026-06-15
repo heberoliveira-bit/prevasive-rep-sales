@@ -6726,6 +6726,14 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       var d = res.data || {};
       if(d.ok){
         try{ console.info("[sendQuote] ✓ sent — cc:"+(d.cc||0)+" bcc:"+(d.bcc||0), d); }catch(e){}
+        // v97b: log to shared Sent so it shows up in the Email tab's sidebar
+        try{ logSentEmail({
+          to: payload.to, toName: cust.name||payload.to, cc: payload.cc||"",
+          subject: payload.subject,
+          sentBy: (currentUser && currentUser.name) || "",
+          kind: "quote", quoteId: enrichedQuote.id,
+          preview: "Quote total $"+(enrichedQuote.total||0).toFixed(2),
+        }); }catch(e){}
         addToast("Quote emailed to "+custEmail + (payload.cc ? " (CC: "+payload.cc+")" : ""),"success");
       } else {
         try{ console.error("[sendQuote] ✗ HTTP "+res.status+" — "+(d.error||"no error message"), d); }catch(e){}
@@ -12175,6 +12183,9 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
           try{ localStorage.setItem(sentLogKey, JSON.stringify(next)); }catch(e){}
           return next;
         });
+        // v97b: also write to the shared cross-feature log so the Sent sidebar
+        // shows this alongside quote sends and payment confirmations
+        try{ logSentEmail(Object.assign({}, entry, {kind:"compose", preview:(body||"").slice(0,120)})); }catch(e){}
         addToast("✓ Email sent to "+(selCust?selCust.name:toEmail)+(ccRep&&repEmail?" (CC: you)":""),"success");
         setToId(""); setToEmail(""); setSubject(""); setBody(""); setTmpl("custom");
       } else {
@@ -12396,18 +12407,46 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
             </div>
           </div>
 
-{sentLog.length>0&&(
+{(function(){
+  // v97b: combine per-user sentLog with the shared cross-feature log so admin
+  // sees quote sends and payment confirmations alongside their own composes.
+  var sharedLog = [];
+  try{ sharedLog = JSON.parse(localStorage.getItem("__pv__sentLog_shared")||"[]"); }catch(e){}
+  var seen = {};
+  var merged = sentLog.concat(sharedLog).filter(function(e){
+    if(!e || !e.id || seen[e.id]) return false;
+    seen[e.id]=true; return true;
+  }).sort(function(a,b){return new Date(b.sentAt) - new Date(a.sentAt);}).slice(0,15);
+  if(merged.length===0) return null;
+  function kindBadge(k){
+    if(k==="quote")    return {label:"QUOTE",   bg:"#eef2ff", fg:"#6366f1"};
+    if(k==="payment")  return {label:"💰 PAID", bg:"#ecfdf5", fg:"#059669"};
+    if(k==="invoice")  return {label:"INVOICE", bg:"#fffbeb", fg:"#d97706"};
+    if(k==="receipt")  return {label:"RECEIPT", bg:"#ecfdf5", fg:"#059669"};
+    return null;
+  }
+  return (
             <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-              <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Sent</div>
-              {sentLog.slice(0,5).map(function(e){return (
-                <div key={e.id} style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:12}}>
-                  <div style={{fontWeight:600,color:C.text,marginBottom:2}}>{e.toName}</div>
-                  <div style={{color:C.muted,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</div>
-                  <div style={{color:C.dim,fontSize:10,marginTop:2}}>{fmtDate(e.sentAt)}</div>
-                </div>
-              );})}
+              <div style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:11,fontWeight:600,color:C.muted,textTransform:"uppercase",letterSpacing:".06em"}}>Sent ({merged.length})</div>
+              {merged.map(function(e){
+                var badge = kindBadge(e.kind);
+                var refId = e.orderId || e.quoteId || "";
+                return (
+                  <div key={e.id} style={{padding:"10px 14px",borderBottom:"1px solid "+C.border,fontSize:12}}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3,flexWrap:"wrap"}}>
+                      {badge && <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:badge.bg,color:badge.fg,letterSpacing:".05em"}}>{badge.label}</span>}
+                      <div style={{fontWeight:600,color:C.text,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.toName||e.to}</div>
+                    </div>
+                    <div style={{color:C.muted,fontSize:11,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.subject}</div>
+                    {refId && <div style={{color:C.accent,fontSize:10,fontFamily:"monospace",marginTop:2}}>{refId}</div>}
+                    {e.cc && <div style={{color:C.dim,fontSize:10,marginTop:1}}>CC: {e.cc}</div>}
+                    <div style={{color:C.dim,fontSize:10,marginTop:2}}>{fmtDate(e.sentAt)}{e.sentBy?(" · "+e.sentBy):""}</div>
+                  </div>
+                );
+              })}
             </div>
-          )}
+  );
+})()}
         </div>
       </div>
 
@@ -15865,6 +15904,44 @@ function _writeNotifRow(o){
   sb.from("crm_notifications").upsert({id:id,data:row,created_at:row.ts}).then(function(){});
 }
 
+// v97b: shared sent-email log so the Email tab's SENT sidebar shows ALL outgoing emails
+// (manual composer + quote sends + payment confirmations + future order receipts), not
+// just the ones composed from the Email tab. Stored under a SHARED key so it survives
+// across users on the same browser and shows the same history regardless of who logged in.
+// Optionally also writes to crm_email_log Supabase table for cross-browser sync.
+//
+// entry: { to, toName, cc?, subject, sentAt, sentBy?, kind?, orderId?, quoteId? }
+// kind: "compose" | "quote" | "payment" | "invoice" | "receipt" | "notification"
+function logSentEmail(entry){
+  if(!entry || !entry.to || !entry.subject) return;
+  var rec = {
+    id: entry.id || ("em_"+Date.now().toString(36)+Math.random().toString(36).slice(2,5)),
+    to: entry.to,
+    toName: entry.toName || entry.to,
+    cc: entry.cc || "",
+    subject: entry.subject,
+    sentAt: entry.sentAt || new Date().toISOString(),
+    sentBy: entry.sentBy || "",
+    kind: entry.kind || "compose",
+    orderId: entry.orderId || "",
+    quoteId: entry.quoteId || "",
+    preview: entry.preview || "",
+  };
+  // Write to shared localStorage key (cross-user on same browser)
+  try{
+    var raw = localStorage.getItem("__pv__sentLog_shared");
+    var arr = raw ? JSON.parse(raw) : [];
+    arr = [rec].concat(arr).slice(0, 200);  // cap at 200 most recent
+    localStorage.setItem("__pv__sentLog_shared", JSON.stringify(arr));
+  }catch(e){}
+  // Best-effort cross-browser sync via Supabase
+  try{
+    var sb = getSB();
+    if(sb) sb.from("crm_email_log").upsert({id:rec.id, data:rec, created_at:rec.sentAt}).then(function(){});
+  }catch(e){}
+  try{ console.info("[logSentEmail] "+rec.kind+" → "+rec.to+(rec.cc?" (CC: "+rec.cc+")":"")+" — "+rec.subject); }catch(e){}
+}
+
 // v97: payment confirmation email — sent to customer, CC'd to rep so rep sees
 // exactly what customer received. No admin email (admins use the in-app notif
 // + the Refire button to test).
@@ -15970,6 +16047,14 @@ function firePaidNotifs(order, customer, rep, addToast, opts){
             });
           }
         }catch(e){}
+        // v97b: log to shared Sent so admin can see payment confirmations in the Email tab sidebar
+        try{ logSentEmail({
+          to: payload.to, toName: custName, cc: payload.cc||"",
+          subject: payload.subject,
+          sentBy: "System (payment confirmation)",
+          kind: "payment", orderId: orderId,
+          preview: "Payment confirmation — "+amtStr,
+        }); }catch(e){}
         if(addToast) addToast("✓ Payment confirmation sent to "+custEmail+(payload.cc?" (CC: "+payload.cc+")":""),"success");
         try{ console.info("[firePaidNotifs] ✓ sent",d); }catch(e){}
         return {ok:true,response:d};
@@ -17437,7 +17522,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v97-refire-paid-emails</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v97b-sent-log-orders</div>
       </div>
     </div>
   );
@@ -18934,7 +19019,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v97-refire-paid-emails
+        BUILD: 2026-05-30-v97b-sent-log-orders
       </div>
     </div>
   );
