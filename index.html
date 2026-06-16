@@ -14747,7 +14747,12 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                 {!viewOrd.paidAt && (
                   <Btn small onClick={function(){setShowCharge(true);}}>💳 Charge Card</Btn>
                 )}
-                <Btn small variant="ghost" onClick={function(){setShowSendInv(true);}}>✉ Send to Customer</Btn>
+                {/* v102j: hide "Send to Customer" when already paid — it opens the
+                       CollectPayment modal (CC form / send link) which is meaningless
+                       once the order is paid. */}
+                {!viewOrd.paidAt && (
+                  <Btn small variant="ghost" onClick={function(){setShowSendInv(true);}}>✉ Send to Customer</Btn>
+                )}
                 {(function(){
                   var er=(returns||[]).find(function(r){return r.orderId===viewOrd.id;});
                   if(er){ var sm=returnStatusMeta(er.status); return <span style={{padding:"5px 12px",borderRadius:6,fontSize:11,fontWeight:700,background:sm.bg,color:sm.c,alignSelf:"center"}}>Refund: {sm.label}</span>; }
@@ -17784,7 +17789,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102i-quote-variant-gate</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102j-hide-send-when-paid</div>
       </div>
     </div>
   );
@@ -19281,7 +19286,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102i-quote-variant-gate
+        BUILD: 2026-05-30-v102j-hide-send-when-paid
       </div>
     </div>
   );
