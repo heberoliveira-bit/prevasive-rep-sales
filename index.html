@@ -2907,6 +2907,20 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
 
   function buildEmailHtml(payLink, recipientName, messageText, total, orderid) {
     var btnColor = "#635bff";
+    // v102q: build the Subtotal/Shipping/Tax breakdown from order.totals — shows
+    // customer what the total is composed of, not just the grand total.
+    var t = order.totals || {};
+    function row(label, value){
+      return "<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;padding:3px 0'><span>"+label+"</span><span>"+value+"</span></div>";
+    }
+    var breakdownLines = "";
+    if(t.subtotal > 0)                  breakdownLines += row("Subtotal",                                              "$"+t.subtotal.toFixed(2));
+    if(t.shipping > 0)                  breakdownLines += row("Shipping" + (t.shippingService ? (" — "+t.shippingService) : ""), "$"+t.shipping.toFixed(2));
+    if(t.tax > 0)                       breakdownLines += row("Tax" + (t.taxRate ? (" ("+(t.taxRate*100).toFixed(2)+"%)") : ""),    "$"+t.tax.toFixed(2));
+    if(t.taxExempt && (!t.tax || t.tax===0)) breakdownLines += row("Tax", "Exempt");
+    var breakdownBlock = breakdownLines
+      ? "<div style='background:#f6f9fc;border-radius:8px;padding:14px 18px;margin-bottom:14px'>"+breakdownLines+"</div>"
+      : "";
     return "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
       +"<body style='margin:0;padding:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
       +"<div style='max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
@@ -2915,7 +2929,8 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
       +"<div style='color:rgba(255,255,255,.75);font-size:12px;margin-top:2px'>Invoice &amp; Payment</div>"
       +"</div>"
       +"<div style='padding:32px'>"
-      +"<div style='font-size:15px;color:#1a1a2e;line-height:1.7;white-space:pre-line;margin-bottom:28px'>"+messageText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>"
+      +"<div style='font-size:15px;color:#1a1a2e;line-height:1.7;white-space:pre-line;margin-bottom:24px'>"+messageText.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>"
+      + breakdownBlock
       +"<div style='background:#f6f9fc;border-radius:8px;padding:16px 20px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center'>"
       +"<div><div style='font-size:11px;color:#6b7c93;font-weight:700;text-transform:uppercase;letter-spacing:.06em'>Order Total</div>"
       +"<div style='font-size:24px;font-weight:900;color:#1a1a2e'>$"+total+"</div></div>"
@@ -2933,7 +2948,7 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
   function openMail(){
     if(!toEmail.trim()){addToast("Enter a customer email first","warning");return;}
     var cfg=null;
-    try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    cfg=getEmailCfg();
     if(cfg&&cfg.edgeFnUrl&&cfg.fromEmail){
       setSending(true);
       var html = buildEmailHtml(link, cust.name||"", body, grand.toFixed(2), order.id);
@@ -6729,7 +6744,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     try{localStorage.setItem("__pv__quote_"+token,JSON.stringify(snap));}catch(e){}
     var sbq=getSB();if(sbq){sbq.from("crm_quote_tokens").upsert({id:token,data:snap,created_at:snap.createdAt}).then(function(){});}
     var link = getSiteUrl()+"#quote="+token;
-    var emailCfg2=null; try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var emailCfg2=getEmailCfg();
 
     // v94: track quote as sent immediately so it's saved regardless of email outcome.
     // v94b: also persist the enriched items so the in-app view stops showing prod_005.
@@ -12174,7 +12189,7 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
   const [pickedProductIds, setPickedProductIds] = useState([]);
 
   // Cache the email config read so we don't re-parse localStorage 100x per render
-  var emailCfg = (function(){ try{ return JSON.parse(localStorage.getItem("__pv__emailCfg")||"null"); }catch(e){ return null; } })();
+  var emailCfg = getEmailCfg();
   var emailReady = !!(emailCfg && emailCfg.edgeFnUrl && emailCfg.fromEmail);
   var threadReady = !!(emailCfg && emailCfg.edgeFnUrl && emailCfg.tenantId && emailCfg.clientId && emailCfg.clientSecret);
 
@@ -13146,7 +13161,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     // ── DOR: Send Invoice Link — email customer immediately ──
     if(payMethod==="due_receipt"&&dorPath==="link"&&sendOnPlace&&placeEmail.trim()) {
       var emailCfg2=null;
-      try{emailCfg2=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+      emailCfg2=getEmailCfg();
       if(emailCfg2&&emailCfg2.edgeFnUrl&&(emailCfg2.clientSecret||emailCfg2.pass)) {
         var payTok2 = id+"_"+Math.random().toString(36).slice(2,9);
         var payD2   = {token:payTok2,status:"pending",orderId:id,custId:order.custId,custName:order.custName||"",custEmail:placeEmail,company:JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA",items:(order.items||[]).map(function(it){var p=(products||[]).find(function(px){return px.id===it.prodId;})||{};return {prodId:it.prodId,qty:it.qty,unitPrice:it.unitPrice||0,customerPrice:it.customerPrice||it.unitPrice||0,name:p.name||it.prodId||""};}) ,totals:order.totals||{},createdAt:new Date().toISOString()};
@@ -16012,15 +16027,35 @@ function buildQuoteEmail(quote, company, link, customer){
     introCopy = "Please review your quote below. Payment is required to place this order.";
     ctas = "<a href='"+link+"' style='display:block;text-align:center;background:#635bff;color:#fff;text-decoration:none;padding:16px;border-radius:8px;font-weight:800;font-size:16px;letter-spacing:.01em'>💳 Pay $"+totalDisplay+" &amp; place order</a>";
   }
+  // v102q: build the Subtotal / Shipping / Tax breakdown lines between items and Total.
+  // Quote object has FLAT fields (q.shipping, q.tax, q.productCustomer) — not nested totals.
+  // For freight quotes, skip the Shipping line entirely (shown separately as "TBD").
+  var subtotal = quote.productCustomer || 0;
+  var taxAmt   = quote.tax || 0;
+  var shipAmt  = quote.shipping || 0;
+  var taxRate  = quote.taxRate || 0;
+  var taxRateLabel = taxRate ? (" ("+(taxRate*100).toFixed(2)+"%)") : "";
+  var shipLabel = quote.shippingService ? (" — "+escHtml(quote.shippingService)) : "";
+  function breakdownRow(label, value){
+    return "<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;padding:3px 0'><span>"+label+"</span><span>"+value+"</span></div>";
+  }
+  var breakdown = "";
+  if(subtotal > 0)                    breakdown += breakdownRow("Subtotal",                  "$"+subtotal.toFixed(2));
+  if(shipAmt > 0 && !isFreightEmail)  breakdown += breakdownRow("Shipping"+shipLabel,         "$"+shipAmt.toFixed(2));
+  if(taxAmt > 0)                      breakdown += breakdownRow("Tax"+taxRateLabel,           "$"+taxAmt.toFixed(2));
+  if(quote.taxExempt && taxAmt === 0) breakdown += breakdownRow("Tax",                        "Exempt");
+  var breakdownBlock = breakdown ? ("<div style='margin:8px 0 4px;padding-top:8px;border-top:1px solid #e8ecef'>"+breakdown+"</div>") : "";
+
   return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
     +"<div style='max-width:560px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
     +"<div style='background:#635bff;padding:24px 32px'><div style='color:#fff;font-size:20px;font-weight:800'>"+company+"</div>"
     +"<div style='color:rgba(255,255,255,.8);font-size:12px'>Quote "+quote.id+"</div></div>"
     +"<div style='padding:32px'>"
     +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:20px'>"+introCopy+"</div>"
-    +"<table style='width:100%;border-collapse:collapse;font-size:13px;border-bottom:1px solid #e8ecef;margin-bottom:8px'>"+rows+"</table>"
+    +"<table style='width:100%;border-collapse:collapse;font-size:13px;margin-bottom:0'>"+rows+"</table>"
+    +breakdownBlock
     +(isFreightEmail?"<div style='display:flex;justify-content:space-between;font-size:12px;color:#b45309;margin:8px 0;font-weight:600'><span>🚛 Shipping (LTL freight)</span><span>TBD</span></div>":"")
-    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 16px'><span>"+totalLabel+"</span><span style='color:#635bff'>$"+totalDisplay+"</span></div>"
+    +"<div style='display:flex;justify-content:space-between;font-weight:800;font-size:16px;color:#1a1a2e;margin:12px 0 16px;padding-top:8px;border-top:1px solid #e8ecef'><span>"+totalLabel+"</span><span style='color:#635bff'>$"+totalDisplay+"</span></div>"
     +freightNote
     +ctas
     +"<div style='font-size:11px;color:#a0aec0;text-align:center;margin-top:16px'>Or open this link:<br>"+link+"</div>"
@@ -16060,7 +16095,24 @@ var DEFAULT_NOTIF_PREFS = (function(){var p={adminEmail:""};NOTIF_DEFS.forEach(f
 
 function getNotifPrefs(){ try{return JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}");}catch(e){return {};} }
 function notifEnabled(key){ return getNotifPrefs()[key]!==false; }
-function getAdminNotifyEmail(){ var p=getNotifPrefs(); var e=(p.adminEmail||"").trim(); if(e) return e; try{return JSON.parse(localStorage.getItem("__pv__emailCfg")||"{}").fromEmail||"";}catch(x){return "";} }
+
+// v103: centralized email config accessor with in-memory cache.
+// Replaces 12 scattered `JSON.parse(localStorage.getItem("__pv__emailCfg"))` reads
+// — single source of truth, freshness-aware (App publishes to cache on state change).
+// Falls back to localStorage on cold reads so server-render / first-paint still works.
+var __emailCfgCache = null;
+function getEmailCfg(){
+  if(__emailCfgCache) return __emailCfgCache;
+  try{
+    var raw = localStorage.getItem("__pv__emailCfg");
+    if(raw) { __emailCfgCache = JSON.parse(raw); return __emailCfgCache; }
+  }catch(e){}
+  return null;
+}
+function setEmailCfgCache(cfg){
+  __emailCfgCache = cfg || null;
+}
+function getAdminNotifyEmail(){ var p=getNotifPrefs(); var e=(p.adminEmail||"").trim(); if(e) return e; var ec=getEmailCfg(); return (ec&&ec.fromEmail)||""; }
 
 function notifEmailHtml(company, heading, bodyHtml, ctaLabel, ctaLink, accent){
   accent=accent||"#635bff";
@@ -16242,7 +16294,7 @@ function firePaidNotifs(order, customer, rep, addToast, opts){
       link:"orders",orderId:orderId,read:false});
   }catch(e){ try{console.error("[firePaidNotifs] notif write failed:",e);}catch(_){}}
   // 2. Customer email + CC rep — uses the same edge function as the rest of the app
-  var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+  var cfg=null; cfg=getEmailCfg();
   if(!custEmail){
     if(addToast) addToast("Notifications fired (no customer email on file — skipped email)","warning");
     return Promise.resolve({notifsOnly:true});
@@ -16319,7 +16371,7 @@ function _emailRespOk(r){
 // otherwise queues a row that an admin session delivers. `bell` optionally shows in a rep's bell.
 function notifyEmail(key, to, subject, html, bell){
   if(!notifEnabled(key)){ if(bell&&bell.repId&&bell.msg) _writeNotifRow({key:key,emailPending:false,repId:bell.repId,msg:bell.msg,type:bell.type||"info"}); return; }
-  var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+  var cfg=null; cfg=getEmailCfg();
   function queueEmail(){ _writeNotifRow({key:key,to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:(bell&&bell.repId)||"",msg:(bell&&bell.msg)||"",type:(bell&&bell.type)||"info"}); }
   if(to && cfg && cfg.edgeFnUrl){
     fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
@@ -16501,7 +16553,7 @@ function fireCancelledNotifs(order, opts){
 // otherwise queues it for an admin session to deliver (e.g. from the public apply page).
 function sendRepEmail(to, subject, html){
   try{
-    var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var cfg=null; cfg=getEmailCfg();
     function queue(){ _writeNotifRow({key:"rep_onboarding",to:to||"",emailSubject:subject,emailHtml:html,emailPending:!!to,repId:"",msg:"",type:"info"}); }
     if(to && html && cfg && cfg.edgeFnUrl){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
@@ -16763,7 +16815,7 @@ function tktWhen(iso){
 // Always-on ticket notification: in-app bell + best-effort email (no prefs gate).
 function tktNotify(opts){
   try{
-    var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var cfg=null; cfg=getEmailCfg();
     var canSend = opts.toEmail && opts.html && cfg && cfg.edgeFnUrl;
     if(canSend){
       fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
@@ -17191,7 +17243,7 @@ function AdminReturns({returns,setReturns,orders,setOrders,reps,currentUser,addT
   function repEmail(repId){var r=(reps||[]).find(function(x){return (x.rep_id||x.id)===repId;});return r?r.email:"";}
   function notifyRep(rec,msg,html,subject){
     try{
-      var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+      var cfg=null; cfg=getEmailCfg();
       var to=repEmail(rec.repId), canSend=to&&html&&cfg&&cfg.edgeFnUrl;
       if(canSend){ fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({to:to,subject:subject||"Refund update",html:html,fromName:cfg.fromName||"PreVasive USA",fromEmail:cfg.fromEmail})}).then(function(){}).catch(function(){}); _writeNotifRow({key:"refund",repId:rec.repId,msg:msg,type:"info"}); }
       else { _writeNotifRow({key:"refund",to:to||"",emailSubject:subject||"",emailHtml:html||"",emailPending:!!(to&&html),repId:rec.repId,msg:msg,type:"info"}); }
@@ -17300,7 +17352,7 @@ function W9SubmitModal({repData,setReps,addToast,onClose}){
         "<p style='margin-top:24px;font-size:11px;color:#999'>Review and approve in PreVasive CRM → Tasks → Pending W-9.</p>"+
       "</div>";
 
-      var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+      var cfg=null; cfg=getEmailCfg();
       var adminEmail = (typeof getAdminNotifyEmail==="function") ? getAdminNotifyEmail() : "";
       if(!cfg||!cfg.edgeFnUrl){ setUploading(false); setErr("Email is not configured — contact your admin."); return; }
       if(!adminEmail){ setUploading(false); setErr("Admin email not set — contact your admin."); return; }
@@ -18017,7 +18069,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102p-delivered-cancelled-autoemail</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v103-emailcfg-cache-webhook-fallback</div>
       </div>
     </div>
   );
@@ -19514,7 +19566,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102p-delivered-cancelled-autoemail
+        BUILD: 2026-05-30-v103-emailcfg-cache-webhook-fallback
       </div>
     </div>
   );
@@ -19597,6 +19649,10 @@ function App() {
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
   const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
   const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",tenantId:"",clientId:"",clientSecret:"",edgeFnUrl:""});
+  // v103 #2: keep the module-level email config cache in sync with App's state.
+  // Module helpers (notifyEmail, sendRepEmail, etc.) read via getEmailCfg() — this
+  // effect makes sure they see updates immediately, not after a page reload.
+  useEffect(function(){ setEmailCfgCache(emailCfg); }, [emailCfg]);
   const [discountCodes, setDiscountCodes] = useLS("discountCodes", [{id:"dc1",code:"PREVA10",type:"percent",value:10,active:true,uses:0},{id:"dc2",code:"PREVA50",type:"fixed",value:50,active:true,uses:0}]);
   const [supabaseCfg, setSupabaseCfg] = useLS("supabaseCfg",{});
   const [notifPrefs,  setNotifPrefs]  = useLS("notifPrefs", DEFAULT_NOTIF_PREFS);
@@ -19804,7 +19860,7 @@ function App() {
   // Admin sessions deliver queued rep-notification emails (customer device has no email creds)
   useEffect(function(){
     if(!currentUser||currentUser.role!=="admin") return;
-    var cfg=null; try{cfg=JSON.parse(localStorage.getItem("__pv__emailCfg")||"null");}catch(e){}
+    var cfg=null; cfg=getEmailCfg();
     if(!cfg||!cfg.edgeFnUrl) return;
     notifications.forEach(function(n){
       if(!n || !n.id) return;
