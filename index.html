@@ -6860,7 +6860,13 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
           }}
           footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
             <Btn variant="ghost" onClick={function(){setShowForm(false);}}>Cancel</Btn>
-            <Btn onClick={saveQuote} disabled={!custId}>{editingQuoteId ? "💾 Save Changes" : "Save Quote"}</Btn>
+            {/* v102i: also block save if any item needs a variant but doesn't have one
+                  picked yet (matches the red highlight on the Choose variant dropdown). */}
+            <Btn onClick={saveQuote} disabled={!custId || items.some(function(it){
+              if(!it.prodId) return false;
+              var p = products.find(function(x){return x.id===it.prodId;});
+              return p && p.variants && p.variants.length > 0 && !it.variantId;
+            })}>{editingQuoteId ? "💾 Save Changes" : "Save Quote"}</Btn>
           </div>}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <div>
@@ -17778,7 +17784,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102h-receipt-cleanup</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102i-quote-variant-gate</div>
       </div>
     </div>
   );
@@ -19275,7 +19281,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102h-receipt-cleanup
+        BUILD: 2026-05-30-v102i-quote-variant-gate
       </div>
     </div>
   );
