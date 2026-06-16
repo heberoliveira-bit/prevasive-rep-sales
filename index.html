@@ -4956,6 +4956,13 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                         cancelled.auditLog = (o.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:"Cancelled by admin",detail:"Freight order — pre-quote"}]);
                         setOrders(function(prev){return prev.map(function(x){return x.id===o.id?cancelled:x;});});
                         dbSave("crm_orders",o.id,cancelled);
+                        // v102p: customer email + rep + admin bells
+                        fireCancelledNotifs(cancelled, {
+                          customers: customers||[],
+                          currentUser: currentUser,
+                          reason: "Freight order — pre-quote",
+                          onUpdate: function(stamped){ setOrders(function(prev){return prev.map(function(x){return x.id===stamped.id?stamped:x;});}); },
+                        });
                         addToast("Order "+o.id+" cancelled","warning");
                       });
                     }}>Cancel Order</Btn>
@@ -5282,9 +5289,16 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                       </Btn>
                     )}
                     <Btn small variant="ghost" onClick={function(){
-                      var updated=addAuditEntry(Object.assign({},o,{status:"Cancelled"}),"Cancelled from Tasks","Admin");
+                      var updated=addAuditEntry(Object.assign({},o,{status:"Cancelled",cancelledAt:new Date().toISOString()}),"Cancelled from Tasks","Admin");
                       setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
                       dbSave("crm_orders",o.id,updated);
+                      // v102p: customer email + rep + admin bells
+                      fireCancelledNotifs(updated, {
+                        customers: customers||[],
+                        currentUser: currentUser,
+                        reason: "Cancelled from Tasks",
+                        onUpdate: function(stamped){ setOrders(function(prev){return prev.map(function(x){return x.id===stamped.id?stamped:x;});}); },
+                      });
                       addToast("Order "+o.id+" cancelled","warning");
                     }}>Cancel</Btn>
                   </div>
@@ -9025,18 +9039,26 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     if(next==="Shipped"){
       fireShippedEmail(withAudit);
     }
+    // v102p: same trio for Delivered — was only firing customer email, now rep+admin bells too
     if(next==="Delivered"){
-      var cD=(customers||[]).find(function(x){return x.id===order.custId;})||{};
-      var coD=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
-      notifyEmail("delivered",cD.email||"","Your order "+order.id+" was delivered",
-        notifEmailHtml(coD,"Delivered","<p>Hi "+(cD.name||"there")+",</p><p>Your order <strong>"+order.id+"</strong> has been delivered. Thank you for your business!</p>","#1ea672"));
+      fireDeliveredNotifs(withAudit, {
+        customers: customers||[],
+        currentUser: currentUser,
+        onUpdate: function(stamped){ onUpdate(stamped); setViewOrder(stamped); },
+      });
     }
     addToast("Order "+order.id+" → "+next,"info");
   }
 
   function cancel(order) {
-    var withAudit = addAuditEntry(Object.assign({},order,{status:"Cancelled"}), "Cancelled", currentUser&&currentUser.name);
+    var withAudit = addAuditEntry(Object.assign({},order,{status:"Cancelled",cancelledAt:order.cancelledAt||new Date().toISOString()}), "Cancelled", currentUser&&currentUser.name);
     onUpdate(withAudit); setViewOrder(withAudit); dbSave("crm_orders",order.id,withAudit);
+    // v102p: customer email + rep + admin bells
+    fireCancelledNotifs(withAudit, {
+      customers: customers||[],
+      currentUser: currentUser,
+      onUpdate: function(stamped){ onUpdate(stamped); setViewOrder(stamped); },
+    });
     addToast("Order "+order.id+" cancelled","warning");
   }
 
@@ -16374,6 +16396,107 @@ function fireShippedNotifs(order, opts){
   return stamped;
 }
 
+// v102p: Delivered-notification helper — same pattern as fireShippedNotifs.
+// Fires:
+//   1) Customer "thanks, hope you love it" email
+//   2) Rep in-app bell ("delivered to X")
+//   3) Admin in-app bell ("delivered by X — order closed")
+// Idempotent via order.deliveredEmailSentAt.
+function fireDeliveredNotifs(order, opts){
+  opts = opts || {};
+  if(!opts.force && order && order.deliveredEmailSentAt) return order;
+  if(!order || !order.id) return order;
+  var customers = opts.customers || [];
+  var currentUser = opts.currentUser || null;
+  var c = customers.find(function(x){return x.id===order.custId;}) || {name:order.custName||"", email:order.custEmail||""};
+  var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  var body = "<p>Hi "+(c.name||"there")+",</p>"
+           + "<p>Your order <strong>"+order.id+"</strong> has been delivered. Thank you for your business — we hope you love it!</p>"
+           + "<p style='color:#6b7c93;font-size:12px;margin-top:18px'>If anything's not right, just reply to this email and we'll make it right.</p>";
+
+  var repBell = order.repId ? {
+    repId: order.repId,
+    msg: "✅ Order "+order.id+" delivered to "+(c.name||order.custName||"customer"),
+    type: "success"
+  } : null;
+  try{
+    _writeNotifRow({
+      key: "delivered",
+      ts: new Date().toISOString(),
+      type: "success",
+      adminNotify: true,
+      orderId: order.id,
+      msg: "✅ Order "+order.id+" delivered — closed by "+((currentUser&&currentUser.name)||"Admin")
+    });
+  }catch(e){ console.warn("[fireDeliveredNotifs] admin notif write failed:", (e&&e.message)||e); }
+
+  if(c.email){
+    notifyEmail("delivered", c.email, "Your order "+order.id+" was delivered",
+      notifEmailHtml(co, "Delivered", body, null, null, "#1ea672"),
+      repBell);
+  } else {
+    console.warn("[fireDeliveredNotifs] no customer email for "+order.id+" — sending rep notif only");
+    if(repBell) _writeNotifRow({key:"delivered", repId:repBell.repId, msg:repBell.msg, type:repBell.type, ts:new Date().toISOString(), orderId:order.id, emailPending:false});
+  }
+
+  var stamped = Object.assign({}, order, {deliveredEmailSentAt: new Date().toISOString()});
+  try{ dbSave("crm_orders", order.id, stamped); }catch(e){}
+  if(typeof opts.onUpdate === "function") opts.onUpdate(stamped);
+  return stamped;
+}
+
+// v102p: Cancelled-notification helper. Fires:
+//   1) Customer cancellation email (apologetic, with reason if provided)
+//   2) Rep in-app bell ("order X cancelled — reason")
+//   3) Admin in-app bell
+// Idempotent via order.cancelledEmailSentAt.
+function fireCancelledNotifs(order, opts){
+  opts = opts || {};
+  if(!opts.force && order && order.cancelledEmailSentAt) return order;
+  if(!order || !order.id) return order;
+  var customers = opts.customers || [];
+  var currentUser = opts.currentUser || null;
+  var reason = opts.reason || order.cancelReason || "";
+  var c = customers.find(function(x){return x.id===order.custId;}) || {name:order.custName||"", email:order.custEmail||""};
+  var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  var reasonHtml = reason ? ("<p style='background:#fff5f5;border-left:3px solid #fc8181;padding:10px 14px;margin:12px 0;color:#742a2a;font-size:13px'><strong>Reason:</strong> "+String(reason).replace(/[<>&"]/g,function(ch){return {"<":"&lt;",">":"&gt;","&":"&amp;","\"":"&quot;"}[ch];})+"</p>") : "";
+  var body = "<p>Hi "+(c.name||"there")+",</p>"
+           + "<p>Your order <strong>"+order.id+"</strong> has been cancelled.</p>"
+           + reasonHtml
+           + "<p>If you paid by credit card, a refund will appear on your statement within 5-10 business days. If you have any questions, just reply to this email.</p>";
+
+  var reasonPhrase = reason ? (" — "+reason) : "";
+  var repBell = order.repId ? {
+    repId: order.repId,
+    msg: "🛑 Order "+order.id+" cancelled"+reasonPhrase,
+    type: "warning"
+  } : null;
+  try{
+    _writeNotifRow({
+      key: "cancelled",
+      ts: new Date().toISOString(),
+      type: "warning",
+      adminNotify: true,
+      orderId: order.id,
+      msg: "🛑 Order "+order.id+" cancelled by "+((currentUser&&currentUser.name)||"Admin")+reasonPhrase
+    });
+  }catch(e){ console.warn("[fireCancelledNotifs] admin notif write failed:", (e&&e.message)||e); }
+
+  if(c.email){
+    notifyEmail("cancelled", c.email, "Your order "+order.id+" was cancelled",
+      notifEmailHtml(co, "Order cancelled", body, null, null, "#e53e3e"),
+      repBell);
+  } else {
+    console.warn("[fireCancelledNotifs] no customer email for "+order.id+" — sending rep notif only");
+    if(repBell) _writeNotifRow({key:"cancelled", repId:repBell.repId, msg:repBell.msg, type:repBell.type, ts:new Date().toISOString(), orderId:order.id, emailPending:false});
+  }
+
+  var stamped = Object.assign({}, order, {cancelledEmailSentAt: new Date().toISOString(), cancelReason: reason});
+  try{ dbSave("crm_orders", order.id, stamped); }catch(e){}
+  if(typeof opts.onUpdate === "function") opts.onUpdate(stamped);
+  return stamped;
+}
+
 // Send a rep onboarding email — sends now if this session has email creds (admin),
 // otherwise queues it for an admin session to deliver (e.g. from the public apply page).
 function sendRepEmail(to, subject, html){
@@ -17894,7 +18017,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102o-shipped-notifs-shared</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102p-delivered-cancelled-autoemail</div>
       </div>
     </div>
   );
@@ -19391,7 +19514,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102o-shipped-notifs-shared
+        BUILD: 2026-05-30-v102p-delivered-cancelled-autoemail
       </div>
     </div>
   );
