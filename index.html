@@ -4897,11 +4897,16 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
             setOrders(function(prev){return prev.map(function(o){return o.id===fulfillTarget.id?updated:o;});});
             dbSave("crm_orders",fulfillTarget.id,updated);
             setFulfillTarget(updated);
+            // v102o: use shared fireShippedNotifs (customer email + rep bell + admin bell)
             if(result.status==="Shipped"){
-              var cS=(customers||[]).find(function(x){return x.id===fulfillTarget.custId;})||{};
-              var coSh=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
-              notifyEmail("shipped",cS.email||"","Your order "+fulfillTarget.id+" has shipped",
-                notifEmailHtml(coSh,"Your order shipped","<p>Order <strong>"+fulfillTarget.id+"</strong> is on its way."+(result.trackingNumber?(" Tracking number: <strong>"+result.trackingNumber+"</strong>"+(result.carrier?" ("+result.carrier+")":"")+"."):"")+"</p>",result.trackingUrl?"Track shipment":null,result.trackingUrl||null,"#0ea5e9"));
+              fireShippedNotifs(updated, {
+                customers: customers||[],
+                currentUser: currentUser,
+                onUpdate: function(stamped){
+                  setOrders(function(prev){return prev.map(function(o){return o.id===stamped.id?stamped:o;});});
+                  setFulfillTarget(stamped);
+                },
+              });
             }
             addToast("Order "+fulfillTarget.id+" → "+result.status,"success");
           }}
@@ -8994,54 +8999,14 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     return true;
   });
 
-  // v102m/n: fire the customer "Your order has shipped" email + in-app notifs
-  // for rep and admin. Previously this only fired from the Tasks tab tracking
-  // modal — Advance → and bulk Mark Shipped buttons silently skipped it.
-  // Idempotent via shippedEmailSentAt stamp.
+  // v102m/n/o: shipped-notif helper. Delegates to module-level fireShippedNotifs
+  // so the same logic runs from the Tasks tab tracking modal as well.
   function fireShippedEmail(order, opts){
-    opts = opts || {};
-    if(!opts.force && order.shippedEmailSentAt) return; // already sent
-    var c = (customers||[]).find(function(x){return x.id===order.custId;}) || {name:order.custName||"", email:order.custEmail||""};
-    var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
-    var tn  = order.trackingNumber || "";
-    var car = order.carrier || "";
-    var tu  = order.trackingUrl || "";
-    var trackText = tn ? (" Tracking number: <strong>"+tn+"</strong>"+(car?" ("+car+")":"")+".") : "";
-    var body = "<p>Hi "+(c.name||"there")+",</p><p>Order <strong>"+order.id+"</strong> is on its way."+trackText+"</p>"
-             + (tu ? "" : "<p style='color:#6b7c93;font-size:12px'>Tracking details will follow shortly once available.</p>");
-
-    // v102n: in-app notification for the rep (so they see it in their bell)
-    var trackPhrase = tn ? (" — "+(car?(car+" "):"")+tn) : "";
-    var repBell = order.repId ? {
-      repId: order.repId,
-      msg: "📦 Order "+order.id+" shipped to "+(c.name||order.custName||"customer")+trackPhrase,
-      type: "info"
-    } : null;
-    // v102n: also fire an admin-facing notification (separate write — bell arg only handles rep)
-    try{
-      _writeNotifRow({
-        key: "shipped",
-        ts: new Date().toISOString(),
-        type: "info",
-        adminNotify: true,
-        orderId: order.id,
-        msg: "📦 Order "+order.id+" marked Shipped by "+((currentUser&&currentUser.name)||"Admin")+trackPhrase
-      });
-    }catch(e){ console.warn("[fireShippedEmail] admin notif write failed:", (e&&e.message)||e); }
-
-    if(c.email){
-      notifyEmail("shipped", c.email, "Your order "+order.id+" has shipped",
-        notifEmailHtml(co, "Your order shipped", body, tu?"Track shipment":null, tu||null, "#0ea5e9"),
-        repBell);
-    } else {
-      // No customer email — still write the rep notif so they know it shipped
-      console.warn("[fireShippedEmail] no customer email for "+order.id+" — sending rep notif only");
-      if(repBell) _writeNotifRow({key:"shipped", repId:repBell.repId, msg:repBell.msg, type:repBell.type, ts:new Date().toISOString(), orderId:order.id, emailPending:false});
-    }
-    // Stamp the order so we don't double-send if admin advances/refires
-    var stamped = Object.assign({}, order, {shippedEmailSentAt: new Date().toISOString()});
-    onUpdate(stamped);
-    dbSave("crm_orders", order.id, stamped);
+    return fireShippedNotifs(order, Object.assign({
+      customers: customers,
+      currentUser: currentUser,
+      onUpdate: onUpdate,
+    }, opts || {}));
   }
 
   function advance(order) {
@@ -9236,11 +9201,9 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
             var updated=addAuditEntry(Object.assign({},fulfillTarget2,patch),result.status==="Shipped"?"Tracking added → Shipped":"Sent to fulfillment","Admin",result.trackingNumber||"");
             onUpdate(updated); setViewOrder(updated); setFulfillTarget2(updated);
             dbSave("crm_orders",fulfillTarget2.id,updated);
+            // v102o: shared fireShippedEmail → customer email + rep bell + admin bell
             if(result.status==="Shipped"){
-              var cS2=(customers||[]).find(function(x){return x.id===fulfillTarget2.custId;})||{};
-              var coSh2=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
-              notifyEmail("shipped",cS2.email||"","Your order "+fulfillTarget2.id+" has shipped",
-                notifEmailHtml(coSh2,"Your order shipped","<p>Order <strong>"+fulfillTarget2.id+"</strong> is on its way."+(result.trackingNumber?(" Tracking number: <strong>"+result.trackingNumber+"</strong>"+(result.carrier?" ("+result.carrier+")":"")+"."):"")+"</p>",result.trackingUrl?"Track shipment":null,result.trackingUrl||null,"#0ea5e9"));
+              fireShippedEmail(updated);
             }
             addToast("Order "+fulfillTarget2.id+" → "+result.status,"success");
           }}
@@ -16347,6 +16310,70 @@ function notifyEmail(key, to, subject, html, bell){
   queueEmail();
 }
 
+// v102o: module-level shipped-notification helper, shared by:
+//   - AdminOrders Advance → button (advance() in AdminOrders)
+//   - AdminOrders bulk → Mark Shipped button
+//   - Tasks tab FulfillmentModal onSend handlers (when status=Shipped)
+//
+// Fires three notifications in one call:
+//   1) Customer email (if email present + "shipped" notification key enabled)
+//   2) Rep in-app bell notification (if order.repId present)
+//   3) Admin in-app bell notification (always — admins see all shipped)
+//
+// Idempotent via order.shippedEmailSentAt — pass {force:true} to override.
+// Returns the stamped order so the caller can update local state.
+function fireShippedNotifs(order, opts){
+  opts = opts || {};
+  if(!opts.force && order && order.shippedEmailSentAt) return order;  // already sent
+  if(!order || !order.id) return order;
+  var customers = opts.customers || [];
+  var currentUser = opts.currentUser || null;
+  var c = customers.find(function(x){return x.id===order.custId;}) || {name:order.custName||"", email:order.custEmail||""};
+  var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  var tn  = order.trackingNumber || "";
+  var car = order.carrier || "";
+  var tu  = order.trackingUrl || "";
+  var trackText  = tn ? (" Tracking number: <strong>"+tn+"</strong>"+(car?" ("+car+")":"")+".") : "";
+  var trackPhrase = tn ? (" — "+(car?(car+" "):"")+tn) : "";
+  var body = "<p>Hi "+(c.name||"there")+",</p><p>Order <strong>"+order.id+"</strong> is on its way."+trackText+"</p>"
+           + (tu ? "" : "<p style='color:#6b7c93;font-size:12px'>Tracking details will follow shortly once available.</p>");
+
+  // Rep in-app notif (via the bell arg in notifyEmail) — only if order has a repId
+  var repBell = order.repId ? {
+    repId: order.repId,
+    msg: "📦 Order "+order.id+" shipped to "+(c.name||order.custName||"customer")+trackPhrase,
+    type: "info"
+  } : null;
+
+  // Admin in-app notif — separate write (the bell arg only handles a single rep)
+  try{
+    _writeNotifRow({
+      key: "shipped",
+      ts: new Date().toISOString(),
+      type: "info",
+      adminNotify: true,
+      orderId: order.id,
+      msg: "📦 Order "+order.id+" marked Shipped by "+((currentUser&&currentUser.name)||"Admin")+trackPhrase
+    });
+  }catch(e){ console.warn("[fireShippedNotifs] admin notif write failed:", (e&&e.message)||e); }
+
+  // Customer email + rep bell (notifyEmail handles both)
+  if(c.email){
+    notifyEmail("shipped", c.email, "Your order "+order.id+" has shipped",
+      notifEmailHtml(co, "Your order shipped", body, tu?"Track shipment":null, tu||null, "#0ea5e9"),
+      repBell);
+  } else {
+    console.warn("[fireShippedNotifs] no customer email for "+order.id+" — sending rep notif only");
+    if(repBell) _writeNotifRow({key:"shipped", repId:repBell.repId, msg:repBell.msg, type:repBell.type, ts:new Date().toISOString(), orderId:order.id, emailPending:false});
+  }
+
+  // Stamp + persist + return
+  var stamped = Object.assign({}, order, {shippedEmailSentAt: new Date().toISOString()});
+  try{ dbSave("crm_orders", order.id, stamped); }catch(e){}
+  if(typeof opts.onUpdate === "function") opts.onUpdate(stamped);
+  return stamped;
+}
+
 // Send a rep onboarding email — sends now if this session has email creds (admin),
 // otherwise queues it for an admin session to deliver (e.g. from the public apply page).
 function sendRepEmail(to, subject, html){
@@ -17867,7 +17894,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102n-shipped-inapp-notifs</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102o-shipped-notifs-shared</div>
       </div>
     </div>
   );
@@ -19364,7 +19391,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102n-shipped-inapp-notifs
+        BUILD: 2026-05-30-v102o-shipped-notifs-shared
       </div>
     </div>
   );
