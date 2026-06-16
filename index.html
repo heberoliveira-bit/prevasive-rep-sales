@@ -14734,6 +14734,28 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                 {(viewOrd.items||[]).map(function(it,i){var p=products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};var up=it.customerPrice||it.unitPrice||lineUnit(p,it)||0;return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:12,padding:"4px 0",borderBottom:"1px solid "+C.border}}><span style={{color:C.muted}}>{it.qty}× {p.name}{it.variantName?(" — "+it.variantName):""}</span><span style={{fontFamily:"monospace",fontWeight:600}}>{fmtMoney(up*it.qty)}</span></div>
                 );})}
+                {/* v102k: show shipping + tax breakdown between items and total.
+                       Only render lines with values > 0 — tax-exempt orders skip Tax,
+                       freight orders skip Shipping until rated. */}
+                {(function(){
+                  var t = viewOrd.totals || {};
+                  var sub  = t.subtotal != null ? t.subtotal : 0;
+                  var ship = t.shipping != null ? t.shipping : 0;
+                  var tax  = t.tax      != null ? t.tax      : 0;
+                  var rows = [];
+                  if(sub  > 0) rows.push(["Subtotal", sub]);
+                  if(ship > 0) rows.push(["Shipping" + (t.shippingService ? (" — " + t.shippingService) : ""), ship]);
+                  if(tax  > 0) rows.push(["Tax" + (t.taxRate ? (" (" + (t.taxRate*100).toFixed(2) + "%)") : ""), tax]);
+                  if(t.taxExempt && tax === 0) rows.push(["Tax", "Exempt"]);
+                  return rows.length ? rows.map(function(r,i){
+                    return (
+                      <div key={"tot"+i} style={{display:"flex",justifyContent:"space-between",fontSize:11,padding:"3px 0",color:C.muted}}>
+                        <span>{r[0]}</span>
+                        <span style={{fontFamily:"monospace"}}>{typeof r[1] === "number" ? fmtMoney(r[1]) : r[1]}</span>
+                      </div>
+                    );
+                  }) : null;
+                })()}
                 <div style={{display:"flex",justifyContent:"space-between",fontWeight:800,fontSize:15,color:C.accent,marginTop:8,paddingTop:8,borderTop:"1px solid "+C.border}}><span>Total</span><span style={{fontFamily:"monospace"}}>{fmtMoney(viewOrd.totals&&viewOrd.totals.grand||0)}</span></div>
               </div>
               <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -17789,7 +17811,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102j-hide-send-when-paid</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102k-rep-order-totals-breakdown</div>
       </div>
     </div>
   );
@@ -19286,7 +19308,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102j-hide-send-when-paid
+        BUILD: 2026-05-30-v102k-rep-order-totals-breakdown
       </div>
     </div>
   );
