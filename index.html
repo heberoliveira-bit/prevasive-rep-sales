@@ -16044,11 +16044,56 @@ function buildPaymentConfirmationEmail(order, customer, company, receiptUrl){
   var custName = (customer && customer.name) || "";
   var orderId  = order && order.id || "";
   var total    = (order && order.totals && order.totals.grand) || 0;
+  var subtotal = (order && order.totals && order.totals.subtotal) || 0;
+  var tax      = (order && order.totals && order.totals.tax) || (order && order.tax) || 0;
+  var shipping = (order && order.totals && order.totals.shipping) || 0;
   var paidAt   = (order && order.paidAt) ? new Date(order.paidAt) : new Date();
   var paidDateStr = paidAt.toLocaleDateString("en-US",{year:"numeric",month:"short",day:"numeric"}) + " at " + paidAt.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
   var brand = (order && order.cardRef && order.cardRef.brand) || "";
   var last4 = (order && order.cardRef && order.cardRef.last4) || "";
   var paymentLine = (brand && last4) ? (brand[0].toUpperCase()+brand.slice(1).toLowerCase()+" •••• "+last4) : "Credit card";
+
+  // v102d: line items block — shows what was paid for, not just the total
+  var items = (order && order.items) || [];
+  var itemsRows = items.map(function(it){
+    var lp = it.customerPrice || it.unitPrice || 0;
+    var label = it.name || it.prodId || "Item";
+    var variant = it.variantName ? " — " + escHtml(it.variantName) : "";
+    var sku = (it.variantSku || it.sku) ? " <span style='color:#a0aec0;font-size:11px;font-family:monospace'>("+escHtml(it.variantSku||it.sku)+")</span>" : "";
+    return "<tr><td style='padding:8px 0;font-size:13px;color:#4a5568'>"
+         + (it.qty||1) + "× " + escHtml(label) + variant + sku
+         + "</td><td style='padding:8px 0;font-size:13px;color:#1a1a2e;font-weight:600;text-align:right'>$" + (lp*(it.qty||1)).toFixed(2)
+         + "</td></tr>";
+  }).join("");
+  var itemsBlock = items.length ? (
+      "<div style='font-weight:700;font-size:13px;color:#1a1a2e;margin:18px 0 6px;text-transform:uppercase;letter-spacing:.04em'>Items</div>"
+    + "<table style='width:100%;border-collapse:collapse;margin-bottom:6px'>"+itemsRows+"</table>"
+    + "<div style='border-top:1px solid #e8ecef;padding-top:8px;margin-top:6px'>"
+    + (subtotal>0 ? "<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;padding:2px 0'><span>Subtotal</span><span>$"+subtotal.toFixed(2)+"</span></div>" : "")
+    + (shipping>0 ? "<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;padding:2px 0'><span>Shipping</span><span>$"+shipping.toFixed(2)+"</span></div>" : "")
+    + (tax>0      ? "<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;padding:2px 0'><span>Tax</span><span>$"+tax.toFixed(2)+"</span></div>" : "")
+    + "</div>"
+  ) : "";
+
+  // v102d: shipping address block
+  var ship = (order && order.shipAddress) || {};
+  var shipName = escHtml(ship.name || ship.attn || custName);
+  var shipLines = [];
+  if(ship.company)                       shipLines.push(escHtml(ship.company));
+  if(ship.line1 || ship.address1)         shipLines.push(escHtml(ship.line1 || ship.address1));
+  if(ship.line2 || ship.address2)         shipLines.push(escHtml(ship.line2 || ship.address2));
+  var cityRegion = [ship.city, ship.state || ship.region].filter(Boolean).join(", ");
+  var locLine = [cityRegion, ship.zip || ship.postalCode].filter(Boolean).join(" ");
+  if(locLine) shipLines.push(escHtml(locLine));
+  if(ship.country && ship.country!=="US" && ship.country!=="USA") shipLines.push(escHtml(ship.country));
+  var addressBlock = (shipLines.length || ship.line1 || ship.address1) ? (
+      "<div style='font-weight:700;font-size:13px;color:#1a1a2e;margin:22px 0 6px;text-transform:uppercase;letter-spacing:.04em'>Ship to</div>"
+    + "<div style='background:#f6f9fc;border-radius:8px;padding:12px 14px;font-size:13px;color:#4a5568;line-height:1.5'>"
+    + "<div style='font-weight:600;color:#1a1a2e'>"+shipName+"</div>"
+    + shipLines.map(function(l){return "<div>"+l+"</div>";}).join("")
+    + "</div>"
+  ) : "";
+
   var receiptButton = receiptUrl
     ? "<a href='"+receiptUrl+"' style='display:inline-block;background:#635bff;color:#fff;text-decoration:none;padding:14px 24px;border-radius:8px;font-weight:700;font-size:14px;margin-top:8px'>View official receipt →</a>"
     : "";
@@ -16059,12 +16104,14 @@ function buildPaymentConfirmationEmail(order, customer, company, receiptUrl){
     +"<div style='padding:28px 32px'>"
     +"<div style='font-size:15px;color:#1a1a2e;margin-bottom:18px'>Hi "+escHtml(custName||"there")+",</div>"
     +"<div style='font-size:14px;color:#4a5568;line-height:1.6;margin-bottom:18px'>Thank you — we've received your payment for order <strong>"+escHtml(orderId)+"</strong>. Your order is now in production and we'll email tracking information as soon as it ships.</div>"
-    +"<div style='background:#f6f9fc;border-radius:8px;padding:14px 16px;margin-bottom:18px;font-size:13px'>"
+    +"<div style='background:#f6f9fc;border-radius:8px;padding:14px 16px;margin-bottom:6px;font-size:13px'>"
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Amount paid</span><span style='font-weight:700;color:#1a1a2e'>$"+total.toFixed(2)+"</span></div>"
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Date</span><span>"+paidDateStr+"</span></div>"
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Payment method</span><span>"+escHtml(paymentLine)+"</span></div>"
     +"</div>"
-    +(receiptButton ? "<div style='text-align:center;margin:8px 0'>"+receiptButton+"</div>" : "")
+    + itemsBlock
+    + addressBlock
+    + (receiptButton ? "<div style='text-align:center;margin:18px 0 4px'>"+receiptButton+"</div>" : "")
     +"<div style='font-size:11px;color:#a0aec0;text-align:center;margin-top:22px;padding-top:18px;border-top:1px solid #e8ecef'>Questions about your order? Reply to this email and we'll help.</div>"
     +"</div></div></body></html>";
 }
@@ -17697,7 +17744,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102b-payload-orderid-fix</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102d-receipt-items-shipto</div>
       </div>
     </div>
   );
@@ -19194,7 +19241,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102b-payload-orderid-fix
+        BUILD: 2026-05-30-v102d-receipt-items-shipto
       </div>
     </div>
   );
