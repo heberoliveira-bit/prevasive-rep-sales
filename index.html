@@ -3357,18 +3357,34 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
       .then(function(result){
         if(result.error){setErr(result.error.message);setPaying(false);return;}
         var stripeMode = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").stripeMode||"live";}catch(e){return "live";}})();
+        // v102: if this is the accept-page flow, payData.quoteToken is set instead of orderId.
+        // Edge function will create the order from the quote token after charge succeeds.
+        var quoteTokenForCharge = (payData && payData.quoteToken) || "";
         return fetch(edgeFn,{method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge",paymentMethodId:result.paymentMethod.id,
             amount:Math.round((totals.grand||0)*100),currency:"usd",
             mode: stripeMode,
             orderId:(payData&&payData.orderId)||(order&&order.id)||"",
             payToken:payToken||"",
+            quoteToken: quoteTokenForCharge,
             // v96c: customer name lets the edge function include it in rep/admin notifications
             customerName: (customer && customer.name) || (payData && payData.custName) || "",
-            description:company+" — Order "+(payData.orderId||order.id)})
+            customerEmail: (customer && customer.email) || (payData && payData.custEmail) || "",
+            description: quoteTokenForCharge
+              ? (company+" — Quote "+((payData.quote&&payData.quote.id)||""))
+              : (company+" — Order "+((payData&&payData.orderId)||(order&&order.id)||""))})
         }).then(function(r){return r.json();}).then(function(d){
           if(d.ok){
-            onPaid({method:"credit_card",chargeId:d.chargeId,paidAt:new Date().toISOString(),cardRef:{holder:cardHolder}});
+            // v102: pass back enough for the success card on the accept-flow path
+            onPaid({
+              method:"credit_card",
+              chargeId: d.paymentIntentId || d.chargeId,
+              paidAt:new Date().toISOString(),
+              cardRef:{holder:cardHolder, last4:d.last4||"", brand:d.brand||""},
+              receiptUrl: d.receiptUrl || "",
+              orderId: d.orderId || (payData && payData.orderId) || (order && order.id) || "",
+              acceptFlow: !!d.acceptFlow,
+            });
             setDone(true); setPaying(false);
           } else { setErr(d.error||"Payment failed — please try again."); setPaying(false); }
         });
@@ -16211,6 +16227,10 @@ function notifyAdmin(subject, html, msg, key){
 
 function QuoteAcceptPage({snap, onAccept, onDecline}){
   const [busy,setBusy]=useState(false);
+  // v102: inline payment mode. "accept" shows the buttons, "paying" mounts
+  // CustomerPaymentPage with the card form, "paid" shows the success card.
+  const [payMode, setPayMode] = useState("accept");
+  const [paidResult, setPaidResult] = useState(null);
   var quote=snap.quote||{};
   var company=snap.company||"PreVasive USA";
   var items=quote.items||[];
@@ -16222,6 +16242,67 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
   //   - Has terms   → "💳 Pay now" primary + "📄 Accept on NET-30 terms" secondary
   var hasTerms = snap.customerTermsStatus === "approved";
   function money(n){return "$"+(Math.round((n||0)*100)/100).toFixed(2);}
+  // v102: build the payData CustomerPaymentPage expects, from the quote snapshot.
+  // No orderId — we use quoteToken instead; edge function creates the order on charge success.
+  function buildPayData(){
+    return {
+      // quoteToken is what the edge function uses to verify + look up the quote
+      quoteToken: snap.token,
+      // Bring through the rest so CustomerPaymentPage can render the order summary
+      order: { id: "(pending)", items: quote.items||[], totals: quote.totals||{grand:quote.total||0} },
+      customer: { name: snap.custName||"", email: snap.custEmail||"", termsStatus: snap.customerTermsStatus||"none" },
+      company: company,
+      totals: quote.totals||{grand:quote.total||0},
+      items: quote.items||[],
+      custName: snap.custName||"",
+      custEmail: snap.custEmail||"",
+      products: [],
+    };
+  }
+  // v102: if customer just paid, show the success card
+  if(payMode === "paid" && paidResult){
+    return (
+      <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
+        <div style={{maxWidth:520,margin:"0 auto"}}>
+          <div style={{background:"#fff",borderRadius:12,padding:"32px 28px",boxShadow:"0 2px 12px rgba(0,0,0,.06)",textAlign:"center"}}>
+            <div style={{fontSize:56,marginBottom:12}}>✅</div>
+            <div style={{fontWeight:800,fontSize:22,color:"#1ea672",marginBottom:8}}>Payment received</div>
+            <div style={{fontSize:14,color:"#4a5568",marginBottom:20,lineHeight:1.6}}>
+              Thank you! Your order has been placed and will ship shortly. We've emailed you a confirmation with your receipt.
+            </div>
+            <div style={{background:"#f6f9fc",borderRadius:8,padding:"14px 16px",marginBottom:16,fontSize:13,textAlign:"left"}}>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0",color:"#4a5568"}}><span>Amount paid</span><span style={{fontWeight:700,color:"#1a1a2e"}}>{money(quote.total)}</span></div>
+              {paidResult.orderId && <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0",color:"#4a5568"}}><span>Order number</span><span style={{fontFamily:"monospace",color:"#1a1a2e"}}>{paidResult.orderId}</span></div>}
+              {paidResult.cardRef && paidResult.cardRef.last4 && <div style={{display:"flex",justifyContent:"space-between",padding:"3px 0",color:"#4a5568"}}><span>Card</span><span>•••• {paidResult.cardRef.last4}</span></div>}
+            </div>
+            {paidResult.receiptUrl && (
+              <a href={paidResult.receiptUrl} target="_blank" rel="noreferrer"
+                style={{display:"inline-block",background:"#635bff",color:"#fff",textDecoration:"none",padding:"12px 24px",borderRadius:8,fontWeight:700,fontSize:13}}>
+                View Stripe receipt →
+              </a>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // v102: if customer clicked Pay, show CustomerPaymentPage inline (real Stripe Elements)
+  if(payMode === "paying"){
+    return (
+      <CustomerPaymentPage
+        payData={buildPayData()}
+        onPaid={function(result){
+          setPaidResult(result || {});
+          setPayMode("paid");
+        }}
+        onDecline={function(){
+          // Customer clicked back / decline on the payment page — return to accept view
+          setPayMode("accept");
+          setBusy(false);
+        }}
+      />
+    );
+  }
   return (
     <div style={{minHeight:"100vh",background:"#f6f9fc",padding:"24px 16px",fontFamily:"Inter,system-ui,sans-serif"}}>
       <div style={{maxWidth:520,margin:"0 auto"}}>
@@ -16265,6 +16346,7 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
         {!expired&&(
           <div style={{background:"#fff",borderRadius:12,padding:"20px",boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
             {/* v95: button copy matches the email — pay-focused for no-terms customers */}
+            {/* v102: Pay buttons now switch to inline Stripe Elements payment instead of just calling onAccept */}
             {isFreightQuote ? (
               // Freight — total isn't final, no payment option here
               <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
@@ -16274,9 +16356,9 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
             ) : hasTerms ? (
               // Terms-approved — both options
               <React.Fragment>
-                <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+                <button disabled={busy} onClick={function(){setPayMode("paying");}}
                   style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"15px",borderRadius:8,fontWeight:800,fontSize:15,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit",marginBottom:8}}>
-                  {busy?"Processing…":"💳 Pay "+money(quote.total)+" now"}
+                  💳 Pay {money(quote.total)} now
                 </button>
                 <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
                   style={{width:"100%",background:"#fff",color:"#635bff",border:"1px solid #d0d7e2",padding:"12px",borderRadius:8,fontWeight:700,fontSize:13,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit"}}>
@@ -16285,9 +16367,9 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
               </React.Fragment>
             ) : (
               // No terms — single big pay button (matches email)
-              <button disabled={busy} onClick={function(){setBusy(true);onAccept();}}
+              <button disabled={busy} onClick={function(){setPayMode("paying");}}
                 style={{width:"100%",background:"#635bff",color:"#fff",border:"none",padding:"16px",borderRadius:8,fontWeight:800,fontSize:16,cursor:busy?"default":"pointer",opacity:busy?.6:1,fontFamily:"inherit",letterSpacing:".01em"}}>
-                {busy?"Processing…":"💳 Pay "+money(quote.total)+" & place order"}
+                💳 Pay {money(quote.total)} & place order
               </button>
             )}
             <button disabled={busy} onClick={function(){if(busy)return;setBusy(true);onDecline();}}
@@ -16298,8 +16380,8 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
               {isFreightQuote
                 ? "Accepting reserves your order. We'll email you the freight invoice within 1 business day."
                 : hasTerms
-                  ? "Pay now for immediate processing, or accept on NET-30 terms — we'll invoice you."
-                  : "We'll send you a secure payment link to complete the order."}
+                  ? "Pay by card for immediate processing, or accept on NET-30 terms — we'll invoice you."
+                  : "Secure payment by card. Your order ships once payment clears."}
             </div>
           </div>
         )}
@@ -17611,7 +17693,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v100-error-boundary-confirm-pipeline</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102-inline-payment-on-accept</div>
       </div>
     </div>
   );
@@ -19108,7 +19190,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v100-error-boundary-confirm-pipeline
+        BUILD: 2026-05-30-v102-inline-payment-on-accept
       </div>
     </div>
   );
