@@ -8994,6 +8994,33 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     return true;
   });
 
+  // v102m: fire the customer "Your order has shipped" email + admin/rep notif.
+  // Previously this only fired from the Tasks tab tracking modal — Advance →
+  // and bulk Mark Shipped buttons silently skipped it. Idempotent via
+  // shippedEmailSentAt stamp.
+  function fireShippedEmail(order, opts){
+    opts = opts || {};
+    if(!opts.force && order.shippedEmailSentAt) return; // already sent
+    var c = (customers||[]).find(function(x){return x.id===order.custId;}) || {name:order.custName||"", email:order.custEmail||""};
+    if(!c.email){
+      console.warn("[fireShippedEmail] no customer email for "+order.id);
+      return;
+    }
+    var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+    var tn  = order.trackingNumber || "";
+    var car = order.carrier || "";
+    var tu  = order.trackingUrl || "";
+    var trackText = tn ? (" Tracking number: <strong>"+tn+"</strong>"+(car?" ("+car+")":"")+".") : "";
+    var body = "<p>Hi "+(c.name||"there")+",</p><p>Order <strong>"+order.id+"</strong> is on its way."+trackText+"</p>"
+             + (tu ? "" : "<p style='color:#6b7c93;font-size:12px'>Tracking details will follow shortly once available.</p>");
+    notifyEmail("shipped", c.email, "Your order "+order.id+" has shipped",
+      notifEmailHtml(co, "Your order shipped", body, tu?"Track shipment":null, tu||null, "#0ea5e9"));
+    // Stamp the order so we don't double-send if admin advances/refires
+    var stamped = Object.assign({}, order, {shippedEmailSentAt: new Date().toISOString()});
+    onUpdate(stamped);
+    dbSave("crm_orders", order.id, stamped);
+  }
+
   function advance(order) {
     var next = getNextOrderStatus(order);
     if(!next) return;
@@ -9004,6 +9031,12 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     onUpdate(withAudit);
     setViewOrder(withAudit);
     dbSave("crm_orders",order.id,withAudit);
+    // v102m: fire shipped email when status reaches Shipped (was missing — only Tasks
+    // tab tracking modal triggered it). Pass the just-updated order so the helper sees
+    // trackingNumber/carrier/url if present.
+    if(next==="Shipped"){
+      fireShippedEmail(withAudit);
+    }
     if(next==="Delivered"){
       var cD=(customers||[]).find(function(x){return x.id===order.custId;})||{};
       var coD=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
@@ -9057,7 +9090,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
         <div style={{padding:"10px 16px",background:C.accent+"10",border:"1px solid "+C.accent+"25",borderRadius:10,marginBottom:14,display:"flex",alignItems:"center",gap:12}}>
           <span style={{fontSize:13,fontWeight:700,color:C.accent}}>{Object.keys(selected).length} selected</span>
           <Btn small onClick={function(){Object.keys(selected).forEach(function(id){var o=orders.find(function(x){return x.id===id;});if(o&&o.status==="Submitted"){var u=addAuditEntry(Object.assign({},o,{status:"Processing"}),"> Processing","Admin");onUpdate(u);dbSave("crm_orders",id,u);}});setSelected({});addToast("Orders moved to Processing","info");}}>→ Mark Processing</Btn>
-          <Btn small onClick={function(){Object.keys(selected).forEach(function(id){var o=orders.find(function(x){return x.id===id;});if(o&&o.status==="Processing"){var stamp=o.shippedAt||new Date().toISOString();var u=addAuditEntry(Object.assign({},o,{status:"Shipped",shippedAt:stamp}),"> Shipped","Admin");onUpdate(u);dbSave("crm_orders",id,u);}});setSelected({});addToast("Orders marked Shipped","info");}}>→ Mark Shipped</Btn>
+          <Btn small onClick={function(){Object.keys(selected).forEach(function(id){var o=orders.find(function(x){return x.id===id;});if(o&&o.status==="Processing"){var stamp=o.shippedAt||new Date().toISOString();var u=addAuditEntry(Object.assign({},o,{status:"Shipped",shippedAt:stamp}),"> Shipped","Admin");onUpdate(u);dbSave("crm_orders",id,u);/* v102m: also fire customer shipped email */fireShippedEmail(u);}});setSelected({});addToast("Orders marked Shipped","info");}}>→ Mark Shipped</Btn>
           <button onClick={function(){setSelected({});}} style={{background:"none",border:"none",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:12}}>Clear selection</button>
         </div>
       )}
@@ -17811,7 +17844,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102k-rep-order-totals-breakdown</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102m-shipped-email-on-advance</div>
       </div>
     </div>
   );
@@ -19308,7 +19341,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102k-rep-order-totals-breakdown
+        BUILD: 2026-05-30-v102m-shipped-email-on-advance
       </div>
     </div>
   );
