@@ -3415,7 +3415,7 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
           <div style={{fontSize:13,color:"#6b7c93"}}>Secure Payment</div>
         </div>
         <div style={{background:"#fff",borderRadius:12,padding:"20px",marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.06)"}}>
-          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>Order {payData.orderId||order.id}</div>
+          <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:14,paddingBottom:10,borderBottom:"1px solid #e8ecef"}}>{(payData.orderId||order.id) ? ("Order "+(payData.orderId||order.id)) : "Order summary"}</div>
           {items.map(function(it,i){
             var prod=products.find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||"Item",price:it.unitPrice||0};
             return (
@@ -16244,18 +16244,22 @@ function QuoteAcceptPage({snap, onAccept, onDecline}){
   function money(n){return "$"+(Math.round((n||0)*100)/100).toFixed(2);}
   // v102: build the payData CustomerPaymentPage expects, from the quote snapshot.
   // No orderId — we use quoteToken instead; edge function creates the order on charge success.
+  // IMPORTANT: order.id MUST be empty string here (not a placeholder like "(pending)"),
+  // because CustomerPaymentPage passes payData.order.id as orderId to the edge function.
+  // A non-empty placeholder would trigger the v101 orderId verification path and fail.
   function buildPayData(){
     return {
       // quoteToken is what the edge function uses to verify + look up the quote
       quoteToken: snap.token,
       // Bring through the rest so CustomerPaymentPage can render the order summary
-      order: { id: "(pending)", items: quote.items||[], totals: quote.totals||{grand:quote.total||0} },
+      order: { id: "", items: quote.items||[], totals: quote.totals||{grand:quote.total||0} },
       customer: { name: snap.custName||"", email: snap.custEmail||"", termsStatus: snap.customerTermsStatus||"none" },
       company: company,
       totals: quote.totals||{grand:quote.total||0},
       items: quote.items||[],
       custName: snap.custName||"",
       custEmail: snap.custEmail||"",
+      quote: quote,  // give CustomerPaymentPage the quote id for description fallback
       products: [],
     };
   }
@@ -17693,7 +17697,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102-inline-payment-on-accept</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102b-payload-orderid-fix</div>
       </div>
     </div>
   );
@@ -19190,7 +19194,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102-inline-payment-on-accept
+        BUILD: 2026-05-30-v102b-payload-orderid-fix
       </div>
     </div>
   );
