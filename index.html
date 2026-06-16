@@ -143,16 +143,26 @@ function transferRepCommission(rep, amountDollars, description){
   if(!connectFn) return Promise.resolve({ok:false, error:"Stripe Connect edge function not configured", status:"unconfigured"});
   if(!connectId) return Promise.resolve({ok:false, error:"Rep hasn't connected Stripe", status:"no_connect"});
   var netCents = Math.round(amountDollars*(1-platformFee/100)*100);
-  return fetch(connectFn,{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({action:"transfer", connectAccountId:connectId, amount:netCents,
-                         currency:"usd", description:description||"Commission payout"})
-  }).then(function(r){return r.json();}).then(function(d){
-    if(d && (d.ok || d.transferId)){
-      return {ok:true, transferId:d.transferId, netCents:netCents, status:"sent"};
-    }
-    return {ok:false, error:(d && d.error)||"Stripe returned no transferId", status:"failed"};
-  }).catch(function(err){
-    return {ok:false, error:(err && err.message)||"Network/edge function error", status:"failed"};
+  // v102e: attach session JWT — the transfer action requires admin role per v101.
+  var sb = getSB();
+  if(!sb) return Promise.resolve({ok:false, error:"No Supabase client — please reload", status:"failed"});
+  return sb.auth.getSession().then(function(res){
+    var token = (res && res.data && res.data.session && res.data.session.access_token) || "";
+    if(!token) return {ok:false, error:"Not signed in — please refresh and sign in again", status:"failed"};
+    return fetch(connectFn,{method:"POST",headers:{
+        "Content-Type":"application/json",
+        "Authorization":"Bearer "+token
+      },
+      body:JSON.stringify({action:"transfer", connectAccountId:connectId, amount:netCents,
+                           currency:"usd", description:description||"Commission payout"})
+    }).then(function(r){return r.json();}).then(function(d){
+      if(d && (d.ok || d.transferId)){
+        return {ok:true, transferId:d.transferId, netCents:netCents, status:"sent"};
+      }
+      return {ok:false, error:(d && d.error)||"Stripe returned no transferId", status:"failed"};
+    }).catch(function(err){
+      return {ok:false, error:(err && err.message)||"Network/edge function error", status:"failed"};
+    });
   });
 }
 
@@ -10513,22 +10523,31 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 
     if(connectFn&&connectId){
       var netAmount = Math.round(amount*(1-platformFee/100)*100);
-      fetch(connectFn,{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({action:"transfer",connectAccountId:connectId,amount:netAmount,
-          currency:"usd",description:"Commission — Order "+order.id+" — "+rep.name}),
-      }).then(function(r){return r.json();}).then(function(d){
-        if(d.ok){
-          rec.stripeTransferId = d.transferId;
-          rec.note = "Stripe Connect — Transfer "+d.transferId;
-          setCommissions(function(prev){return [rec].concat(prev||[]);});
-          dbSave("crm_commission_payouts",rec.id,rec);
-          addToast("✓ "+fmtMoney(amount)+" transferred to "+rep.name+" via Stripe","success");
-          showResult({type:"commission",title:"Commission Paid via Stripe",subtitle:"Transfer sent to rep's bank account.",
-            rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(amount)],["Net (after "+platformFee+"% fee)",fmtMoney(netAmount/100)],["Transfer ID",d.transferId],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
-        } else {
-          addToast("Stripe transfer failed: "+(d.error||"Unknown error"),"danger");
-        }
-      }).catch(function(){addToast("Could not reach Connect function","danger");});
+      // v102e: attach session JWT — transfer action requires admin role per v101.
+      var sb=getSB();
+      var tokenPromise = sb ? sb.auth.getSession().then(function(r){return (r&&r.data&&r.data.session&&r.data.session.access_token)||"";}) : Promise.resolve("");
+      tokenPromise.then(function(token){
+        if(!token){ addToast("Not signed in — refresh and sign in again","danger"); return; }
+        fetch(connectFn,{method:"POST",headers:{
+            "Content-Type":"application/json",
+            "Authorization":"Bearer "+token
+          },
+          body:JSON.stringify({action:"transfer",connectAccountId:connectId,amount:netAmount,
+            currency:"usd",description:"Commission — Order "+order.id+" — "+rep.name}),
+        }).then(function(r){return r.json();}).then(function(d){
+          if(d.ok){
+            rec.stripeTransferId = d.transferId;
+            rec.note = "Stripe Connect — Transfer "+d.transferId;
+            setCommissions(function(prev){return [rec].concat(prev||[]);});
+            dbSave("crm_commission_payouts",rec.id,rec);
+            addToast("✓ "+fmtMoney(amount)+" transferred to "+rep.name+" via Stripe","success");
+            showResult({type:"commission",title:"Commission Paid via Stripe",subtitle:"Transfer sent to rep's bank account.",
+              rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(amount)],["Net (after "+platformFee+"% fee)",fmtMoney(netAmount/100)],["Transfer ID",d.transferId],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
+          } else {
+            addToast("Stripe transfer failed: "+(d.error||"Unknown error"),"danger");
+          }
+        }).catch(function(){addToast("Could not reach Connect function","danger");});
+      });
     } else {
       setCommissions(function(prev){return [rec].concat(prev||[]);});
       dbSave("crm_commission_payouts",rec.id,rec);
@@ -16858,9 +16877,24 @@ function returnStatusMeta(s){
 }
 function retPill(meta,text){return <span style={{padding:"2px 9px",borderRadius:20,fontSize:10,fontWeight:700,background:meta.bg,color:meta.c,whiteSpace:"nowrap"}}>{text}</span>;}
 // Call the Stripe refund edge function (full refund if amount omitted/0).
+// v102e: attach the admin's session JWT so v101's role check passes.
+// Without this, the edge function returns 401 "missing Authorization Bearer token".
 function stripeRefund(chargeId, amountDollars){
-  return fetch(SUPABASE_URL+"/functions/v1/stripe-refund",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({chargeId:chargeId, amount:amountDollars||0})}).then(function(r){return r.json();}).catch(function(e){return {ok:false,error:String(e)};});
+  var sb = getSB();
+  if(!sb) return Promise.resolve({ok:false, error:"No Supabase client — please reload."});
+  return sb.auth.getSession().then(function(res){
+    var token = (res && res.data && res.data.session && res.data.session.access_token) || "";
+    if(!token) return {ok:false, error:"Not signed in — please refresh and sign in again."};
+    return fetch(SUPABASE_URL+"/functions/v1/stripe-refund",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":"Bearer "+token
+      },
+      body:JSON.stringify({chargeId:chargeId, amount:amountDollars||0})
+    }).then(function(r){return r.json();})
+      .catch(function(e){return {ok:false, error:String(e)};});
+  });
 }
 // Patch an order for a full or partial refund (commission reversed/prorated).
 function applyReturnPatch(order, ret){
@@ -17744,7 +17778,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102d-receipt-items-shipto</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102e-refund-transfer-jwt</div>
       </div>
     </div>
   );
@@ -19241,7 +19275,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102d-receipt-items-shipto
+        BUILD: 2026-05-30-v102e-refund-transfer-jwt
       </div>
     </div>
   );
