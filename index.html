@@ -8994,18 +8994,14 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     return true;
   });
 
-  // v102m: fire the customer "Your order has shipped" email + admin/rep notif.
-  // Previously this only fired from the Tasks tab tracking modal — Advance →
-  // and bulk Mark Shipped buttons silently skipped it. Idempotent via
-  // shippedEmailSentAt stamp.
+  // v102m/n: fire the customer "Your order has shipped" email + in-app notifs
+  // for rep and admin. Previously this only fired from the Tasks tab tracking
+  // modal — Advance → and bulk Mark Shipped buttons silently skipped it.
+  // Idempotent via shippedEmailSentAt stamp.
   function fireShippedEmail(order, opts){
     opts = opts || {};
     if(!opts.force && order.shippedEmailSentAt) return; // already sent
     var c = (customers||[]).find(function(x){return x.id===order.custId;}) || {name:order.custName||"", email:order.custEmail||""};
-    if(!c.email){
-      console.warn("[fireShippedEmail] no customer email for "+order.id);
-      return;
-    }
     var co = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
     var tn  = order.trackingNumber || "";
     var car = order.carrier || "";
@@ -9013,8 +9009,35 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
     var trackText = tn ? (" Tracking number: <strong>"+tn+"</strong>"+(car?" ("+car+")":"")+".") : "";
     var body = "<p>Hi "+(c.name||"there")+",</p><p>Order <strong>"+order.id+"</strong> is on its way."+trackText+"</p>"
              + (tu ? "" : "<p style='color:#6b7c93;font-size:12px'>Tracking details will follow shortly once available.</p>");
-    notifyEmail("shipped", c.email, "Your order "+order.id+" has shipped",
-      notifEmailHtml(co, "Your order shipped", body, tu?"Track shipment":null, tu||null, "#0ea5e9"));
+
+    // v102n: in-app notification for the rep (so they see it in their bell)
+    var trackPhrase = tn ? (" — "+(car?(car+" "):"")+tn) : "";
+    var repBell = order.repId ? {
+      repId: order.repId,
+      msg: "📦 Order "+order.id+" shipped to "+(c.name||order.custName||"customer")+trackPhrase,
+      type: "info"
+    } : null;
+    // v102n: also fire an admin-facing notification (separate write — bell arg only handles rep)
+    try{
+      _writeNotifRow({
+        key: "shipped",
+        ts: new Date().toISOString(),
+        type: "info",
+        adminNotify: true,
+        orderId: order.id,
+        msg: "📦 Order "+order.id+" marked Shipped by "+((currentUser&&currentUser.name)||"Admin")+trackPhrase
+      });
+    }catch(e){ console.warn("[fireShippedEmail] admin notif write failed:", (e&&e.message)||e); }
+
+    if(c.email){
+      notifyEmail("shipped", c.email, "Your order "+order.id+" has shipped",
+        notifEmailHtml(co, "Your order shipped", body, tu?"Track shipment":null, tu||null, "#0ea5e9"),
+        repBell);
+    } else {
+      // No customer email — still write the rep notif so they know it shipped
+      console.warn("[fireShippedEmail] no customer email for "+order.id+" — sending rep notif only");
+      if(repBell) _writeNotifRow({key:"shipped", repId:repBell.repId, msg:repBell.msg, type:repBell.type, ts:new Date().toISOString(), orderId:order.id, emailPending:false});
+    }
     // Stamp the order so we don't double-send if admin advances/refires
     var stamped = Object.assign({}, order, {shippedEmailSentAt: new Date().toISOString()});
     onUpdate(stamped);
@@ -17844,7 +17867,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102m-shipped-email-on-advance</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102n-shipped-inapp-notifs</div>
       </div>
     </div>
   );
@@ -19341,7 +19364,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102m-shipped-email-on-advance
+        BUILD: 2026-05-30-v102n-shipped-inapp-notifs
       </div>
     </div>
   );
