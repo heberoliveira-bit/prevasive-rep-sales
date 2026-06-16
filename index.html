@@ -16113,9 +16113,9 @@ function buildPaymentConfirmationEmail(order, customer, company, receiptUrl){
     + "</div>"
   ) : "";
 
-  var receiptButton = receiptUrl
-    ? "<a href='"+receiptUrl+"' style='display:inline-block;background:#635bff;color:#fff;text-decoration:none;padding:14px 24px;border-radius:8px;font-weight:700;font-size:14px;margin-top:8px'>View official receipt →</a>"
-    : "";
+  // v102h: removed Stripe receipt button per user request — customers shouldn't be
+  // redirected to Stripe-hosted receipt. Keep the receiptUrl arg for signature.
+  var receiptButton = "";
   return "<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body style='margin:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
     +"<div style='max-width:540px;margin:32px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)'>"
     +"<div style='background:#1ea672;padding:24px 32px'><div style='color:#fff;font-size:20px;font-weight:800'>✓ Payment received</div>"
@@ -17778,7 +17778,7 @@ function MobileLanding({onLogin}){
       <div style={{padding:"24px 24px 28px",textAlign:"center",fontSize:11,color:C.dim,lineHeight:1.5}}>
         Need a rep account? Apply on a computer at<br/>
         <span style={{color:C.muted,fontWeight:600}}>prevasive-rep-sales.vercel.app</span>
-        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102e-refund-transfer-jwt</div>
+        <div style={{marginTop:10,fontSize:9,fontFamily:"monospace",opacity:0.6}}>BUILD: 2026-05-30-v102h-receipt-cleanup</div>
       </div>
     </div>
   );
@@ -19275,7 +19275,7 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
       </button>
 
       <div style={{textAlign:"center",fontSize:10,color:C.dim,marginTop:20,fontFamily:"monospace"}}>
-        BUILD: 2026-05-30-v102e-refund-transfer-jwt
+        BUILD: 2026-05-30-v102h-receipt-cleanup
       </div>
     </div>
   );
