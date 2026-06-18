@@ -4,6 +4,7 @@
 <script src="https://js.stripe.com/v3/"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.10/babel.min.js" onerror="window.__babelCdnFailed=true"></script>
@@ -448,6 +449,90 @@ function exportCustomers(customers) {
     return [c.id, c.name||"", c.company||"", c.email||"", c.phone||"", c.paymentTerms||"",
             [c.address,c.city,c.state,c.zip].filter(Boolean).join(" "), fmtDate(c.createdAt)];
   }), ["ID","Name","Company","Email","Phone","Payment Terms","Address","Created"]);
+}
+
+// Multi-sheet Excel accounting report for a date range (filters orders by createdAt, payouts by paidAt).
+function exportAccountingReport(orders, commissions, customers, reps, taxCfg, fromISO, toISO) {
+  if (typeof XLSX === "undefined" || !XLSX) { alert("Spreadsheet engine is still loading — try again in a few seconds."); return; }
+  orders = orders || []; commissions = commissions || []; reps = reps || [];
+  var from = fromISO ? new Date(fromISO + "T00:00:00") : new Date(0);
+  var to   = toISO   ? new Date(toISO   + "T23:59:59") : new Date(8640000000000000);
+  function within(d){ if(!d) return false; var t=new Date(d); return t>=from && t<=to; }
+  function r2(n){ return Math.round((Number(n)||0)*100)/100; }
+  function repOf(id){ return reps.find(function(x){return x.id===id;}) || {}; }
+  var rangeLabel = (fromISO||"start") + "  to  " + (toISO||"today");
+
+  var ordIn  = orders.filter(function(o){ return within(o.createdAt); });
+  var sales  = ordIn.filter(function(o){ return o.status!=="cancelled"; });
+  var refs   = ordIn.filter(function(o){ return o.status==="refunded" || (o.refundAmount||0)>0; });
+  var paidIn = commissions.filter(function(c){ return within(c.paidAt); });
+
+  function sumBy(arr, fn){ return arr.reduce(function(s,o){ return s + (Number(fn(o))||0); }, 0); }
+  var grossSales   = sumBy(sales, function(o){ return o.totals&&o.totals.grand; });
+  var taxCollected = sumBy(sales, function(o){ return o.totals&&o.totals.tax; });
+  var totalRefunds = sumBy(refs,  function(o){ return o.refundAmount; });
+  var totalAccrued = sumBy(sales, function(o){ return o.totals&&o.totals.commission; });
+  var totalPaid    = sumBy(paidIn,function(c){ return c.amount; });
+
+  var wb = XLSX.utils.book_new();
+  function addSheet(name, aoa, cols){ var ws=XLSX.utils.aoa_to_sheet(aoa); if(cols) ws["!cols"]=cols; XLSX.utils.book_append_sheet(wb, ws, name); }
+
+  // Sales register
+  addSheet("Sales Register", [["Order ID","Date","Rep","Customer","Subtotal","Discount","Shipping","Tax","Total","Commission","Status","Stripe Charge ID"]].concat(
+    sales.map(function(o){ var t=o.totals||{}; return [o.id, fmtDate(o.createdAt), o.repName||(repOf(o.repId).name)||"", o.custName||"", r2(t.subtotal), r2(t.discount), r2(t.shipping), r2(t.tax), r2(t.grand), r2(t.commission), o.status||"", o.chargeId||""]; }),
+    [[],["","","","TOTALS", r2(sumBy(sales,function(o){return o.totals&&o.totals.subtotal;})), r2(sumBy(sales,function(o){return o.totals&&o.totals.discount;})), r2(sumBy(sales,function(o){return o.totals&&o.totals.shipping;})), r2(taxCollected), r2(grossSales), r2(totalAccrued), "", ""]]),
+    [{wch:16},{wch:12},{wch:18},{wch:22},{wch:11},{wch:10},{wch:10},{wch:10},{wch:11},{wch:12},{wch:11},{wch:26}]);
+
+  // Refund register
+  addSheet("Refund Register", [["Order ID","Order Date","Rep","Customer","Original Total","Refund Amount","Method","Refunded By","Stripe Refund ID"]].concat(
+    refs.map(function(o){ return [o.id, fmtDate(o.createdAt), o.repName||(repOf(o.repId).name)||"", o.custName||"", r2(o.totals&&o.totals.grand), r2(o.refundAmount), o.refundMethod||"", o.refundedBy||"", o.refundId||""]; }),
+    [[],["","","","TOTAL","", r2(totalRefunds), "","",""]]),
+    [{wch:16},{wch:12},{wch:18},{wch:22},{wch:13},{wch:13},{wch:14},{wch:16},{wch:26}]);
+
+  // Commission ledger
+  addSheet("Commission Ledger", [["Order ID","Date","Rep","Order Total","Commission Accrued","Rate %","Status"]].concat(
+    sales.map(function(o){ return [o.id, fmtDate(o.createdAt), o.repName||(repOf(o.repId).name)||"", r2(o.totals&&o.totals.grand), r2(o.totals&&o.totals.commission), Number(o.commissionRate)||0, o.status||""]; }),
+    [[],["","","TOTAL ACCRUED","", r2(totalAccrued),"",""],["","","TOTAL PAID (in range)","", r2(totalPaid),"",""],["","","BALANCE (accrued − paid)","", r2(totalAccrued-totalPaid),"",""]]),
+    [{wch:16},{wch:12},{wch:18},{wch:12},{wch:18},{wch:8},{wch:11}]);
+
+  // Rep payout / 1099
+  var byRep={};
+  paidIn.forEach(function(c){ var k=c.repId||c.repName||"unknown"; if(!byRep[k]) byRep[k]={repId:c.repId||"",name:c.repName||"",amt:0,cnt:0}; byRep[k].amt+=(Number(c.amount)||0); byRep[k].cnt++; });
+  var payRows=Object.keys(byRep).map(function(k){ var x=byRep[k]; var rep=repOf(x.repId); return [x.repId, x.name||rep.name||"", r2(x.amt), x.cnt, (x.amt>=600?"YES":"no"), rep.stripeConnectId||""]; });
+  payRows.sort(function(a,b){ return b[2]-a[2]; });
+  addSheet("Rep Payout 1099", [["Rep ID","Rep","Commission Paid (range)","# Payments","1099-NEC (≥ $600)","Stripe Connect ID"]].concat(payRows, [[],["","TOTAL", r2(totalPaid), paidIn.length, "", ""]]),
+    [{wch:16},{wch:20},{wch:20},{wch:11},{wch:16},{wch:24}]);
+
+  // Tax summary by month
+  var byMonth={};
+  sales.forEach(function(o){ var m=(o.createdAt||"").slice(0,7)||"unknown"; if(!byMonth[m]) byMonth[m]={cnt:0,tax:0}; byMonth[m].cnt++; byMonth[m].tax+=(Number(o.totals&&o.totals.tax)||0); });
+  addSheet("Tax Summary", [["Month","Taxable Orders","Tax Collected"]].concat(
+    Object.keys(byMonth).sort().map(function(m){ return [m, byMonth[m].cnt, r2(byMonth[m].tax)]; }),
+    [[],["TOTAL","", r2(taxCollected)]]),
+    [{wch:12},{wch:15},{wch:14}]);
+
+  // Summary (placed first)
+  addSheet("Summary", [
+    ["PreVasive — Accounting Report"],
+    ["Period", rangeLabel],
+    ["Generated", new Date().toLocaleString()],
+    [],
+    ["Gross Sales", r2(grossSales)],
+    ["Less: Refunds", -r2(totalRefunds)],
+    ["Net Sales", r2(grossSales-totalRefunds)],
+    ["Sales Tax Collected", r2(taxCollected)],
+    [],
+    ["Commission Accrued", r2(totalAccrued)],
+    ["Commission Paid (range)", r2(totalPaid)],
+    ["Commission Balance Owed", r2(totalAccrued-totalPaid)],
+    [],
+    ["Orders (in range)", sales.length],
+    ["Refunds (in range)", refs.length],
+    ["Reps Paid (in range)", Object.keys(byRep).length],
+  ], [{wch:26},{wch:22}]);
+  wb.SheetNames.unshift(wb.SheetNames.pop()); // move Summary to front
+
+  XLSX.writeFile(wb, "prevasive-accounting-"+(fromISO||"all")+"_"+(toISO||"now")+".xlsx");
 }
 
 
@@ -11933,6 +12018,25 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
       {tab==="export"&&(
         <div style={{maxWidth:520}}>
           <div style={{marginBottom:8,fontSize:13,color:C.muted,lineHeight:1.7}}>Export your data as CSV files. Open in Excel, Google Sheets, or any spreadsheet app.</div>
+          <div style={{background:C.surface,border:"1px solid "+C.accent,borderRadius:12,padding:"18px 20px",marginTop:16}}>
+            <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:4}}>📊 Accounting Report (Excel)</div>
+            <div style={{fontSize:11,color:C.muted,marginBottom:14,lineHeight:1.5}}>Multi-sheet workbook for a date range: summary, sales &amp; refund registers, commission ledger, rep payout/1099, and tax summary.</div>
+            <div style={{display:"flex",gap:12,alignItems:"flex-end",flexWrap:"wrap"}}>
+              <label style={{fontSize:11,color:C.muted}}>From<br/>
+                <input id="acctFrom" type="date" defaultValue={new Date(new Date().getFullYear(),0,1).toLocaleDateString("en-CA")}
+                  style={{marginTop:4,padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:12}}/>
+              </label>
+              <label style={{fontSize:11,color:C.muted}}>To<br/>
+                <input id="acctTo" type="date" defaultValue={new Date().toLocaleDateString("en-CA")}
+                  style={{marginTop:4,padding:"7px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontFamily:"inherit",fontSize:12}}/>
+              </label>
+              <Btn small onClick={function(){
+                var f=(document.getElementById("acctFrom")||{}).value||"";
+                var t=(document.getElementById("acctTo")||{}).value||"";
+                exportAccountingReport(orders,commissions,customers,reps,taxCfg,f,t);
+              }}>⬇ Export Excel →</Btn>
+            </div>
+          </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginTop:20}}>
             {[
               ["📦 Orders","All orders with rep, customer, totals, status","Export "+orders.length+" orders",function(){exportOrders(orders,reps,customers);}],
