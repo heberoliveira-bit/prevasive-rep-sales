@@ -10525,6 +10525,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
 
 </script>
 <script id="c11" type="text/plain">
+var _commPayInFlight = {}; // orderId -> true while a Stripe transfer is in flight; blocks double-pay
 function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addToast,showResult,payoutRequests,setPayoutRequests,currentUser}) {
   const [payTarget,    setPayTarget]    = useState(null);
   const [releasingAll, setReleasingAll] = useState(false);
@@ -10625,23 +10626,36 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
     newPayouts.forEach(function(p){dbSave("crm_commission_payouts",p.id,p);});
     setCommissions(function(prev){return newPayouts.concat(prev);});
 
-    // Attempt Stripe transfers if Edge Function configured
+    // Attempt Stripe Connect transfers if configured — same endpoint/contract as single Pay.
     var cfg = JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");
-    var fn  = cfg.edgeFnUrl;
+    var fn  = cfg.connectFnUrl;
+    var platformFee = parseFloat(cfg.platformFee)||0;
     if(fn) {
-      newPayouts.forEach(function(p){
-        var rep3 = reps.find(function(r){return r.id===p.repId;})||{};
-        if(rep3.stripeConnectId) {
-          fetch(fn,{method:"POST",headers:{"Content-Type":"application/json"},
-            body:JSON.stringify({action:"transfer",repId:p.repId,amount:p.amount,stripeAccountId:rep3.stripeConnectId})})
+      var sbA = getSB();
+      var tokenP = sbA ? sbA.auth.getSession().then(function(r){return (r&&r.data&&r.data.session&&r.data.session.access_token)||"";}) : Promise.resolve("");
+      tokenP.then(function(token){
+        if(!token){ addToast("Not signed in — transfers not sent (commissions are recorded)","warning"); return; }
+        newPayouts.forEach(function(p){
+          var rep3 = reps.find(function(r){return r.id===p.repId;})||{};
+          if(!rep3.stripeConnectId) return;
+          var netCents = Math.round(p.amount*(1-platformFee/100)*100);
+          fetch(fn,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
+            body:JSON.stringify({action:"transfer",connectAccountId:rep3.stripeConnectId,amount:netCents,
+              currency:"usd",description:"Commission — Order "+p.orderId+" — "+(rep3.name||p.repName)})})
           .then(function(r){return r.json();})
           .then(function(d){
-            if(d.transferId){
-              var upd=Object.assign({},p,{stripeTransferId:d.transferId,transferStatus:"sent"});
-              dbSave("crm_commission_payouts",p.id,upd);
-            }
-          }).catch(function(){});
-        }
+            var upd = d.ok ? Object.assign({},p,{stripeTransferId:d.transferId,transferStatus:"sent"})
+                           : Object.assign({},p,{transferStatus:"failed",transferError:(d.error||"Unknown error")});
+            dbSave("crm_commission_payouts",p.id,upd);
+            setCommissions(function(prev){return prev.map(function(c){return c.id===p.id?upd:c;});});
+            if(!d.ok) addToast("Transfer failed for "+(rep3.name||p.repId)+": "+(d.error||"error"),"danger");
+          }).catch(function(){
+            var upd=Object.assign({},p,{transferStatus:"failed",transferError:"network"});
+            dbSave("crm_commission_payouts",p.id,upd);
+            setCommissions(function(prev){return prev.map(function(c){return c.id===p.id?upd:c;});});
+            addToast("Transfer failed for "+(rep3.name||p.repId)+" (network)","danger");
+          });
+        });
       });
     }
 
@@ -10659,6 +10673,13 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
   var unpaid = availableOrds; // legacy alias; same data via the new buckets
 
   function payCommission(order) {
+    // Double-pay guards: a payout already exists for this order, or one is mid-flight.
+    if((commissions||[]).some(function(c){return c.orderId===order.id;})){
+      addToast("A payout already exists for order "+order.id,"warning"); return;
+    }
+    if(_commPayInFlight[order.id]){
+      addToast("A payout for order "+order.id+" is already processing","warning"); return;
+    }
     var rep = reps.find(function(r){return r.id===order.repId;})||{name:"Unknown"};
     var amount = order.totals&&order.totals.commission||0;
     var connectFn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
@@ -10670,11 +10691,12 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 
     if(connectFn&&connectId){
       var netAmount = Math.round(amount*(1-platformFee/100)*100);
+      _commPayInFlight[order.id] = true; // lock until the transfer resolves — blocks re-entry during the async window
       // v102e: attach session JWT — transfer action requires admin role per v101.
       var sb=getSB();
       var tokenPromise = sb ? sb.auth.getSession().then(function(r){return (r&&r.data&&r.data.session&&r.data.session.access_token)||"";}) : Promise.resolve("");
       tokenPromise.then(function(token){
-        if(!token){ addToast("Not signed in — refresh and sign in again","danger"); return; }
+        if(!token){ delete _commPayInFlight[order.id]; addToast("Not signed in — refresh and sign in again","danger"); return; }
         fetch(connectFn,{method:"POST",headers:{
             "Content-Type":"application/json",
             "Authorization":"Bearer "+token
@@ -10682,18 +10704,21 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
           body:JSON.stringify({action:"transfer",connectAccountId:connectId,amount:netAmount,
             currency:"usd",description:"Commission — Order "+order.id+" — "+rep.name}),
         }).then(function(r){return r.json();}).then(function(d){
+          delete _commPayInFlight[order.id]; // release lock
           if(d.ok){
             rec.stripeTransferId = d.transferId;
+            rec.transferStatus = "sent";
             rec.note = "Stripe Connect — Transfer "+d.transferId;
+            // Record the paid row ONLY on success, so a failed transfer stays unpaid and retryable.
             setCommissions(function(prev){return [rec].concat(prev||[]);});
             dbSave("crm_commission_payouts",rec.id,rec);
             addToast("✓ "+fmtMoney(amount)+" transferred to "+rep.name+" via Stripe","success");
             showResult({type:"commission",title:"Commission Paid via Stripe",subtitle:"Transfer sent to rep's bank account.",
               rows:[["Rep",rep.name],["Order",order.id],["Amount",fmtMoney(amount)],["Net (after "+platformFee+"% fee)",fmtMoney(netAmount/100)],["Transfer ID",d.transferId],["Date",fmtDate(new Date().toISOString())]],cta:"Done"});
           } else {
-            addToast("Stripe transfer failed: "+(d.error||"Unknown error"),"danger");
+            addToast("Stripe transfer failed: "+(d.error||"Unknown error")+" — nothing was paid, you can retry","danger");
           }
-        }).catch(function(){addToast("Could not reach Connect function","danger");});
+        }).catch(function(){ delete _commPayInFlight[order.id]; addToast("Could not reach Connect function — nothing was paid, you can retry","danger"); });
       });
     } else {
       setCommissions(function(prev){return [rec].concat(prev||[]);});
