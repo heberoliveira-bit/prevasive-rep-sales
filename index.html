@@ -11249,7 +11249,119 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 }
 
 /* ─── Admin Settings ─────────────────────────────────────────────────────── */
-function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast}) {
+function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
+  const [editing,setEditing]=useState(null);
+  const [preview,setPreview]=useState(null);
+  const [audience,setAudience]=useState("customers");
+  const [manual,setManual]=useState("");
+  const [progress,setProgress]=useState(null);
+  var list=campaigns||[];
+  function company(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}}
+  function startNew(){ setEditing({id:"camp_"+Date.now().toString(36),name:"",subject:"",html:"<p>Hi {{name}},</p>\n<p>Write your campaign here…</p>",createdAt:new Date().toISOString()}); }
+  function save(){
+    if(!editing||!editing.name.trim()){ addToast&&addToast("Give the campaign a name","warning"); return; }
+    var exists=list.some(function(x){return x.id===editing.id;});
+    setCampaigns(exists?list.map(function(x){return x.id===editing.id?editing:x;}):list.concat([editing]));
+    addToast&&addToast("Campaign saved","success"); setEditing(null);
+  }
+  function del(id){ if(!window.confirm("Delete this campaign?")) return; setCampaigns(list.filter(function(x){return x.id!==id;})); addToast&&addToast("Campaign deleted","success"); }
+  function recipientsFor(){
+    if(audience==="customers") return (customers||[]).filter(function(c){return c.email;}).map(function(c){return {name:c.name,email:c.email};});
+    if(audience==="reps") return (reps||[]).filter(function(r){return r.email;}).map(function(r){return {name:r.name,email:r.email};});
+    return manual.split(/[\s,;]+/).filter(function(e){return e.indexOf("@")>0;}).map(function(e){return {name:"",email:e.trim()};});
+  }
+  function send(camp, testOnly){
+    var cfg=(typeof getEmailCfg==="function")?getEmailCfg():null;
+    var recips = testOnly ? [{name:"Test", email:(cfg&&cfg.fromEmail)||""}] : recipientsFor();
+    if(!recips.length){ addToast&&addToast(testOnly?"Set a From address in Settings → Email first":"No recipients for this audience","warning"); return; }
+    if(!testOnly && !window.confirm("Send \""+(camp.name||"campaign")+"\" to "+recips.length+" recipient(s)?")) return;
+    setProgress({sent:0,failed:0,total:recips.length});
+    sendCampaignBatch(camp, recips, {name:company(),email:(cfg&&cfg.fromEmail)}, {siteUrl:(typeof getSiteUrl==="function"?getSiteUrl():"")}, function(p){
+      setProgress(p);
+      if(p.done){ addToast&&addToast(p.error?("Could not send — "+p.error):("Sent "+p.sent+" / "+(p.total||p.sent)+(p.failed?(" · "+p.failed+" failed"):"")), (p.error||p.failed)?"warning":"success"); setTimeout(function(){setProgress(null);},1500); }
+    });
+  }
+  var previewHtml = preview ? notifEmailHtml(company(), preview.subject||"", (preview.html||"")+"<div style='margin-top:24px;padding-top:14px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6'>Unsubscribe · "+company()+"</div>", null, null, "#635bff") : "";
+  return (
+    <div style={{maxWidth:760}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:12}}>
+        <div><div style={{fontWeight:800,fontSize:15,color:C.text}}>Email Campaigns</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Paste HTML, preview, and send branded, personalized campaigns. Tokens: {"{{name}}"}, {"{{company}}"}, {"{{rep}}"}.</div></div>
+        {!editing&&<Btn small onClick={startNew}>+ New Campaign</Btn>}
+      </div>
+
+      {editing&&(
+        <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:10,padding:"16px 18px",marginBottom:16}}>
+          <Field label="Campaign Name" value={editing.name} onChange={function(v){setEditing(Object.assign({},editing,{name:v}));}} placeholder="Spring Promo 2026"/>
+          <Field label="Subject Line" value={editing.subject} onChange={function(v){setEditing(Object.assign({},editing,{subject:v}));}} placeholder="A special offer for you, {{name}}"/>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,margin:"10px 0 5px"}}>HTML Body</div>
+          <textarea value={editing.html} onChange={function(e){setEditing(Object.assign({},editing,{html:e.target.value}));}} spellCheck={false}
+            style={{width:"100%",minHeight:200,background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontFamily:"monospace",fontSize:12,lineHeight:1.5,boxSizing:"border-box",resize:"vertical"}}/>
+          <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+            <Btn small onClick={save}>Save</Btn>
+            <Btn small variant="outline" onClick={function(){setPreview(editing);}}>Preview</Btn>
+            <Btn small variant="ghost" onClick={function(){setEditing(null);}}>Cancel</Btn>
+          </div>
+        </div>
+      )}
+
+      {!list.length&&!editing&&<div style={{fontSize:13,color:C.dim,fontStyle:"italic",padding:"20px 0"}}>No campaigns yet. Create one to get started.</div>}
+
+      {list.map(function(camp){
+        return (
+          <div key={camp.id} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:10,padding:"14px 16px",marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+              <div style={{minWidth:0}}>
+                <div style={{fontWeight:700,fontSize:14,color:C.text}}>{camp.name||"(untitled)"}</div>
+                <div style={{fontSize:12,color:C.muted,marginTop:2}}>{camp.subject||"(no subject)"}</div>
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <Btn small variant="outline" onClick={function(){setPreview(camp);}}>Preview</Btn>
+                <Btn small variant="ghost" onClick={function(){setEditing(camp);}}>Edit</Btn>
+                <Btn small variant="danger" onClick={function(){del(camp.id);}}>Delete</Btn>
+              </div>
+            </div>
+            <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.border}}>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:6}}>Send to:</div>
+              <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:8}}>
+                {[["customers","All Customers ("+(customers||[]).filter(function(c){return c.email;}).length+")"],["reps","All Reps ("+(reps||[]).filter(function(r){return r.email;}).length+")"],["manual","Manual list"]].map(function(opt){
+                  return (
+                    <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",fontSize:12,color:audience===opt[0]?C.text:C.muted}}>
+                      <input type="radio" name={"aud_"+camp.id} checked={audience===opt[0]} onChange={function(){setAudience(opt[0]);}} style={{accentColor:C.accent}}/>{opt[1]}
+                    </label>
+                  );
+                })}
+              </div>
+              {audience==="manual"&&(
+                <textarea value={manual} onChange={function(e){setManual(e.target.value);}} placeholder="Paste emails separated by commas, spaces, or new lines"
+                  style={{width:"100%",minHeight:60,background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px",color:C.text,fontFamily:"monospace",fontSize:12,boxSizing:"border-box",marginBottom:8}}/>
+              )}
+              <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                <Btn small variant="outline" onClick={function(){send(camp,true);}}>Send Test to Me</Btn>
+                <Btn small onClick={function(){send(camp,false);}}>Send Campaign →</Btn>
+                {progress&&<span style={{fontSize:12,color:C.muted}}>{progress.done?"Done":"Sending…"} {progress.sent||0}/{progress.total||0}{progress.failed?(" · "+progress.failed+" failed"):""}</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {preview&&(
+        <div onClick={function(){setPreview(null);}} style={{position:"fixed",inset:0,background:C.bg+"f2",backdropFilter:"blur(8px)",zIndex:6000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:640,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><div style={{fontSize:10,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:".08em"}}>Preview</div><div style={{fontWeight:700,fontSize:14,color:C.text}}>{preview.subject||"(no subject)"}</div></div>
+              <Btn small variant="ghost" onClick={function(){setPreview(null);}}>Close</Btn>
+            </div>
+            <iframe title="preview" srcDoc={previewHtml} style={{flex:1,width:"100%",border:"none",background:"#fff",minHeight:380}}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns}) {
   const [tab,      setTab]      = useState("supabase");
   const [nprefs,   setNprefs]   = useState((function(){var d=Object.assign({},DEFAULT_NOTIF_PREFS);try{return Object.assign(d,JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}"));}catch(e){return d;}})());
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
@@ -11264,7 +11376,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"campaigns",l:"Campaigns"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
   const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
@@ -11544,6 +11656,8 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
         </div>
       )}
 
+
+      {tab==="campaigns"&&<CampaignsTab campaigns={campaigns} setCampaigns={setCampaigns} customers={customers} reps={reps} addToast={addToast}/>}
 
       {tab==="email"&&(
         <div style={{maxWidth:600}}>
@@ -16381,6 +16495,52 @@ function notifEmailHtml(company, heading, bodyHtml, ctaLabel, ctaLink, accent){
     +"</div></div></body></html>";
 }
 
+// Campaign sender — personalizes tokens, wraps in the branded shell, appends a CAN-SPAM
+// footer (sender + company + working mailto unsubscribe), and sends one-by-one with throttle.
+// recipients: [{name,email}]; sender: {name,email}; onProgress({sent,failed,total,done,error}).
+function sendCampaignBatch(campaign, recipients, sender, opts, onProgress){
+  opts = opts || {};
+  var cfg = (typeof getEmailCfg==="function") ? getEmailCfg() : null;
+  if(!cfg || !cfg.edgeFnUrl || !cfg.fromEmail){ if(onProgress) onProgress({done:true,sent:0,failed:0,error:"Email not configured (Settings → Email)."}); return; }
+  var company = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  var addr = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").address||"";}catch(e){return "";}})();
+  var senderName = (sender&&sender.name)||company;
+  var list = (recipients||[]).filter(function(r){return r&&r.email&&/.+@.+\..+/.test(r.email);});
+  var sent=0, failed=0, i=0;
+  function footer(){
+    return "<div style='margin-top:24px;padding-top:14px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6;line-height:1.6'>"
+      +"You're receiving this email from "+senderName+(senderName!==company?(" · "+company):"")+"."
+      +(addr?("<br>"+addr):"")
+      +"<br><a href='mailto:"+cfg.fromEmail+"?subject=Unsubscribe' style='color:#8a94a6'>Unsubscribe</a> from these emails."
+      +"</div>";
+  }
+  function personalize(s, r){
+    return String(s||"")
+      .replace(/\{\{\s*name\s*\}\}/gi, r.name||"there")
+      .replace(/\{\{\s*first_?name\s*\}\}/gi, (r.name||"there").split(" ")[0])
+      .replace(/\{\{\s*(rep|sender)\s*\}\}/gi, senderName)
+      .replace(/\{\{\s*company\s*\}\}/gi, company);
+  }
+  function next(){
+    if(i>=list.length){ if(onProgress) onProgress({done:true,sent:sent,failed:failed,total:list.length}); return; }
+    var r=list[i++];
+    var body = personalize(campaign.html, r) + footer();
+    var full = opts.raw ? body : notifEmailHtml(company, personalize(campaign.subject,r), body, null, null, "#635bff");
+    var subj = personalize(campaign.subject||"(no subject)", r);
+    fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"send",fromEmail:cfg.fromEmail,fromName:senderName,
+        to:r.email,toEmail:r.email,replyTo:(sender&&sender.email)||cfg.fromEmail,
+        subject:subj,body:full,message:full,html:full,isHtml:true})
+    }).then(function(res){return res.json();}).then(function(d){
+      if(d&&(d.ok||d.success||d.id||d.messageId)) sent++; else failed++;
+      if(onProgress) onProgress({sent:sent,failed:failed,total:list.length});
+      setTimeout(next,300);
+    }).catch(function(){ failed++; if(onProgress) onProgress({sent:sent,failed:failed,total:list.length}); setTimeout(next,300); });
+  }
+  if(onProgress) onProgress({sent:0,failed:0,total:list.length});
+  next();
+}
+
 function _writeNotifRow(o){
   var sb=getSB(); if(!sb) return;
   if(!o.to && !o.msg) return;
@@ -19908,6 +20068,7 @@ function App() {
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
   const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
   const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",tenantId:"",clientId:"",clientSecret:"",edgeFnUrl:""});
+  const [campaigns,     setCampaigns]     = useLS("campaigns",     []);
   // v103 #2: keep the module-level email config cache in sync with App's state.
   // Module helpers (notifyEmail, sendRepEmail, etc.) read via getEmailCfg() — this
   // effect makes sure they see updates immediately, not after a page reload.
@@ -20225,6 +20386,7 @@ function App() {
       if(d.invoice && Object.keys(d.invoice).length) setInvoiceCfg(d.invoice);
       if(d.tax && Object.keys(d.tax).length) setTaxCfg(d.tax);
       if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
+      if(d.campaigns && Array.isArray(d.campaigns)) setCampaigns(d.campaigns);
       if(d.stripePublishableKey||d.stripeChargeFnUrl||d.stripeConnectFnUrl) setStripeAccountA(function(prev){var p=prev||{}; return Object.assign({},p,{publishableKey:p.publishableKey||d.stripePublishableKey||"",edgeFnUrl:p.edgeFnUrl||d.stripeChargeFnUrl||"",connectFnUrl:p.connectFnUrl||d.stripeConnectFnUrl||""});});
       if(d.emailFnUrl) setEmailCfg(function(prev){var p=prev||{}; return Object.assign({},p,{edgeFnUrl:p.edgeFnUrl||d.emailFnUrl||"",fromName:p.fromName||d.emailFromName||"",fromEmail:p.fromEmail||d.emailFromEmail||""});});
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
@@ -20331,7 +20493,7 @@ function App() {
   useEffect(function(){
     if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
     var sb=getSB(); if(!sb) return;
-    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{},
+    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{}, campaigns:campaigns||[],
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
                 stripeChargeFnUrl:(stripeAccountA&&stripeAccountA.edgeFnUrl)||"",
                 stripeConnectFnUrl:(stripeAccountA&&stripeAccountA.connectFnUrl)||"",
@@ -20354,7 +20516,7 @@ function App() {
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(r){
       if(r&&r.error){ try{console.warn("[public_settings] sync write failed:",r.error.message);}catch(_){} }
     });
-  },[invoiceCfg,taxCfg,stripeLinks,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,stripeLinks,campaigns,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
   // v89: publish admin-only secrets so they sync across admin browsers.
   // Same anti-echo pattern as public_settings.
@@ -21137,7 +21299,7 @@ function App() {
             stripeAccountA={stripeAccountA} onSaveStripeAccountA={setStripeAccountA}
             twoFAEnabled={twoFAEnabled} setTwoFAEnabled={setTwoFAEnabled}
             orders={orders} customers={customers} commissions={commissions}
-            reps={reps} addToast={addToast}/>
+            reps={reps} addToast={addToast} campaigns={campaigns} setCampaigns={setCampaigns}/>
         )}
 
         {isAdmin&&activeTab==="helpdesk"&&(
