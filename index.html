@@ -246,7 +246,8 @@ function autoFulfillIfPaid(order, actor){
 }
 var REP_PLANS = [
   {id:"starter", name:"Starter", price:100, ceiling:1000,  desc:"Up to $1,000/mo"},
-  {id:"pro",     name:"Pro",     price:200, ceiling:2000, desc:"Up to $2,000/mo"},
+  {id:"pro",     name:"Pro",     price:200, ceiling:3000, desc:"Up to $3,000/mo"},
+  {id:"elite",   name:"Elite",   price:300, ceiling:5000, desc:"Up to $5,000/mo"},
 ];
 // v100 #1: reordered so the Advance → button progresses through the real business flow.
 // Was ["Submitted","Processing","Shipped","Delivered","Paid"] which had Paid at the END,
@@ -1881,8 +1882,13 @@ function LegalDocSignModal({doc,repId,repName,onSign,onDecline}) {
 function RepAgreementModal({repName,onAgree,onDecline}) {
   const [checked, setChecked] = useState({});
   const [step,    setStep]    = useState("review");
+  const [sigName, setSigName] = useState("");
+  const [ack,     setAck]     = useState(false);
   var allChecked = REP_AGREEMENT_CLAUSES.every(function(cl){return checked[cl.id];});
+  var nameMatches = sigName.trim().toLowerCase() === (repName||"").trim().toLowerCase();
+  var canSign = allChecked && nameMatches && ack;
   function toggle(id) { setChecked(function(prev){return Object.assign({},prev,{[id]:!prev[id]});}); }
+  var remaining = REP_AGREEMENT_CLAUSES.filter(function(cl){return !checked[cl.id];}).length;
   return (
     <div style={{position:"fixed",inset:0,background:C.bg+"f2",backdropFilter:"blur(8px)",
                  zIndex:5000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,
@@ -1891,10 +1897,12 @@ function RepAgreementModal({repName,onAgree,onDecline}) {
                    width:"100%",maxWidth:560,maxHeight:"90vh",display:"flex",flexDirection:"column",
                    boxShadow:"0 16px 48px rgba(0,0,0,.25)"}}>
         <div style={{padding:"22px 24px 16px",borderBottom:"1px solid "+C.border}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.accent,textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>Action Required</div>
+          <div style={{fontSize:11,fontWeight:600,color:C.accent,textTransform:"uppercase",letterSpacing:".07em",marginBottom:6}}>{step==="sign"?"Electronic Signature":"Action Required"}</div>
           <div style={{fontSize:19,fontWeight:700,color:C.text,letterSpacing:"-.02em"}}>Sales Representative Agreement</div>
-          <div style={{fontSize:12,color:C.muted,marginTop:4}}>Please review and accept each clause to continue. Version {REP_AGREEMENT_VERSION}</div>
+          <div style={{fontSize:12,color:C.muted,marginTop:4}}>{step==="sign"?"Sign below to complete. ":"Review and accept each clause to continue. "}Version {REP_AGREEMENT_VERSION}</div>
         </div>
+
+        {step==="review"&&(
         <div style={{flex:1,overflowY:"auto",padding:"20px 24px"}}>
           {REP_AGREEMENT_CLAUSES.map(function(cl){
             var ok = checked[cl.id];
@@ -1908,28 +1916,84 @@ function RepAgreementModal({repName,onAgree,onDecline}) {
                 <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
                   <input type="checkbox" checked={!!ok} onChange={function(){toggle(cl.id);}}
                     style={{width:15,height:15,accentColor:C.success,cursor:"pointer"}}/>
-                  <span style={{fontSize:12,fontWeight:600,color:ok?C.success:C.muted}}>
-                    {ok?"I agree to this clause":"I agree to this clause"}
-                  </span>
+                  <span style={{fontSize:12,fontWeight:600,color:ok?C.success:C.muted}}>I agree to this clause</span>
                 </label>
               </div>
             );
           })}
         </div>
+        )}
+
+        {step==="sign"&&(
+        <div style={{flex:1,overflowY:"auto",padding:"20px 24px"}}>
+          <div style={{padding:"12px 14px",background:C.success+"10",border:"1px solid "+C.success+"30",borderRadius:10,fontSize:12,color:C.success,fontWeight:600,marginBottom:18}}>
+            ✓ You've accepted all {REP_AGREEMENT_CLAUSES.length} clauses of the Sales Representative Agreement (v{REP_AGREEMENT_VERSION}).
+          </div>
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>
+              Type your full legal name to sign: <strong style={{color:C.text}}>{repName}</strong>
+            </div>
+            <input value={sigName} onChange={function(e){setSigName(e.target.value);}}
+              placeholder="Type your full name exactly as shown above"
+              style={{width:"100%",background:C.bg,border:"1px solid "+(nameMatches?C.success:C.border),
+                      borderRadius:7,padding:"10px 12px",color:C.text,fontSize:15,
+                      fontFamily:"Georgia,serif",fontStyle:"italic",boxSizing:"border-box",outline:"none"}}/>
+            {sigName&&!nameMatches&&(
+              <div style={{fontSize:11,color:C.danger,marginTop:3}}>Name does not match. Type exactly: {repName}</div>
+            )}
+            {sigName&&nameMatches&&(
+              <div style={{fontSize:11,color:C.success,marginTop:3}}>✓ Signature verified</div>
+            )}
+          </div>
+          <label style={{display:"flex",alignItems:"flex-start",gap:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={ack} onChange={function(e){setAck(e.target.checked);}}
+              style={{marginTop:2,width:14,height:14,accentColor:C.accent,cursor:"pointer"}}/>
+            <span style={{fontSize:12,color:C.muted,lineHeight:1.5}}>
+              I have read, understood, and agree to the Sales Representative Agreement. I understand my electronic signature is legally binding.
+            </span>
+          </label>
+        </div>
+        )}
+
         <div style={{padding:"16px 24px",borderTop:"1px solid "+C.border,display:"flex",gap:10}}>
+          {step==="review"&&(
           <button onClick={onDecline}
             style={{flex:1,padding:"10px",borderRadius:6,border:"1px solid "+C.border,
                     background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>
-            Decline & Sign Out
+            Decline &amp; Sign Out
           </button>
-          <button onClick={function(){if(allChecked) onAgree();}} disabled={!allChecked}
+          )}
+          {step==="review"&&(
+          <button onClick={function(){if(allChecked) setStep("sign");}} disabled={!allChecked}
             style={{flex:2,padding:"10px",borderRadius:6,border:"none",
                     background:allChecked?C.accent:C.border,color:allChecked?"#fff":C.dim,
                     cursor:allChecked?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700,
                     fontSize:14,letterSpacing:"-.01em",boxShadow:allChecked?"0 2px 10px "+C.accent+"40":"none"}}>
-            {allChecked?"Sign Agreement →":"Check all clauses to continue ("+(REP_AGREEMENT_CLAUSES.filter(function(cl){return !checked[cl.id];}).length)+" remaining)"}
+            {allChecked?"Continue to Sign →":"Check all clauses to continue ("+remaining+" remaining)"}
           </button>
+          )}
+          {step==="sign"&&(
+          <button onClick={function(){setStep("review");}}
+            style={{flex:1,padding:"10px",borderRadius:6,border:"1px solid "+C.border,
+                    background:"transparent",color:C.muted,cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13}}>
+            ← Back
+          </button>
+          )}
+          {step==="sign"&&(
+          <button onClick={function(){if(canSign) onAgree(sigName.trim());}} disabled={!canSign}
+            style={{flex:2,padding:"10px",borderRadius:6,border:"none",
+                    background:canSign?C.accent:C.border,color:canSign?"#fff":C.dim,
+                    cursor:canSign?"pointer":"not-allowed",fontFamily:"inherit",fontWeight:700,
+                    fontSize:14,letterSpacing:"-.01em",boxShadow:canSign?"0 2px 10px "+C.accent+"40":"none"}}>
+            {canSign?"Sign Agreement →":"Type your name & confirm"}
+          </button>
+          )}
         </div>
+        {step==="sign"&&(
+          <div style={{padding:"0 24px 14px",fontSize:10,color:C.dim,textAlign:"center"}}>
+            Signed as: {repName} · {new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})} · Version {REP_AGREEMENT_VERSION}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1984,7 +2048,7 @@ function RepSubscriptionWall({rep,onActivate,onLogout}) {
         </div>
         {(function(){
           var links={}; try{links=JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");}catch(e){}
-          var base = selPlan==="pro"?links.pro:links.starter;
+          var base = links[selPlan]||"";
           var link = base ? base+(base.indexOf("?")>=0?"&":"?")+"client_reference_id="+encodeURIComponent((rep&&rep.id)||"")+"&prefilled_email="+encodeURIComponent((rep&&rep.email)||"") : "";
           var pl = REP_PLANS.find(function(p){return p.id===selPlan;})||REP_PLANS[0];
           if(link) return (
@@ -7921,7 +7985,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                 <div style={{display:"flex",gap:8}}>
                   {REP_PLANS.map(function(p){var sel=rep.planId===p.id;
                     var planLinks=JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
-                    var link=p.id==="pro"?planLinks.pro:planLinks.starter;
+                    var link=planLinks[p.id]||"";
                     return (
                       <div key={p.id} style={{flex:1,padding:"10px",borderRadius:8,
                               border:"2px solid "+(sel?C.accent:C.border),
@@ -8123,7 +8187,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                 </div>
                 {[
                   ["Terms of Service", !!rep.termsAcceptedAt, rep.termsAcceptedAt?fmtDate(rep.termsAcceptedAt):"Not accepted"],
-                  ["Rep Agreement",    !!rep.agreementSignedAt, rep.agreementSignedAt?fmtDate(rep.agreementSignedAt):"Not signed"],
+                  ["Rep Agreement",    !!rep.agreementSignedAt, rep.agreementSignedAt?(fmtDate(rep.agreementSignedAt)+(rep.agreementSignerName?" · signed by "+rep.agreementSignerName:"")):"Not signed"],
                   ["W-9 Verified",     rep.w9ReviewStatus==="approved", rep.w9ReviewStatus==="approved"?fmtDate(rep.w9ApprovedAt):"Not verified"],
                 ].map(function(item,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
@@ -8457,13 +8521,14 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
               .reduce(function(s,r){var p=REP_PLANS.find(function(x){return x.id===r.planId;});return s+(p?p.price:0);},0);
             var starters = reps.filter(function(r){return r.planId==="starter"&&(r.subscriptionStatus==="active"||r.subscriptionStatus==="comp");}).length;
             var pros = reps.filter(function(r){return r.planId==="pro"&&(r.subscriptionStatus==="active"||r.subscriptionStatus==="comp");}).length;
+            var elites = reps.filter(function(r){return r.planId==="elite"&&(r.subscriptionStatus==="active"||r.subscriptionStatus==="comp");}).length;
             var trials = reps.filter(function(r){return r.subscriptionStatus==="trial";}).length;
             var comps = reps.filter(function(r){return r.subscriptionStatus==="comp";}).length;
             return (
               <div>
                 <div style={{fontSize:28,fontWeight:800,fontFamily:"monospace",color:C.success,marginBottom:8}}>{fmtMoney(mrr)}<span style={{fontSize:12,color:C.dim,fontWeight:400}}>/mo</span></div>
                 <div style={{display:"flex",gap:12,fontSize:11,color:C.muted,flexWrap:"wrap"}}>
-                  <span>{starters} Starter</span><span>{pros} Pro</span><span>{trials} Trial</span>
+                  <span>{starters} Starter</span><span>{pros} Pro</span><span>{elites} Elite</span><span>{trials} Trial</span>
                   {comps>0&&<span style={{color:C.gold}}>🎁 {comps} Comp</span>}
                 </div>
               </div>
@@ -11413,6 +11478,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
             <div style={{paddingTop:12}}>
               <Field label="Starter Plan Link" value={(stripeLinks&&stripeLinks.starter)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{starter:v});});}} placeholder="https://buy.stripe.com/…"/>
               <Field label="Pro Plan Link" value={(stripeLinks&&stripeLinks.pro)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{pro:v});});}} placeholder="https://buy.stripe.com/…"/>
+              <Field label="Elite Plan Link" value={(stripeLinks&&stripeLinks.elite)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{elite:v});});}} placeholder="https://buy.stripe.com/…"/>
               <Field label="Customer Portal Link" value={(stripeLinks&&stripeLinks.portal)||""} onChange={function(v){setStripeLinks(function(p){return Object.assign({},p,{portal:v});});}} placeholder="https://billing.stripe.com/…"/>
             </div>
           </details>
@@ -15647,7 +15713,7 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
             <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:8}}>My Subscription</div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,marginBottom:12}}>
               <span style={{color:C.muted}}>Plan</span>
-              <span style={{fontWeight:700,color:C.accent}}>{repData&&repData.planId==="pro"?"Pro":"Starter"} · ${repData&&repData.planId==="pro"?200:100}/mo</span>
+              <span style={{fontWeight:700,color:C.accent}}>{(function(){var p=REP_PLANS.find(function(x){return x.id===(repData&&repData.planId);})||REP_PLANS[0];return p.name+" · $"+p.price+"/mo";})()}</span>
             </div>
             <a href={portalLink} target="_blank"
               style={{display:"block",textAlign:"center",padding:"10px",borderRadius:8,
@@ -15916,7 +15982,7 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
               {(function(){
                 var links = JSON.parse(localStorage.getItem("__pv__stripeLinks")||"{}");
                 var billingFn = links.billingFnUrl || "";
-                var baseLink = repData.planId==="pro"?links.pro:links.starter;
+                var baseLink = links[repData.planId]||"";
                 var planLink = baseLink ? baseLink+(baseLink.indexOf("?")>=0?"&":"?")+"client_reference_id="+encodeURIComponent(repData.id)+"&prefilled_email="+encodeURIComponent((user&&user.email)||repData.email||"") : "";
                 var portalLink = links.portal;
                 var isActive = repData.subscriptionStatus==="active";
@@ -17632,7 +17698,7 @@ function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,
       {allDone&&<div style={{marginTop:24,textAlign:"center"}}><Btn onClick={onComplete}>Add Your First Order →</Btn></div>}
 
       {modal==="terms"&&<TermsModal onAccept={function(){patchRep({termsAcceptedAt:new Date().toISOString()});setModal(null);}} onDecline={function(){setModal(null);}}/>}
-      {modal==="agreement"&&<RepAgreementModal repName={effectiveUser.name} onAgree={function(){patchRep({agreementSignedAt:new Date().toISOString(),agreementVersion:REP_AGREEMENT_VERSION});try{var _cn=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();notifyAdmin("Rep signed the agreement — "+(effectiveUser.name||""),notifEmailHtml(_cn,"Agreement signed","<p><strong>"+(effectiveUser.name||"A rep")+"</strong> signed the Rep Agreement (v"+REP_AGREEMENT_VERSION+").</p>",null,null,"#635bff"),(effectiveUser.name||"A rep")+" signed the Rep Agreement","rep_agreement");}catch(e){}setModal(null);}} onDecline={function(){setModal(null);}}/>}
+      {modal==="agreement"&&<RepAgreementModal repName={effectiveUser.name} onAgree={function(sig){patchRep({agreementSignedAt:new Date().toISOString(),agreementVersion:REP_AGREEMENT_VERSION,agreementSignerName:sig||effectiveUser.name});try{var _cn=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();notifyAdmin("Rep signed the agreement — "+(effectiveUser.name||""),notifEmailHtml(_cn,"Agreement signed","<p><strong>"+(effectiveUser.name||"A rep")+"</strong> signed the Rep Agreement (v"+REP_AGREEMENT_VERSION+").</p>",null,null,"#635bff"),(effectiveUser.name||"A rep")+" signed the Rep Agreement","rep_agreement");}catch(e){}setModal(null);}} onDecline={function(){setModal(null);}}/>}
       {doc&&<LegalDocSignModal doc={doc} repId={rid} repName={effectiveUser.name}
         onSign={function(){
           var sig={id:genId("sig"),docId:doc.id,version:doc.version,repId:rid,repName:effectiveUser.name,signedAt:new Date().toISOString()};
@@ -17659,7 +17725,7 @@ function isMobileDevice(){
 var HELP_SECTIONS = [
   {id:"start", title:"Getting Started", body:[
     "Sign in with the email and password set up by your admin. On first sign-in, you'll be prompted to (1) accept the Terms of Service, (2) sign the Rep Agreement, and (3) upload your W-9 tax form.",
-    "After that, you have a 15-day free trial. To keep access beyond the trial, pick a subscription plan from Profile → Billing (Starter $100/mo up to $1,000 monthly commission, or Pro $200/mo up to $2,000).",
+    "After that, you have a 15-day free trial. To keep access beyond the trial, pick a subscription plan from Profile → Billing (Starter $100/mo up to $1,000 monthly commission, Pro $200/mo up to $3,000, or Elite $300/mo up to $5,000).",
     "Connect your Stripe Connect account to receive commission payouts. Profile → Billing → Connect Stripe. Stripe holds your bank info securely; PreVasive never sees it."
   ]},
   {id:"orders", title:"Placing Orders", body:[
@@ -17706,7 +17772,8 @@ var HELP_SECTIONS = [
     "Every new rep gets a 15-day free trial with full platform access. After day 15, you must select a subscription plan to continue earning commissions and placing new orders.",
     "Plans:",
     "  • Starter — $100/month, up to $1,000 in monthly commission earnings",
-    "  • Pro — $200/month, up to $2,000 in monthly commission earnings",
+    "  • Pro — $200/month, up to $3,000 in monthly commission earnings",
+    "  • Elite — $300/month, up to $5,000 in monthly commission earnings",
     "If you exceed your plan's monthly commission ceiling, additional commission is deferred until the next billing cycle resets (or you upgrade).",
     "Subscriptions are billed via Stripe. To upgrade, downgrade, or cancel, go to Profile → Billing → 'Manage Subscription'."
   ]},
@@ -17766,7 +17833,8 @@ var TERMS_SECTIONS = [
     "New Reps receive a 15-day free trial with full Platform access. After trial expiration, Reps must select an active subscription plan to continue placing orders and earning commissions.",
     "Plans:",
     "  • Starter — $100/month, up to $1,000 in monthly commission earnings.",
-    "  • Pro — $200/month, up to $2,000 in monthly commission earnings.",
+    "  • Pro — $200/month, up to $3,000 in monthly commission earnings.",
+    "  • Elite — $300/month, up to $5,000 in monthly commission earnings.",
     "Subscriptions are billed via Stripe on a recurring monthly basis. Plan changes (upgrade/downgrade/cancel) can be made through Profile → Billing → Manage Subscription. Cancellations take effect at the end of the current billing period.",
     "Commission earned beyond the monthly ceiling is deferred to the following calendar month, at which point it counts toward that month's ceiling. PreVasive may modify plan pricing or ceilings with 30 days written notice.",
   ]},
@@ -20069,7 +20137,7 @@ function App() {
   });
   const [stripeLinks, setStripeLinks] = useLS("stripeLinks",{
     membershipMonthly:"", membershipAnnual:"", membershipCompany:"",
-    starter:"", pro:"", portal:"",
+    starter:"", pro:"", elite:"", portal:"",
     starterPriceId:"", proPriceId:"",
   });
   const [payoutRequests,setPayoutRequests] = useState([]);
