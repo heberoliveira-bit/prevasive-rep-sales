@@ -15729,8 +15729,9 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
 }
 
 /* ─── Rep Profile ────────────────────────────────────────────────────────── */
-function RepProfile({user,repData,setReps,commissions,addToast}) {
+function RepProfile({user,repData,setReps,commissions,addToast,legalDocs,signatures}) {
   const [tab,   setTab]   = useState("profile");
+  const [viewDoc, setViewDoc] = useState(null);
   const [name,  setName]  = useState(user&&user.name||"");
   const [phone, setPhone] = useState(repData&&repData.phone||"");
   const [msg,   setMsg]   = useState("");
@@ -15921,6 +15922,41 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
               </div>
             );
           })()}
+
+          {/* Agreements & Terms — latest versions, for reference */}
+          <div style={{marginTop:28}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:12,borderBottom:"1px solid "+C.border}}>
+              <div><div style={{fontWeight:800,fontSize:15,color:C.text}}>Agreements &amp; Terms</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Latest versions, for your reference.</div></div>
+            </div>
+            {(function(){
+              var myId=user&&(user.rep_id||user.id);
+              var docs=[
+                {key:"terms", name:"Terms of Service", version:null,
+                 signed: repData&&repData.termsAcceptedAt ? ("Accepted "+fmtDate(repData.termsAcceptedAt)) : null,
+                 sections: TERMS_SECTIONS.map(function(s){return {h:s.title, body:s.body||[]};})},
+                {key:"agreement", name:"Sales Representative Agreement", version:REP_AGREEMENT_VERSION,
+                 signed: repData&&repData.agreementSignedAt ? ("Signed "+fmtDate(repData.agreementSignedAt)+(repData.agreementSignerName?" by "+repData.agreementSignerName:"")+(repData.agreementVersion?" · v"+repData.agreementVersion:"")) : null,
+                 sections: REP_AGREEMENT_CLAUSES.map(function(c){return {h:c.title, body:[c.text]};})}
+              ];
+              (legalDocs||[]).filter(function(d){return d.active||d.published;}).forEach(function(d){
+                var isSigned=(signatures||[]).some(function(s){return s.docId===d.id&&s.repId===myId&&(s.version===d.version);});
+                docs.push({key:d.id, name:d.title||"Document", version:d.version,
+                  signed:isSigned?("Signed · v"+d.version):null,
+                  sections:[{h:d.title||"Document", body:[d.content||"[No content available]"]}]});
+              });
+              return docs.map(function(dc){
+                return (
+                  <div key={dc.key} style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"12px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:9,marginBottom:8}}>
+                    <div style={{minWidth:0}}>
+                      <div style={{fontSize:13,fontWeight:700,color:C.text}}>{dc.name}{dc.version?(<span style={{fontSize:11,fontWeight:600,color:C.muted}}> · v{dc.version}</span>):null}</div>
+                      <div style={{fontSize:11,color:dc.signed?C.success:C.dim,marginTop:2}}>{dc.signed?("✓ "+dc.signed):"For reference"}</div>
+                    </div>
+                    <Btn small variant="outline" onClick={function(){setViewDoc(dc);}}>View</Btn>
+                  </div>
+                );
+              });
+            })()}
+          </div>
         </div>
       )}
 
@@ -16138,6 +16174,28 @@ function RepProfile({user,repData,setReps,commissions,addToast}) {
         </div>
       )}
       {showW9Modal && <W9SubmitModal repData={repData} setReps={setReps} addToast={addToast} onClose={function(){setShowW9Modal(false);}}/>}
+      {viewDoc && (
+        <div onClick={function(){setViewDoc(null);}} style={{position:"fixed",inset:0,background:C.bg+"f2",backdropFilter:"blur(8px)",zIndex:5000,display:"flex",alignItems:"center",justifyContent:"center",padding:16,fontFamily:"'Inter',system-ui,sans-serif"}}>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:620,maxHeight:"90vh",display:"flex",flexDirection:"column",boxShadow:"0 16px 48px rgba(0,0,0,.25)"}}>
+            <div style={{padding:"20px 24px 16px",borderBottom:"1px solid "+C.border,flexShrink:0}}>
+              <div style={{fontSize:10,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:".08em",marginBottom:6}}>For Reference{viewDoc.version?" · Version "+viewDoc.version:""}</div>
+              <div style={{fontSize:19,fontWeight:700,color:C.text,letterSpacing:"-.02em"}}>{viewDoc.name}</div>
+              {viewDoc.signed&&<div style={{fontSize:11,color:C.success,marginTop:4,fontWeight:600}}>✓ {viewDoc.signed}</div>}
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"20px 24px",lineHeight:1.7}}>
+              {(viewDoc.sections||[]).map(function(sec,i){return (
+                <div key={i} style={{marginBottom:16}}>
+                  {sec.h&&<div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:6}}>{sec.h}</div>}
+                  {(sec.body||[]).map(function(line,j){return <div key={j} style={{fontSize:12.5,color:C.muted,lineHeight:1.7,marginBottom:6,whiteSpace:"pre-wrap"}}>{line}</div>;})}
+                </div>
+              );})}
+            </div>
+            <div style={{padding:"14px 24px",borderTop:"1px solid "+C.border,flexShrink:0}}>
+              <Btn small variant="outline" onClick={function(){setViewDoc(null);}} fullWidth={true}>Close</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -21127,7 +21185,7 @@ function App() {
             addToast={addToast} repData={myRepData}/>
         )}
         {!isAdmin&&activeTab==="profile"&&(
-          <RepProfile user={effectiveUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast}/>
+          <RepProfile user={effectiveUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast} legalDocs={legalDocs} signatures={signatures}/>
         )}
         {!isAdmin&&activeTab==="helpdesk"&&(
           <HelpDeskModule currentUser={effectiveUser} tickets={tickets} setTickets={setTickets}
