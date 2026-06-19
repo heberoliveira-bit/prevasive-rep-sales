@@ -11281,7 +11281,7 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
       if(p.done){ addToast&&addToast(p.error?("Could not send — "+p.error):("Sent "+p.sent+" / "+(p.total||p.sent)+(p.failed?(" · "+p.failed+" failed"):"")), (p.error||p.failed)?"warning":"success"); setTimeout(function(){setProgress(null);},1500); }
     });
   }
-  var previewHtml = preview ? notifEmailHtml(company(), preview.subject||"", (preview.html||"")+"<div style='margin-top:24px;padding-top:14px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6'>Unsubscribe · "+company()+"</div>", null, null, "#635bff") : "";
+  var previewHtml = preview ? campaignWrapHtml((preview.html||"")+"<div style='margin-top:24px;padding:14px 20px 16px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6'>Unsubscribe · "+company()+"</div>") : "";
   return (
     <div style={{maxWidth:760}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,gap:12}}>
@@ -12498,7 +12498,7 @@ function RepCampaignsPanel({campaigns, customers, senderName, senderEmail, addTo
       if(p.done){ addToast&&addToast(p.error?("Could not send — "+p.error):("Sent to "+p.sent+" customer(s)"+(p.failed?(" · "+p.failed+" failed"):"")), (p.error||p.failed)?"warning":"success"); setTimeout(function(){setProgress(null);},1500); }
     });
   }
-  var previewHtml = preview ? notifEmailHtml(company(), preview.subject||"", (preview.html||"")+"<div style='margin-top:24px;padding-top:14px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6'>Unsubscribe · "+company()+"</div>", null,null,"#635bff") : "";
+  var previewHtml = preview ? campaignWrapHtml((preview.html||"")+"<div style='margin-top:24px;padding:14px 20px 16px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6'>Unsubscribe · "+company()+"</div>") : "";
   if(!list.length) return null;
   return (
     <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"14px 16px",marginBottom:16}}>
@@ -16586,6 +16586,16 @@ function notifEmailHtml(company, heading, bodyHtml, ctaLabel, ctaLink, accent){
     +"</div></div></body></html>";
 }
 
+// Header-less email-safe wrapper for campaigns — no branded header bar, so the
+// pasted ad fills the space. Branding/compliance lives in the appended footer.
+function campaignWrapHtml(bodyHtml){
+  return "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+    +"<body style='margin:0;padding:24px 0;background:#f4f6fb;font-family:Arial,Helvetica,sans-serif;'>"
+    +"<div style='max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);'>"
+    +(bodyHtml||"")
+    +"</div></body></html>";
+}
+
 // Campaign sender — personalizes tokens, wraps in the branded shell, appends a CAN-SPAM
 // footer (sender + company + working mailto unsubscribe), and sends one-by-one with throttle.
 // recipients: [{name,email}]; sender: {name,email}; onProgress({sent,failed,total,done,error}).
@@ -16599,7 +16609,7 @@ function sendCampaignBatch(campaign, recipients, sender, opts, onProgress){
   var list = (recipients||[]).filter(function(r){return r&&r.email&&/.+@.+\..+/.test(r.email);});
   var sent=0, failed=0, i=0;
   function footer(){
-    return "<div style='margin-top:24px;padding-top:14px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6;line-height:1.6'>"
+    return "<div style='margin-top:24px;padding:14px 20px 16px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6;line-height:1.6'>"
       +"You're receiving this email from "+senderName+(senderName!==company?(" · "+company):"")+"."
       +(addr?("<br>"+addr):"")
       +"<br><a href='mailto:"+cfg.fromEmail+"?subject=Unsubscribe' style='color:#8a94a6'>Unsubscribe</a> from these emails."
@@ -16616,7 +16626,7 @@ function sendCampaignBatch(campaign, recipients, sender, opts, onProgress){
     if(i>=list.length){ if(onProgress) onProgress({done:true,sent:sent,failed:failed,total:list.length}); return; }
     var r=list[i++];
     var body = personalize(campaign.html, r) + footer();
-    var full = opts.raw ? body : notifEmailHtml(company, personalize(campaign.subject,r), body, null, null, "#635bff");
+    var full = opts.raw ? body : campaignWrapHtml(body);
     var subj = personalize(campaign.subject||"(no subject)", r);
     fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({action:"send",fromEmail:cfg.fromEmail,fromName:senderName,
