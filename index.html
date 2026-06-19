@@ -10064,7 +10064,7 @@ function computeRepStats(orders, quotes, customers, repId, sinceMs){
   var since = sinceMs;
   var orderRows  = (orders||[]).filter(function(o){return o.repId===repId && new Date(o.createdAt).getTime()>=since && o.status!=="Cancelled";});
   var quoteRows  = (quotes||[]).filter(function(q){return q.repId===repId && new Date(q.createdAt).getTime()>=since;});
-  var custRows   = (customers||[]).filter(function(c){return (c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt && new Date(c.createdAt).getTime()>=since;});
+  var custRows   = (customers||[]).filter(function(c){return (c.repId===repId || c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt && new Date(c.createdAt).getTime()>=since;});
   var revenue    = orderRows.reduce(function(s,o){return s + ((o.totals&&o.totals.grand)||o.total||0);}, 0);
   return {
     orderCount:    orderRows.length,
@@ -10090,7 +10090,7 @@ function computeRepActionFeed(orders, quotes, customers, repId, limit){
     actions.push({ts:q.createdAt, kind:"quote_created", label:"Quote "+q.id+" sent — "+(q.custName||"customer"), amount:q.total||0, quoteId:q.id});
     if(q.acceptedAt) actions.push({ts:q.acceptedAt, kind:"quote_accepted", label:"Quote accepted — "+q.id, quoteId:q.id});
   });
-  (customers||[]).filter(function(c){return (c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt;}).forEach(function(c){
+  (customers||[]).filter(function(c){return (c.repId===repId || c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt;}).forEach(function(c){
     actions.push({ts:c.createdAt, kind:"customer_added", label:"Customer added — "+c.name, customerId:c.id});
   });
   actions.sort(function(a,b){return new Date(b.ts).getTime() - new Date(a.ts).getTime();});
