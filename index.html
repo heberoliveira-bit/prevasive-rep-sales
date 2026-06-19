@@ -12474,7 +12474,96 @@ function buildMultiProductTemplate(kind, products, orders){
   };
 }
 
-function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,addToast,showResult}) {
+function RepCampaignsPanel({campaigns, customers, senderName, senderEmail, addToast}){
+  const [sel,setSel]=useState(null);
+  const [preview,setPreview]=useState(null);
+  const [pickAll,setPickAll]=useState(true);
+  const [chosen,setChosen]=useState({});
+  const [progress,setProgress]=useState(null);
+  const [open,setOpen]=useState(false);
+  var list=(campaigns||[]);
+  var withEmail=(customers||[]).filter(function(c){return c.email;});
+  function company(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}}
+  function recipients(){
+    var base = pickAll ? withEmail : withEmail.filter(function(c){return chosen[c.id];});
+    return base.map(function(c){return {name:c.name,email:c.email};});
+  }
+  function send(camp,testOnly){
+    var recips = testOnly ? [{name:senderName||"Me", email:senderEmail||""}] : recipients();
+    if(!recips.length){ addToast&&addToast(testOnly?"No email address on your account":"Select at least one customer","warning"); return; }
+    if(!testOnly && !window.confirm("Send \""+(camp.name||"campaign")+"\" to "+recips.length+" of your customers?")) return;
+    setProgress({sent:0,failed:0,total:recips.length});
+    sendCampaignBatch(camp, recips, {name:senderName||company(),email:senderEmail}, {siteUrl:(typeof getSiteUrl==="function"?getSiteUrl():"")}, function(p){
+      setProgress(p);
+      if(p.done){ addToast&&addToast(p.error?("Could not send — "+p.error):("Sent to "+p.sent+" customer(s)"+(p.failed?(" · "+p.failed+" failed"):"")), (p.error||p.failed)?"warning":"success"); setTimeout(function(){setProgress(null);},1500); }
+    });
+  }
+  var previewHtml = preview ? notifEmailHtml(company(), preview.subject||"", (preview.html||"")+"<div style='margin-top:24px;padding-top:14px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6'>Unsubscribe · "+company()+"</div>", null,null,"#635bff") : "";
+  if(!list.length) return null;
+  return (
+    <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"14px 16px",marginBottom:16}}>
+      <div onClick={function(){setOpen(!open);}} style={{display:"flex",justifyContent:"space-between",alignItems:"center",cursor:"pointer"}}>
+        <div><div style={{fontWeight:700,fontSize:14,color:C.text}}>📣 Send a Campaign</div><div style={{fontSize:11,color:C.muted,marginTop:2}}>Send a saved campaign to your customers — branded and personalized from you.</div></div>
+        <span style={{fontSize:12,color:C.accent,fontWeight:600}}>{open?"Hide":"Show ("+list.length+")"}</span>
+      </div>
+      {open&&(
+        <div style={{marginTop:14}}>
+          {list.map(function(camp){
+            var isSel=sel===camp.id;
+            return (
+              <div key={camp.id} style={{border:"1px solid "+(isSel?C.accent:C.border),borderRadius:9,padding:"12px 14px",marginBottom:8,background:isSel?C.accent+"08":C.surface2}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10}}>
+                  <div style={{minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:13,color:C.text}}>{camp.name||"(untitled)"}</div>
+                    <div style={{fontSize:12,color:C.muted,marginTop:2}}>{camp.subject||"(no subject)"}</div>
+                  </div>
+                  <div style={{display:"flex",gap:6,flexShrink:0}}>
+                    <Btn small variant="outline" onClick={function(){setPreview(camp);}}>Preview</Btn>
+                    <Btn small variant={isSel?"primary":"ghost"} onClick={function(){setSel(isSel?null:camp.id);}}>{isSel?"Selected":"Select"}</Btn>
+                  </div>
+                </div>
+                {isSel&&(
+                  <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.border}}>
+                    <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:8,fontSize:12}}>
+                      <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:pickAll?C.text:C.muted}}><input type="radio" name={"rcp_"+camp.id} checked={pickAll} onChange={function(){setPickAll(true);}} style={{accentColor:C.accent}}/>All my customers ({withEmail.length})</label>
+                      <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",color:!pickAll?C.text:C.muted}}><input type="radio" name={"rcp_"+camp.id} checked={!pickAll} onChange={function(){setPickAll(false);}} style={{accentColor:C.accent}}/>Pick customers</label>
+                    </div>
+                    {!pickAll&&(
+                      <div style={{maxHeight:160,overflowY:"auto",border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px",marginBottom:8}}>
+                        {withEmail.length?withEmail.map(function(c){
+                          return <label key={c.id} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",fontSize:12,color:C.text,cursor:"pointer"}}><input type="checkbox" checked={!!chosen[c.id]} onChange={function(){setChosen(Object.assign({},chosen,{[c.id]:!chosen[c.id]}));}} style={{accentColor:C.accent}}/>{c.name} <span style={{color:C.dim}}>· {c.email}</span></label>;
+                        }):<div style={{fontSize:12,color:C.dim,fontStyle:"italic"}}>No customers with email addresses yet.</div>}
+                      </div>
+                    )}
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <Btn small variant="outline" onClick={function(){send(camp,true);}}>Send Test to Me</Btn>
+                      <Btn small onClick={function(){send(camp,false);}}>Send to Customers →</Btn>
+                      {progress&&<span style={{fontSize:12,color:C.muted}}>{progress.done?"Done":"Sending…"} {progress.sent||0}/{progress.total||0}{progress.failed?(" · "+progress.failed+" failed"):""}</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {preview&&(
+        <div onClick={function(){setPreview(null);}} style={{position:"fixed",inset:0,background:C.bg+"f2",backdropFilter:"blur(8px)",zIndex:6000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+          <div onClick={function(e){e.stopPropagation();}} style={{background:C.surface,border:"1px solid "+C.border,borderRadius:14,width:"100%",maxWidth:640,maxHeight:"90vh",display:"flex",flexDirection:"column",overflow:"hidden"}}>
+            <div style={{padding:"16px 20px",borderBottom:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div><div style={{fontSize:10,fontWeight:700,color:C.accent,textTransform:"uppercase",letterSpacing:".08em"}}>Preview</div><div style={{fontWeight:700,fontSize:14,color:C.text}}>{preview.subject||"(no subject)"}</div></div>
+              <Btn small variant="ghost" onClick={function(){setPreview(null);}}>Close</Btn>
+            </div>
+            <iframe title="preview" srcDoc={previewHtml} style={{flex:1,width:"100%",border:"none",background:"#fff",minHeight:380}}/>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,addToast,showResult,campaigns}) {
   const [toId,     setToId]     = useState("");
   const [toEmail,  setToEmail]  = useState("");
   const [subject,  setSubject]  = useState("");
@@ -12675,6 +12764,8 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
   return (
     <div>
       <PageHeader title="Email" subtitle={emailReady?("Compose and send messages to customers — sending as "+emailCfg.fromEmail):"Compose and send messages to customers"}/>
+
+      <RepCampaignsPanel campaigns={campaigns} customers={myCusts} senderName={currentUser&&currentUser.name} senderEmail={currentUser&&currentUser.email} addToast={addToast}/>
 
       {!emailReady && (
         <div style={{padding:"12px 16px",background:C.warning+"10",border:"1px solid "+C.warning+"30",borderRadius:10,marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
@@ -21224,7 +21315,7 @@ function App() {
         {(activeTab==="email")&&(
           <EmailModule currentUser={currentUser} customers={customers} orders={orders} products={products} reps={reps}
             repId={effectiveUser.rep_id||effectiveUser.id}
-            isAdmin={isAdmin} addToast={addToast} showResult={showResult}/>
+            isAdmin={isAdmin} addToast={addToast} showResult={showResult} campaigns={campaigns}/>
         )}
         {(activeTab==="quotes"||activeTab==="rep_quotes")&&(
           <QuotesModule quotes={quotes} setQuotes={setQuotes}
