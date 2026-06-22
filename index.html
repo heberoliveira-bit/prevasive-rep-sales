@@ -16041,7 +16041,17 @@ function RepProfile({user,repData,setReps,commissions,addToast,legalDocs,signatu
       .then(function(d){ setPoBusy(false); if(d&&d.ok) setPoStatus(d); })
       .catch(function(){ setPoBusy(false); });
   }
-  useEffect(function(){ if(tab==="payouts"&&repData&&repData.stripeConnectId&&!poStatus) checkPayoutStatus(); },[tab]);
+  function openStripeDashboard(){
+    if(!repData||!repData.stripeConnectId){ addToast&&addToast("Set up Stripe first","warning"); return; }
+    var fn=(_connectCfg().connectFnUrl)||""; if(!fn){ addToast&&addToast("Stripe Connect isn't set up yet — ask your admin.","warning"); return; }
+    setPoBusy(true);
+    fetch(fn,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({action:"login_link",connectAccountId:repData.stripeConnectId})})
+      .then(function(r){return r.json();})
+      .then(function(d){ setPoBusy(false); if(d&&d.ok&&d.url){ window.open(d.url,"_blank","noopener"); } else { addToast&&addToast((d&&d.error)||"Couldn't open your Stripe dashboard.","warning"); } })
+      .catch(function(){ setPoBusy(false); addToast&&addToast("Couldn't reach Stripe. Try again.","warning"); });
+  }
+  useEffect(function(){ if((tab==="payouts"||tab==="documents")&&repData&&repData.stripeConnectId&&!poStatus) checkPayoutStatus(); },[tab]);
 
 
   return (
@@ -16075,35 +16085,49 @@ function RepProfile({user,repData,setReps,commissions,addToast,legalDocs,signatu
         <div style={{maxWidth:560}}>
           <div style={{marginBottom:28}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingBottom:12,borderBottom:"1px solid "+C.border}}>
-              <div><div style={{fontWeight:800,fontSize:15,color:C.text}}>W-9 Tax Form</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Required for commission payments.</div></div>
-              {repData&&repData.w9ReviewStatus==="approved"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.success+"18",color:C.success,fontSize:11,fontWeight:700}}>✓ Approved</span>}
-              {repData&&repData.w9SubmittedAt&&repData.w9ReviewStatus!=="approved"&&repData.w9ReviewStatus!=="rejected"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>⏳ Pending Review</span>}
-              {repData&&repData.w9ReviewStatus==="rejected"&&<span style={{padding:"3px 10px",borderRadius:20,background:C.danger+"18",color:C.danger,fontSize:11,fontWeight:700}}>⚠ Needs Resubmission</span>}
-              {repData&&!repData.w9SubmittedAt&&<span style={{padding:"3px 10px",borderRadius:20,background:C.surface2,color:C.dim,fontSize:11,fontWeight:700}}>Not Submitted</span>}
+              <div><div style={{fontWeight:800,fontSize:15,color:C.text}}>Tax Info &amp; W-9</div><div style={{fontSize:12,color:C.muted,marginTop:2}}>Collected securely through Stripe — used for your 1099.</div></div>
+              {(function(){
+                if(!repData||!repData.stripeConnectId) return <span style={{padding:"3px 10px",borderRadius:20,background:C.surface2,color:C.dim,fontSize:11,fontWeight:700}}>Not started</span>;
+                if(!poStatus) return <span style={{padding:"3px 10px",borderRadius:20,background:C.surface2,color:C.dim,fontSize:11,fontWeight:700}}>Checking…</span>;
+                if(poStatus.tax_info_needed||poStatus.needs_attention) return <span style={{padding:"3px 10px",borderRadius:20,background:C.warning+"18",color:C.warning,fontSize:11,fontWeight:700}}>Action needed</span>;
+                return <span style={{padding:"3px 10px",borderRadius:20,background:C.success+"18",color:C.success,fontSize:11,fontWeight:700}}>✓ On file with Stripe</span>;
+              })()}
             </div>
 
             <div style={{padding:"16px 18px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10}}>
-              {repData&&repData.w9SubmittedAt?(
+              {(!repData||!repData.stripeConnectId)?(
                 <div>
-                  <div style={{fontSize:13,color:C.text,fontWeight:600,marginBottom:4}}>{repData.w9FileName||"Signed W-9"}</div>
-                  <div style={{fontSize:12,color:C.muted,marginBottom:10}}>Sent to admin on {fmtDate(repData.w9SubmittedAt)}</div>
-                  {repData.w9ReviewStatus==="rejected"&&repData.w9RejectReason&&(
-                    <div style={{padding:"10px 12px",background:C.danger+"10",border:"1px solid "+C.danger+"25",borderRadius:8,fontSize:12,color:C.danger,marginBottom:10}}>
-                      <strong>Admin requested resubmission:</strong> {repData.w9RejectReason}
-                    </div>
+                  <div style={{fontSize:13,color:C.text,marginBottom:10,lineHeight:1.6}}>Your W-9 is collected through Stripe when you set up payouts. This certifies your tax ID and lets Stripe deliver your 1099 at year-end.</div>
+                  <Btn onClick={connectStripe} disabled={poBusy}>{poBusy?"Opening…":"Set up tax info in Stripe →"}</Btn>
+                </div>
+              ):(poStatus&&(poStatus.tax_info_needed||poStatus.needs_attention))?(
+                <div>
+                  <div style={{fontSize:13,color:C.text,marginBottom:6,lineHeight:1.6}}>Stripe needs a bit more tax info before your payouts can continue. Complete it in your Stripe dashboard.</div>
+                  {poStatus.requirements&&(poStatus.requirements.currently_due||[]).length>0&&(
+                    <div style={{fontSize:11,color:C.muted,marginBottom:10}}>Outstanding: {(poStatus.requirements.currently_due).join(", ")}</div>
                   )}
-                  <Btn small variant={repData.w9ReviewStatus==="approved"?"outline":"primary"} onClick={function(){setShowW9Modal(true);}}>
-                    {repData.w9ReviewStatus==="approved"?"Replace W-9":"Resubmit / Replace W-9"}
-                  </Btn>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <Btn onClick={openStripeDashboard} disabled={poBusy}>{poBusy?"Opening…":"Complete in Stripe →"}</Btn>
+                    <Btn small variant="ghost" onClick={checkPayoutStatus} disabled={poBusy}>Refresh</Btn>
+                  </div>
                 </div>
               ):(
                 <div>
-                  <div style={{fontSize:13,color:C.text,marginBottom:10,lineHeight:1.6}}>
-                    Download the IRS W-9 form, fill it out, sign it, and upload the signed PDF. It's emailed directly to your admin with your profile attached.
+                  <div style={{fontSize:13,color:C.text,marginBottom:10,lineHeight:1.6}}>✓ Your tax info is on file with Stripe. Your 1099 will be delivered to your Stripe dashboard at year-end.</div>
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    <Btn variant="outline" onClick={openStripeDashboard} disabled={poBusy}>{poBusy?"Opening…":"Manage tax info / get 1099"}</Btn>
+                    <Btn small variant="ghost" onClick={checkPayoutStatus} disabled={poBusy}>Refresh</Btn>
                   </div>
-                  <Btn onClick={function(){setShowW9Modal(true);}}>📄 Submit W-9</Btn>
                 </div>
               )}
+
+              <div style={{marginTop:14,paddingTop:12,borderTop:"1px solid "+C.border}}>
+                {repData&&repData.w9SubmittedAt?(
+                  <div style={{fontSize:11,color:C.muted}}>A manual W-9 was sent to your admin on {fmtDate(repData.w9SubmittedAt)}{repData.w9ReviewStatus==="approved"?" · approved":""}. <span onClick={function(){setShowW9Modal(true);}} style={{color:C.accent,cursor:"pointer",fontWeight:600}}>Replace</span></div>
+                ):(
+                  <div style={{fontSize:11,color:C.dim}}>Prefer to file manually instead? <span onClick={function(){setShowW9Modal(true);}} style={{color:C.accent,cursor:"pointer",fontWeight:600}}>Submit a W-9 to your admin</span>.</div>
+                )}
+              </div>
             </div>
           </div>
           {(function(){
