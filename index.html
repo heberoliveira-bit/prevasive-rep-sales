@@ -3900,12 +3900,13 @@ function MultiAddressManager({addresses,onChange}) {
   );
 }
 
-function CustomerEditModal({customer,onSave,onClose,addToast,currentUser}) {
+function CustomerEditModal({customer,reps,onSave,onClose,addToast,currentUser}) {
   var approved=customer.termsStatus==="active"||customer.termsStatus==="awaiting_signature"||customer.termsStatus==="approved";
   const [name,     setName]     = useState(customer.name||"");
   const [email,    setEmail]    = useState(customer.email||"");
   const [phone,    setPhone]    = useState(customer.phone||"");
   const [company,  setCompany]  = useState(customer.company||"");
+  const [repAssign, setRepAssign] = useState(customer.repId||"");
   /* Billing address */
   const [bAddr,  setBAddr]  = useState(customer.billingAddress||customer.address||"");
   const [bAddr2, setBAddr2] = useState(customer.billingAddress2||"");
@@ -4052,6 +4053,7 @@ function CustomerEditModal({customer,onSave,onClose,addToast,currentUser}) {
       /* v84: tax exemption */
       taxExempt: taxExempt,
       taxExemption: taxExemptionObj,
+      repId: repAssign||null,
       updatedAt:new Date().toISOString(),
     });
     onSave(updated);addToast("Customer updated","success");onClose();
@@ -4069,6 +4071,14 @@ function CustomerEditModal({customer,onSave,onClose,addToast,currentUser}) {
         <div style={{gridColumn:"1/-1"}}><Field label="Company / Practice" value={company} onChange={setCompany} placeholder="e.g. Atlanta Medical Group"/></div>
         <Field label="Email" value={email} onChange={setEmail} type="email" placeholder="email@practice.com"/>
         <Field label="Phone" value={phone} onChange={setPhone} placeholder="(404) 555-0100"/>
+        <div style={{gridColumn:"1/-1"}}>
+          <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Assigned Rep</div>
+          <select value={repAssign} onChange={function(e){setRepAssign(e.target.value);}} style={Object.assign({},inpS,{cursor:"pointer"})}>
+            <option value="">— Unassigned (no rep) —</option>
+            {(reps||[]).slice().sort(function(a,b){return (a.name||"").localeCompare(b.name||"");}).map(function(r){return <option key={r.id} value={r.id}>{r.name}{r.email?(" · "+r.email):""}</option>;})}
+          </select>
+          {!repAssign&&<div style={{fontSize:11,color:C.warning,marginTop:4}}>This customer has no rep. Assign one so they show under a rep's book and count in Rep Activity.</div>}
+        </div>
       </div>
 
       {/* Billing Address */}
@@ -7370,12 +7380,13 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
 }
 
 
-function CSVImportModal({repId,onImport,onClose,addToast}) {
+function CSVImportModal({repId,reps,onImport,onClose,addToast}) {
   const [rows,     setRows]     = useState([]);
   const [headers,  setHeaders]  = useState([]);
   const [mapping,  setMapping]  = useState({});
   const [preview,  setPreview]  = useState([]);
   const [step,     setStep]     = useState("upload");
+  const [selRep,   setSelRep]   = useState(repId||"");
 
   var FIELDS = [{v:"name",l:"Name *"},{v:"email",l:"Email"},{v:"company",l:"Company"},{v:"phone",l:"Phone"},{v:"address",l:"Address"},{v:"city",l:"City"},{v:"state",l:"State"},{v:"zip",l:"ZIP"},{v:"paymentTerms",l:"Payment Terms"}];
 
@@ -7418,7 +7429,7 @@ function CSVImportModal({repId,onImport,onClose,addToast}) {
   function doImport() {
     var imported = rows.filter(function(r){return mapping["name"]&&r[mapping["name"]];}).map(function(r){
       var id = genId("cust");
-      return {id:id,repId:repId,
+      return {id:id,repId:selRep||null,
         name:(r[mapping["name"]]||"").trim(),email:(r[mapping["email"]]||"").trim(),
         company:(r[mapping["company"]]||"").trim(),phone:(r[mapping["phone"]]||"").trim(),
         address:(r[mapping["address"]]||"").trim(),city:(r[mapping["city"]]||"").trim(),
@@ -7458,6 +7469,15 @@ function CSVImportModal({repId,onImport,onClose,addToast}) {
       )}
       {step==="map"&&(
         <div>
+          <div style={{marginBottom:16,padding:"12px 14px",background:C.accent+"0d",border:"1px solid "+C.accent+"33",borderRadius:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:6}}>Assign imported customers to a rep</div>
+            <select value={selRep} onChange={function(e){setSelRep(e.target.value);}}
+              style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}>
+              <option value="">— Unassigned (no rep) —</option>
+              {(reps||[]).slice().sort(function(a,b){return (a.name||"").localeCompare(b.name||"");}).map(function(r){return <option key={r.id} value={r.id}>{r.name}{r.email?(" · "+r.email):""}</option>;})}
+            </select>
+            {!selRep&&<div style={{fontSize:11,color:C.warning,marginTop:6}}>Heads up: these customers will have no rep until assigned. Pick a rep above to assign them on import.</div>}
+          </div>
           <div style={{marginBottom:16,fontSize:12,color:C.muted}}>Map your CSV columns to customer fields:</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
             {FIELDS.map(function(f){return (
@@ -10036,7 +10056,7 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast,currentUser
           </table>
         </div>
       )}
-      {showImport&&<CSVImportModal repId={null} onImport={function(imported){setCustomers(function(prev){return imported.concat(prev);});}} onClose={function(){setShowImport(false);}} addToast={addToast}/>}
+      {showImport&&<CSVImportModal repId={null} reps={reps} onImport={function(imported){setCustomers(function(prev){return imported.concat(prev);});}} onClose={function(){setShowImport(false);}} addToast={addToast}/>}
       {viewCust&&(
         <CustomerProfile customer={viewCust} orders={orders}
           onEdit={function(cust){setViewCust(null);setEditCustModal2(cust);}}
@@ -10045,6 +10065,7 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast,currentUser
       {editCustModal2&&(
         <CustomerEditModal
           customer={editCustModal2}
+          reps={reps}
           currentUser={currentUser}
           onSave={function(updated){
             setCustomers(function(prev){return prev.map(function(x){return x.id===updated.id?updated:x;});});
