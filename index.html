@@ -13126,6 +13126,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [forceFreight,    setForceFreight]    = useState(false);
   const [forceParcel,     setForceParcel]     = useState(false); // override: rep forces parcel even if triggers fire
   const [shippingChoice,  setShippingChoice]  = useState(null); // null = auto, "parcel" or "freight" = explicit
+  const [pickup, setPickup] = useState(!!(editOrder&&(editOrder.fulfillment==="pickup"||editOrder.pickup)));
   const [freightPallets,  setFreightPallets]  = useState(1);
   const [freightAcc, setFreightAcc] = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
   const [freightNotes,    setFreightNotes]    = useState("");
@@ -13216,6 +13217,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var _qualifies = isOrderFreight(items, products, _customer, subtotal);
     var _locked = _qualifies && isOrderFreightLocked(items, products, _customer);
     var _isFreightMode = (shippingChoice === "freight") || (shippingChoice == null && _locked);
+    if(pickup) return 0;
     if(_isFreightMode) return 0;
 
     if(shippingOverride!==null) return parseFloat(shippingOverride)||0;
@@ -13269,6 +13271,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var tax = activeExemption ? 0 : Math.round(discounted*taxRate*100)/100;
     var grand    = discounted + shipping + tax;
     return {baseSubtotal:baseSubtotal,subtotal:subtotal,discount:discount,shipping:shipping,tax:tax,taxRate:taxRate,taxInfo:taxInfo,grand:grand,commission:commission,commRate:rate2,
+            fulfillment: pickup?"pickup":"ship",
             taxExempt: !!activeExemption, taxExemptionType: activeExemption?activeExemption.type:null, taxExemptionNumber: activeExemption?activeExemption.number:null};
   }
 
@@ -13433,6 +13436,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     // Track if rep diverged from the auto-default (for audit log)
     var autoDefault = freightQualifies ? (freightLocked ? "freight" : "parcel") : "parcel";
     var repElectedDifferently = shippingChoice && shippingChoice !== autoDefault;
+    if(pickup){ isFreight=false; }  // customer pickup overrides all shipping/freight
 
     var order = {
       id:id, repId:repId, repName:repName,
@@ -13463,7 +13467,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       dorPath:payMethod==="due_receipt"?dorPath:null,
       notes:notes,
       status: isEdit ? (editOrder.status||"Submitted") : (isFreight ? "Awaiting Freight Quote" : "Submitted"),
-      shippingType: isFreight ? "freight" : "parcel",
+      shippingType: pickup ? "pickup" : (isFreight ? "freight" : "parcel"),
+      fulfillment: pickup ? "pickup" : "ship", pickup: !!pickup,
       packageCount: (selectedRate && selectedRate.packageCount) || 1,
       weightPerPackage: (selectedRate && selectedRate.weightPerPackage) || null,
       freightDetails: isFreight ? {
@@ -14077,8 +14082,21 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 })()}
               </div>
 
+              {/* Customer pickup — no shipping */}
+              <label style={{display:"flex",alignItems:"center",gap:10,marginBottom:16,padding:"12px 14px",borderRadius:10,cursor:"pointer",
+                background:pickup?C.accent+"0d":C.surface2,border:"1px solid "+(pickup?C.accent+"55":C.border)}}>
+                <input type="checkbox" checked={pickup} onChange={function(e){
+                  var on=e.target.checked; setPickup(on);
+                  if(on){ setShippingChoice(null); setShippingOverride(null); setShippingOverrideSource(null); setSelectedRate(null); setForceFreight(false); setForceParcel(false); }
+                }} style={{width:16,height:16,accentColor:C.accent,cursor:"pointer"}}/>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:C.text}}>🏬 Customer pickup — no shipping</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>Customer picks up the order. No shipping is calculated or charged.</div>
+                </div>
+              </label>
+
               {/* Toggle: parcel vs freight — shown when order qualifies OR rep explicitly chose freight */}
-              {(function(){
+              {!pickup && (function(){
                 var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
@@ -14140,7 +14158,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               })()}
 
               {/* Freight setup — shown when rep chose freight (or it's locked) */}
-              {(function(){
+              {!pickup && (function(){
                 var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
@@ -14186,7 +14204,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               })()}
 
               {/* Parcel rates — shown when order doesn't qualify for freight, OR rep chose parcel */}
-              {(function(){
+              {!pickup && (function(){
                 var customer = selCust||(newCust?{}:null);
                 var calcTotalsTmp = calcTotals();
                 var freightQualifies = isOrderFreight(items, products, customer, calcTotalsTmp.grand);
@@ -18774,6 +18792,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [freightNotes, setFreightNotes] = useState("");
   const [forceParcel, setForceParcel] = useState(false);
   const [shippingChoice, setShippingChoice] = useState(null); // null = auto, "parcel" or "freight"
+  const [pickup, setPickup] = useState(false);
 
   useEffect(function(){
     if(!custId){
@@ -18899,7 +18918,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var _shipQualifies = hasLines && isOrderFreight(_shipFreightItems, products, selCust, subtotal);
   var _shipLocked = _shipQualifies && isOrderFreightLocked(_shipFreightItems, products, selCust);
   var _shipFreightMode = (shippingChoice === "freight") || (shippingChoice == null && _shipLocked);
-  var shipping = _shipFreightMode ? 0 : (selectedRate ? (Number(selectedRate.shipmentCost)||0) : 0);
+  var shipping = pickup ? 0 : (_shipFreightMode ? 0 : (selectedRate ? (Number(selectedRate.shipmentCost)||0) : 0));
   var total = Math.round((subtotal + tax + shipping)*100)/100;
 
   var pickedProduct = (products||[]).find(function(p){return p.id===productId;});
@@ -18914,8 +18933,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var _mobileCustomer = selCust;
   var _mobileQualifies = hasLines && isOrderFreight(_mobileItemsArr, products, _mobileCustomer, total);
   var _mobileLocked = _mobileQualifies && isOrderFreightLocked(_mobileItemsArr, products, _mobileCustomer);
-  var _mobileIsFreight = _mobileQualifies && ((shippingChoice || "freight")==="freight");
-  var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && (_mobileIsFreight || !!selectedRate);
+  var _mobileIsFreight = !pickup && _mobileQualifies && ((shippingChoice || "freight")==="freight");
+  var canPlace = hasCustomer && hasShipAddr && hasLines && cardOk && (_mobileIsFreight || !!selectedRate || pickup);
 
   function place(){
     if(!canPlace || placing) return;
@@ -18946,7 +18965,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
     var _pItemsArr = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
     var _pQualifies = isOrderFreight(_pItemsArr, products, cRecord, total);
     var _pLocked = _pQualifies && isOrderFreightLocked(_pItemsArr, products, cRecord);
-    var _placeIsFreight = _pQualifies && ((shippingChoice || "freight")==="freight");
+    var _placeIsFreight = !pickup && _pQualifies && ((shippingChoice || "freight")==="freight");
     var _placeAutoDefault = !_pQualifies ? "parcel" : "freight";
     var _placeRepDeviated = _pQualifies && shippingChoice && shippingChoice !== _placeAutoDefault;
 
@@ -18966,6 +18985,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           });
         }),
         subtotal:subtotal, tax:tax, taxRate:taxRate, taxInfo:taxInfo, shipping:shipping, total:total,
+        fulfillment: pickup?"pickup":"ship", pickup: !!pickup, shippingType: pickup?"pickup":undefined,
         shippingRate: selectedRate ? {
           amount: Number(selectedRate.shipmentCost)||0,
           label: (selectedRate.carrierName||selectedRate.carrierCode||"")+" — "+(selectedRate.serviceName||"")+(selectedRate.packageCount>1?" (× "+selectedRate.packageCount+" packages)":""),
@@ -19324,8 +19344,23 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         )}
       </div>
 
+      {/* Customer pickup — no shipping (mobile) */}
+      <div style={{marginBottom:16}}>
+        <label style={{display:"flex",alignItems:"center",gap:10,padding:"14px",borderRadius:10,cursor:"pointer",
+          background:pickup?C.accent+"12":C.surface,border:"2px solid "+(pickup?C.accent:C.border)}}>
+          <input type="checkbox" checked={pickup} onChange={function(e){
+            var on=e.target.checked; setPickup(on);
+            if(on){ setShippingChoice(null); setSelectedRate(null); setForceParcel(false); }
+          }} style={{width:18,height:18,accentColor:C.accent}}/>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:C.text}}>🏬 Customer pickup</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:2}}>No shipping calculated or charged.</div>
+          </div>
+        </label>
+      </div>
+
       {/* Live Shipping rates OR Freight UI — toggleable when order qualifies */}
-      {(function(){
+      {!pickup && (function(){
         var mobileTotal = total;
         var mobileItems = lines.map(function(it){return Object.assign({},it,{prodId:it.productId});});
         var mobileQualifies = hasLines && isOrderFreight(mobileItems, products, selCust, mobileTotal);
