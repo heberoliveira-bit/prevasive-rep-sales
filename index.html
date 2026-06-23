@@ -2272,14 +2272,23 @@ function InviteRegistration({token,onComplete}) {
     var em = email.trim().toLowerCase();
     if(!em||!/^[^@]+@[^@]+\.[^@]+$/.test(em)){setErr("Enter a valid email address.");return;}
     setSendingCode(true); setErr("");
-    fetch(SUPABASE_URL+"/functions/v1/auth-2fa",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({action:"send", email:em}),
-    }).then(function(r){return r.json();}).then(function(d){
-      setSendingCode(false);
-      if(d.ok){setStep("verify"); setResendTimer(45); setCode("");}
-      else setErr(d.error||"Could not send code");
-    }).catch(function(e){setSendingCode(false); setErr((e&&e.message)||"Network error");});
+    var _sb=getSB();
+    function _doSend(){
+      fetch(SUPABASE_URL+"/functions/v1/auth-2fa",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({action:"send", email:em}),
+      }).then(function(r){return r.json();}).then(function(d){
+        setSendingCode(false);
+        if(d.ok){setStep("verify"); setResendTimer(45); setCode("");}
+        else setErr(d.error||"Could not send code");
+      }).catch(function(e){setSendingCode(false); setErr((e&&e.message)||"Network error");});
+    }
+    if(_sb){
+      _sb.from("crm_users").select("id").ilike("email", em).then(function(chk){
+        if(chk && chk.data && chk.data.length){ setSendingCode(false); setErr("You already have an account with this email. Please sign in, or use \u201CForgot password?\u201D on the sign-in screen."); return; }
+        _doSend();
+      }, function(){ _doSend(); });
+    } else { _doSend(); }
   }
 
   function resendCode(){ if(resendTimer===0) sendCode(); }
@@ -2305,7 +2314,9 @@ function InviteRegistration({token,onComplete}) {
     var sb = getSB();
     if(!sb){setErr("Service unavailable.");return;}
     setBusy(true); setErr("");
-    sb.auth.signUp({email:email.trim(),password:pass})
+    var em = email.trim();
+    function proceed(){
+    sb.auth.signUp({email:em,password:pass})
       .then(function(r){
         if(r.error){setBusy(false);setErr(r.error.message);return;}
         var uid = r.data&&r.data.user&&r.data.user.id;
@@ -2341,6 +2352,16 @@ function InviteRegistration({token,onComplete}) {
         });
       })
       .catch(function(e){setBusy(false);setErr(e.message||"Error");});
+    }
+    // Guard: never create a second account for an email that already has one.
+    sb.from("crm_users").select("id").ilike("email", em).then(function(chk){
+      if(chk && chk.data && chk.data.length){
+        setBusy(false);
+        setErr("An account with this email already exists. Please sign in, or use the \u201CForgot password?\u201D link on the sign-in screen.");
+        return;
+      }
+      proceed();
+    }, function(){ proceed(); }); // if the lookup itself fails, still attempt (auth-layer dedupe applies)
   }
 
   function maskEmail(e){
@@ -2517,6 +2538,7 @@ function AppLanding({onLogin}) {
   const [resetDone,   setResetDone]   = useState(false);
   const [resetBusy,   setResetBusy]   = useState(false);
   const [signingIn,   setSigningIn]   = useState(false);
+  const [forgotSent,  setForgotSent]  = useState(false);
 
   useEffect(function() {
     var hash = window.location.hash||"";
@@ -2555,6 +2577,16 @@ function AppLanding({onLogin}) {
           setSiErr(err.message||"Sign in error");
         }
       });
+  }
+
+  function sendReset(){
+    var em=(siEmail||"").trim();
+    if(!em||!/^[^@]+@[^@]+\.[^@]+$/.test(em)){setSiErr("Enter your email above first, then click \u201CForgot password?\u201D.");return;}
+    var sb=getSB(); if(!sb){setSiErr("Service unavailable.");return;}
+    setSiErr("");
+    sb.auth.resetPasswordForEmail(em, {redirectTo: window.location.origin + window.location.pathname})
+      .then(function(){ setForgotSent(true); })
+      .catch(function(e){ setSiErr((e&&e.message)||"Could not send reset email."); });
   }
 
   function handleReset() {
@@ -2802,6 +2834,13 @@ function AppLanding({onLogin}) {
                       fontFamily:"inherit",fontWeight:600,fontSize:14,letterSpacing:"-.01em",marginBottom:10}}>
               {signingIn?"Signing in…":"Sign in →"}
             </button>
+            {forgotSent
+              ? <div style={{textAlign:"center",fontSize:12,color:C.success,marginBottom:10}}>✓ Reset link sent — check your email (and spam folder).</div>
+              : <button onClick={sendReset}
+                  style={{width:"100%",background:"none",border:"none",color:"#635bff",cursor:"pointer",
+                          fontFamily:"inherit",fontSize:12,fontWeight:600,marginBottom:10,padding:"2px"}}>
+                  Forgot password?
+                </button>}
             <button onClick={function(){setShowSignIn(false);}}
               style={{width:"100%",padding:"9px",borderRadius:6,border:"1px solid rgba(255,255,255,.08)",
                       background:"transparent",color:C.muted,cursor:"pointer",
