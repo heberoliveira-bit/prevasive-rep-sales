@@ -12235,7 +12235,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
               </div>
             </div>
           );})}
-          <button onClick={function(){onSaveDiscountCodes((discountCodes||[]).concat([{code:"",type:"percent",value:10,active:true}]));}}
+          <button onClick={function(){onSaveDiscountCodes((discountCodes||[]).concat([{id:"dc_"+Date.now().toString(36),code:"",type:"percent",value:10,active:true,uses:0}]));}}
             style={{padding:"8px 16px",borderRadius:8,border:"1px dashed "+C.border,background:"transparent",color:C.accent,cursor:"pointer",fontSize:12,fontWeight:600,fontFamily:"inherit"}}>
             + Add Discount Code
           </button>
@@ -20568,6 +20568,7 @@ function App() {
       if(d.tax && Object.keys(d.tax).length) setTaxCfg(d.tax);
       if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
       if(d.campaigns && Array.isArray(d.campaigns)) setCampaigns(d.campaigns);
+      if(d.discountCodes && Array.isArray(d.discountCodes)) setDiscountCodes(d.discountCodes);
       if(d.stripePublishableKey||d.stripeChargeFnUrl||d.stripeConnectFnUrl) setStripeAccountA(function(prev){var p=prev||{}; return Object.assign({},p,{publishableKey:p.publishableKey||d.stripePublishableKey||"",edgeFnUrl:p.edgeFnUrl||d.stripeChargeFnUrl||"",connectFnUrl:p.connectFnUrl||d.stripeConnectFnUrl||""});});
       if(d.emailFnUrl) setEmailCfg(function(prev){var p=prev||{}; return Object.assign({},p,{edgeFnUrl:p.edgeFnUrl||d.emailFnUrl||"",fromName:p.fromName||d.emailFromName||"",fromEmail:p.fromEmail||d.emailFromEmail||""});});
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
@@ -20674,7 +20675,7 @@ function App() {
   useEffect(function(){
     if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
     var sb=getSB(); if(!sb) return;
-    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{}, campaigns:campaigns||[],
+    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{}, campaigns:campaigns||[], discountCodes:discountCodes||[],
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
                 stripeChargeFnUrl:(stripeAccountA&&stripeAccountA.edgeFnUrl)||"",
                 stripeConnectFnUrl:(stripeAccountA&&stripeAccountA.connectFnUrl)||"",
@@ -20697,7 +20698,7 @@ function App() {
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(r){
       if(r&&r.error){ try{console.warn("[public_settings] sync write failed:",r.error.message);}catch(_){} }
     });
-  },[invoiceCfg,taxCfg,stripeLinks,campaigns,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
   // v89: publish admin-only secrets so they sync across admin browsers.
   // Same anti-echo pattern as public_settings.
