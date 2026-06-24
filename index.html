@@ -3020,14 +3020,21 @@ function buildInvoicePdf(order, cust, products, company, cb) {
       var prod = (products||[]).find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||'Product'};
       var price = it.customerPrice||it.unitPrice||prod.price||0;
       var total = price * (it.qty||1);
-      if(alt) { doc.setFillColor(250,250,255); doc.rect(margin, y-4, W-margin*2, 7, 'F'); }
+      var hasVar = !!it.variantName;
+      var rowH = hasVar ? 11 : 7;
+      if(alt) { doc.setFillColor(250,250,255); doc.rect(margin, y-4, W-margin*2, rowH, 'F'); }
       alt = !alt;
       doc.setTextColor(30,30,50);
-      doc.text(String(prod.name||'').slice(0,42), margin+2, y);
+      doc.text(String(prod.name||it.name||'').slice(0,46), margin+2, y);
       doc.text(String(it.qty||1), 120, y, {align:'right'});
       doc.text('$'+price.toFixed(2), 150, y, {align:'right'});
       doc.text('$'+total.toFixed(2), W-margin-2, y, {align:'right'});
-      y += 7;
+      if(hasVar){
+        doc.setFontSize(8); doc.setTextColor(120,120,140);
+        doc.text(String(it.variantName).slice(0,54), margin+4, y+4);
+        doc.setFontSize(9); doc.setTextColor(30,30,50);
+      }
+      y += rowH;
     });
     y += 4;
 
@@ -3633,7 +3640,7 @@ function CustomerPaymentPage({payData,onPaid,onDecline}) {
             var prod=products.find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||"Item",price:it.unitPrice||0};
             return (
               <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:8}}>
-                <span>{it.qty}× {prod.name}</span>
+                <span>{it.qty}× {prod.name}{it.variantName?(" — "+it.variantName):""}</span>
                 <span style={{fontWeight:600,color:"#1a1a2e"}}>${((it.customerPrice||it.unitPrice||prod.price||0)*it.qty).toFixed(2)}</span>
               </div>
             );
@@ -3723,7 +3730,7 @@ function CustomerSigningPage({signingData,onSigned,onDecline}) {
           <div style={{fontWeight:700,fontSize:13,color:"#1a1a2e",marginBottom:12}}>Order Summary</div>
           {items.map(function(it,i){return (
             <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:13,color:"#4a5568",marginBottom:6}}>
-              <span>{it.qty}× {it.name||it.prodId}</span>
+              <span>{it.qty}× {it.name||it.prodId}{it.variantName?(" — "+it.variantName):""}</span>
               <span>${((it.unitPrice||0)*it.qty).toFixed(2)}</span>
             </div>
           );})}
@@ -5089,8 +5096,9 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                 }
               }catch(e){}
             }
-            notifyEmail("receipt",cust3.email||"","Payment receipt — "+collectTarget.id,
-              notifEmailHtml(co3,"Payment received","<p>Hi "+(cust3.name||"there")+",</p><p>We've received your payment for order <strong>"+collectTarget.id+"</strong>"+(collectTarget.totals?(" of <strong>$"+((collectTarget.totals.grand||0)).toFixed(2)+"</strong>"):"")+". Thank you!</p>","View receipt",rLink,"#1ea672"));
+            try{ var _repObj=(reps||[]).find(function(r){return r.id===collectTarget.repId;})||{id:collectTarget.repId,name:collectTarget.repName,email:""}; firePaidNotifs(updated, cust3, _repObj, addToast, {force:true, products:products}); }
+            catch(e){ notifyEmail("receipt",cust3.email||"","Payment receipt — "+collectTarget.id,
+              notifEmailHtml(co3,"Payment received","<p>Hi "+(cust3.name||"there")+",</p><p>We've received your payment for order <strong>"+collectTarget.id+"</strong>"+(collectTarget.totals?(" of <strong>$"+((collectTarget.totals.grand||0)).toFixed(2)+"</strong>"):"")+". Thank you!</p>","View receipt",rLink,"#1ea672")); }
             var fulfillSuffix = (updated.status==="Waiting Shipping") ? " · order sent to ShipStation" : "";
             addToast("Payment collected!"+fulfillSuffix,"success");
             setCollectTarget(null);
@@ -9753,10 +9761,10 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                   // If the order isn't paid yet, mark it Paid before firing notifs.
                   // (Backfill case — admin presses Refire on a "Submitted" order that was actually paid.)
                   function doRefire(orderForNotif){
-                    firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: false}).then(function(res){
+                    firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: false, products: products}).then(function(res){
                       if(res && res.skipped){
                         window.appConfirm("Email was sent recently. Send again anyway?", {okLabel:"Send again"}).then(function(force){
-                          if(force) firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: true});
+                          if(force) firePaidNotifs(orderForNotif, custObj, repObj, addToast, {force: true, products: products});
                         });
                       }
                     });
@@ -9777,7 +9785,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                   } else {
                     doRefire(viewOrder);
                   }
-                }}>🔔 Refire Notifications</Btn>
+                }}>🔔 Resend Receipt + Invoice (PDF)</Btn>
                 {viewOrder.status!=="Cancelled"&&viewOrder.status!=="Refunded"&&viewOrder.status!=="Paid"&&(
                   <Btn variant="danger" onClick={function(){cancel(viewOrder);}}>Cancel</Btn>
                 )}
@@ -16924,58 +16932,73 @@ function firePaidNotifs(order, customer, rep, addToast, opts){
   }
   var receiptUrl = (order && (order.receiptUrl || order.receiptLink)) || "";
   var emailHtml = buildPaymentConfirmationEmail(order, customer, company, receiptUrl);
-  var payload = {
-    to: custEmail,
-    subject: "✓ Payment received — Order "+orderId,
-    html: emailHtml,
-    fromName: cfg.fromName || company,
-    fromEmail: cfg.fromEmail,
-    tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret,
-  };
-  if(repEmail && repEmail.toLowerCase() !== custEmail.toLowerCase()){
-    payload.cc = repEmail;
+  var subject = "✓ Payment received — Order "+orderId;
+
+  function _send(attachments){
+    var hasPdf = !!(attachments && attachments.length);
+    var payload = {
+      action: "send",
+      to: custEmail, toEmail: custEmail,
+      subject: subject,
+      html: emailHtml, body: emailHtml, message: emailHtml, isHtml: true,
+      fromName: cfg.fromName || company, fromEmail: cfg.fromEmail,
+      tenantId: cfg.tenantId, clientId: cfg.clientId, clientSecret: cfg.clientSecret,
+      attachments: attachments || []
+    };
+    if(repEmail && repEmail.toLowerCase() !== custEmail.toLowerCase()){ payload.cc = repEmail; }
+    try{ console.info("[firePaidNotifs] →", {to:payload.to, cc:payload.cc||null, subject:subject, orderId:orderId, pdf:hasPdf, force:!!opts.force}); }catch(e){}
+    return fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
+      .then(function(r){return r.json().then(function(d){return {status:r.status,data:d};});})
+      .then(function(res){
+        var d = res.data || {};
+        if(d.ok){
+          try{
+            var sb=getSB();
+            if(sb && orderId){
+              sb.from("crm_orders").select("data").eq("id",orderId).single().then(function(rr){
+                var existing = (rr && rr.data && rr.data.data) || {};
+                var merged = Object.assign({},existing,{paymentEmailSentAt:nowIso});
+                sb.from("crm_orders").update({data:merged,updated_at:nowIso}).eq("id",orderId).then(function(){});
+              });
+            }
+          }catch(e){}
+          try{ logSentEmail({
+            to: payload.to, toName: custName, cc: payload.cc||"",
+            subject: payload.subject,
+            sentBy: "System (payment confirmation)",
+            senderRole: "system",
+            repId: (order && order.repId) || "",
+            kind: "payment", orderId: orderId,
+            preview: "Payment confirmation — "+amtStr,
+          }); }catch(e){}
+          if(addToast) addToast("✓ Payment confirmation"+(hasPdf?" + invoice PDF":"")+" sent to "+custEmail+(payload.cc?" (CC: "+payload.cc+")":""),"success");
+          try{ console.info("[firePaidNotifs] ✓ sent",d); }catch(e){}
+          return {ok:true,response:d};
+        } else {
+          if(addToast) addToast("Email failed ("+res.status+"): "+(d.error||"unknown"),"danger");
+          try{ console.error("[firePaidNotifs] ✗",res.status,d); }catch(e){}
+          return {ok:false,error:d.error,status:res.status};
+        }
+      }).catch(function(err){
+        if(addToast) addToast("Email server unreachable: "+(err.message||"network error"),"danger");
+        try{ console.error("[firePaidNotifs] network err:",err); }catch(e){}
+        return {ok:false,error:err.message};
+      });
   }
-  try{ console.info("[firePaidNotifs] →", {to:payload.to, cc:payload.cc||null, subject:payload.subject, orderId:orderId, force:!!opts.force}); }catch(e){}
-  return fetch(cfg.edgeFnUrl,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)})
-    .then(function(r){return r.json().then(function(d){return {status:r.status,data:d};});})
-    .then(function(res){
-      var d = res.data || {};
-      if(d.ok){
-        // Mark email as sent for throttle tracking
-        try{
-          var sb=getSB();
-          if(sb && orderId){
-            sb.from("crm_orders").select("data").eq("id",orderId).single().then(function(rr){
-              var existing = (rr && rr.data && rr.data.data) || {};
-              var merged = Object.assign({},existing,{paymentEmailSentAt:nowIso});
-              sb.from("crm_orders").update({data:merged,updated_at:nowIso}).eq("id",orderId).then(function(){});
-            });
-          }
-        }catch(e){}
-        // v97b: log to shared Sent so admin can see payment confirmations in the Email tab sidebar
-        // v97c: system-fired, but scoped to the order's rep so they see "their" customer's payment
-        try{ logSentEmail({
-          to: payload.to, toName: custName, cc: payload.cc||"",
-          subject: payload.subject,
-          sentBy: "System (payment confirmation)",
-          senderRole: "system",
-          repId: (order && order.repId) || "",
-          kind: "payment", orderId: orderId,
-          preview: "Payment confirmation — "+amtStr,
-        }); }catch(e){}
-        if(addToast) addToast("✓ Payment confirmation sent to "+custEmail+(payload.cc?" (CC: "+payload.cc+")":""),"success");
-        try{ console.info("[firePaidNotifs] ✓ sent",d); }catch(e){}
-        return {ok:true,response:d};
-      } else {
-        if(addToast) addToast("Email failed ("+res.status+"): "+(d.error||"unknown"),"danger");
-        try{ console.error("[firePaidNotifs] ✗",res.status,d); }catch(e){}
-        return {ok:false,error:d.error,status:res.status};
-      }
-    }).catch(function(err){
-      if(addToast) addToast("Email server unreachable: "+(err.message||"network error"),"danger");
-      try{ console.error("[firePaidNotifs] network err:",err); }catch(e){}
-      return {ok:false,error:err.message};
-    });
+
+  // Attach the paid invoice PDF (8s timeout → send without it if PDF build fails/stalls)
+  var _prods = opts.products || [];
+  var _pdfDone = false;
+  return new Promise(function(resolve){
+    var _t = setTimeout(function(){ if(!_pdfDone){ _pdfDone=true; _send([]).then(resolve); } }, 8000);
+    try{
+      buildInvoicePdf(order, customer||{}, _prods, company, function(err, pdfBase64){
+        if(_pdfDone) return; _pdfDone=true; clearTimeout(_t);
+        var att = (!err && pdfBase64) ? [{name:"Invoice-"+orderId+".pdf", contentType:"application/pdf", contentBytes:pdfBase64}] : [];
+        _send(att).then(resolve);
+      });
+    }catch(e){ if(!_pdfDone){ _pdfDone=true; clearTimeout(_t); _send([]).then(resolve); } }
+  });
 }
 
 function _emailRespOk(r){
@@ -21628,10 +21651,10 @@ window.addEventListener('load',function(){
   // v87: Wait up to 8 seconds for Babel to load (handles slow networks + fallback CDNs)
   var waited = 0;
   function tryStart(){
-    if(typeof Babel === "undefined"){
+    if(typeof Babel === "undefined" || typeof React === "undefined" || typeof ReactDOM === "undefined"){
       waited += 100;
       if(waited >= 8000){
-        showErr("Failed to load Babel from any CDN (cdnjs, jsdelivr, unpkg). This usually means an ad-blocker or browser extension is blocking script CDNs on this site.\n\nFix: disable any content blocker for this domain and refresh. Or try in an incognito window with extensions disabled.");
+        showErr("Failed to load core libraries (React, ReactDOM, or Babel) from the script CDNs (cdnjs, jsdelivr, unpkg). This usually means an ad-blocker or browser extension is blocking CDNs on this site — or the page is being viewed in a sandboxed preview that blocks external scripts.\n\nFix: open the app from its hosted URL and disable any content blocker for this domain, then refresh. Or try an incognito window with extensions disabled.");
         return;
       }
       setTimeout(tryStart, 100);
