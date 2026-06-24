@@ -11168,8 +11168,8 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 
       {/* 4-KPI panel — Held / Available / Paid / Forfeited */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
-        <KpiCard label="⏳ Held" value={fmtMoney(totalHeld)} sub={heldOrders.length+" order"+(heldOrders.length===1?"":"s")} color={C.warning}/>
-        <KpiCard label="✅ Available" value={fmtMoney(totalAvail)} sub={availableOrds.length+" ready to pay"} color={C.success}/>
+        <KpiCard label="⏳ Held" value={fmtMoney(netAfterFee(totalHeld))} sub={heldOrders.length+" order"+(heldOrders.length===1?"":"s")+(feeNote()?" · "+feeNote():"")} color={C.warning}/>
+        <KpiCard label="✅ Available" value={fmtMoney(netAfterFee(totalAvail))} sub={availableOrds.length+" ready to pay"+(feeNote()?" · "+feeNote():"")} color={C.success}/>
         <KpiCard label="💸 Paid" value={fmtMoney(totalPaidF)} sub={paidComms.length+" payment"+(paidComms.length===1?"":"s")} color={C.accent}/>
         <KpiCard label="❌ Forfeited" value={fmtMoney(totalForfeit)} sub={forfeitedOrds.length+" order"+(forfeitedOrds.length===1?"":"s")} color={C.danger}/>
       </div>
@@ -13288,6 +13288,11 @@ function getPickupCfg(){
   try{ var c=JSON.parse(localStorage.getItem("__pv__pickupCfg")||"{}"); return {address:c.address||D.address, hours:c.hours||D.hours, note:c.note||""}; }
   catch(e){ return D; }
 }
+function getPlatformFeePct(){
+  try{ return parseFloat(JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").platformFee)||0; }catch(e){ return 0; }
+}
+function netAfterFee(gross){ var f=getPlatformFeePct(); return f>0 ? gross*(1-f/100) : gross; }
+function feeNote(){ var f=getPlatformFeePct(); return f>0 ? ("after "+f+"% platform fee") : ""; }
 function openOrderPO(path){
   var sb=getSB(); if(!sb||!path){ return; }
   sb.storage.from("tax-exemptions").createSignedUrl(path, 3600).then(function(res){
@@ -16108,9 +16113,9 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
       <PageHeader title="My Commissions"/>
       <CommissionStatement repId={repId} orders={orders} commissions={commissions} repName={repName}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
-        <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub="Paid out" color={C.success}/>
-        <KpiCard label="Ready to Collect" value={fmtMoney(totalReady)} sub={released.length+" orders"} color={C.gold}/>
-        <KpiCard label="In Return Window" value={fmtMoney(totalHeld)} sub={"Held · 15–46 day window"} color={C.warning}/>
+        <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub="Paid out (net)" color={C.success}/>
+        <KpiCard label="Ready to Collect" value={fmtMoney(netAfterFee(totalReady))} sub={released.length+" orders"+(feeNote()?" · "+feeNote():"")} color={C.gold}/>
+        <KpiCard label="In Return Window" value={fmtMoney(netAfterFee(totalHeld))} sub={"Held · 15–46 day window"+(feeNote()?" · "+feeNote():"")} color={C.warning}/>
       </div>
       {released.length>0&&(
         <div style={{marginBottom:20}}>
