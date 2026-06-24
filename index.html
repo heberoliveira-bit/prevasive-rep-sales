@@ -2968,10 +2968,14 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     doc.setFillColor(99, 91, 255);
     doc.rect(0, 0, W, 30, 'F');
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(18); doc.setFont('helvetica','bold');
-    doc.text(company||'PreVasive USA', margin, 19);
-    doc.setFontSize(9); doc.setFont('helvetica','normal');
-    doc.text('INVOICE', W - margin, 19, {align:'right'});
+    doc.setFontSize(17); doc.setFont('helvetica','bold');
+    doc.text(company||'PreVasive USA', margin, 14);
+    doc.setFontSize(8.5); doc.setFont('helvetica','normal'); doc.setTextColor(224,222,255);
+    doc.text('Invoice & Statement', margin, 21);
+    doc.setFont('helvetica','bold'); doc.setFontSize(22); doc.setTextColor(255,255,255);
+    doc.text('INVOICE', W - margin, 15, {align:'right'});
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(224,222,255);
+    doc.text('#'+order.id, W - margin, 22, {align:'right'});
     y = 40;
 
     // ── Invoice meta ──
@@ -3048,23 +3052,23 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     doc.line(margin, y, W-margin, y); y += 8;
 
     // ── Items table header ──
-    doc.setFillColor(245,245,252);
+    doc.setFillColor(99,91,255);
     doc.rect(margin, y-4, W-margin*2, 8, 'F');
-    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(99,91,255);
-    doc.text('PRODUCT', margin+2, y+1);
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(255,255,255);
+    doc.text('DESCRIPTION', margin+2, y+1);
     doc.text('QTY', 120, y+1, {align:'right'});
     doc.text('UNIT PRICE', 150, y+1, {align:'right'});
-    doc.text('TOTAL', W-margin-2, y+1, {align:'right'});
+    doc.text('AMOUNT', W-margin-2, y+1, {align:'right'});
     y += 8;
 
     // ── Items ──
     doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(30,30,50);
     var items = order.items||[];
-    var alt = false;
+    var alt = false; var lineSum = 0;
     items.forEach(function(it) {
       var prod = (products||[]).find(function(p){return p.id===it.prodId;})||{name:it.name||it.prodId||'Product'};
       var price = it.customerPrice||it.unitPrice||prod.price||0;
-      var total = price * (it.qty||1);
+      var total = price * (it.qty||1); lineSum += total;
       var hasVar = !!it.variantName;
       var rowH = hasVar ? 11 : 7;
       if(alt) { doc.setFillColor(250,250,255); doc.rect(margin, y-4, W-margin*2, rowH, 'F'); }
@@ -3084,25 +3088,46 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     y += 4;
 
     // ── Totals ──
-    doc.setDrawColor(200,200,220); doc.line(margin, y, W-margin, y); y += 6;
+    // Authoritative total is the stored grand (what was actually charged/paid). The
+    // breakdown is reconciled to it: if the stored line fields don't add up to grand
+    // (e.g. legacy/quote-converted orders that only stored grand), the remainder is
+    // surfaced as one line so the invoice always foots to the real amount.
+    doc.setDrawColor(225,228,238); doc.setLineWidth(0.3); doc.line(margin, y, W-margin, y); y += 7;
     var totals = order.totals||{};
-    var labelX = 145; var valX = W-margin-2;
-    doc.setFontSize(9); doc.setTextColor(80,80,100); doc.setFont('helvetica','normal');
-    if(totals.subtotal) { doc.text('Subtotal', labelX, y, {align:'right'}); doc.text('$'+totals.subtotal.toFixed(2), valX, y, {align:'right'}); y += 6; }
-    if(totals.discount>0) { doc.setTextColor(30,150,80); doc.text('Discount', labelX, y, {align:'right'}); doc.text('-$'+totals.discount.toFixed(2), valX, y, {align:'right'}); doc.setTextColor(80,80,100); y += 6; }
-    if(totals.shipping>0) { doc.text('Shipping', labelX, y, {align:'right'}); doc.text('$'+totals.shipping.toFixed(2), valX, y, {align:'right'}); y += 6; }
-    if(totals.tax>0) { doc.text('Tax', labelX, y, {align:'right'}); doc.text('$'+totals.tax.toFixed(2), valX, y, {align:'right'}); y += 6; }
-    doc.setDrawColor(99,91,255); doc.setLineWidth(0.5); doc.line(labelX-20, y, W-margin, y); y += 6;
-    doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(99,91,255);
-    doc.text('TOTAL DUE', labelX, y, {align:'right'}); doc.text('$'+(totals.grand||0).toFixed(2), valX, y, {align:'right'});
-    y += 14;
+    var sub  = (totals.subtotal>0) ? totals.subtotal : lineSum;
+    var disc = totals.discount>0 ? totals.discount : 0;
+    var ship = totals.shipping>0 ? totals.shipping : 0;
+    var tax  = totals.tax>0 ? totals.tax : 0;
+    var explained = Math.round((sub - disc + ship + tax)*100)/100;
+    var grand = (totals.grand>0) ? Math.round(totals.grand*100)/100 : explained;
+    var gap = Math.round((grand - explained)*100)/100;
+    if(gap < -0.02){ grand = explained; gap = 0; } // components exceed stored grand → trust the lines
+    var tX = 130, valX = W-margin-2;
+    doc.setFontSize(9.5); doc.setFont('helvetica','normal'); doc.setTextColor(90,94,120);
+    doc.text('Subtotal', tX, y); doc.text('$'+sub.toFixed(2), valX, y, {align:'right'}); y += 6;
+    if(disc>0){ doc.setTextColor(22,163,74); doc.text('Discount', tX, y); doc.text('-$'+disc.toFixed(2), valX, y, {align:'right'}); doc.setTextColor(90,94,120); y += 6; }
+    if(ship>0){ doc.text((order.pickup||order.shippingType==='pickup')?'Pickup':'Shipping', tX, y); doc.text('$'+ship.toFixed(2), valX, y, {align:'right'}); y += 6; }
+    if(tax>0){ doc.text('Tax', tX, y); doc.text('$'+tax.toFixed(2), valX, y, {align:'right'}); y += 6; }
+    if(gap > 0.02){
+      var gapLabel = (tax<=0 && ship<=0) ? 'Tax & shipping' : (tax<=0 ? 'Tax & fees' : 'Shipping & fees');
+      doc.text(gapLabel, tX, y); doc.text('$'+gap.toFixed(2), valX, y, {align:'right'}); y += 6;
+    }
+    y += 2;
+    var barY = y;
+    doc.setFillColor(99,91,255); doc.roundedRect(tX-4, barY-5, valX-(tX-4)+2, 11, 1.5, 1.5, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(11.5); doc.setTextColor(255,255,255);
+    doc.text(order.paidAt?'TOTAL PAID':'TOTAL DUE', tX, barY+1.5);
+    doc.text('$'+grand.toFixed(2), valX, barY+1.5, {align:'right'});
+    y = barY + 16;
 
     if(order.paidAt) {
-      doc.setFont('helvetica','bold'); doc.setFontSize(16); doc.setTextColor(34,197,94);
-      doc.text('PAID', W/2, y, {align:'center'});
-      doc.setDrawColor(34,197,94); doc.setLineWidth(1);
-      doc.rect(W/2-14, y-10, 28, 14, 'S');
-      y += 10;
+      // Clean PAID badge on the left, level with the total bar
+      doc.setDrawColor(34,197,94); doc.setLineWidth(0.8); doc.setFillColor(240,253,244);
+      doc.roundedRect(margin, barY-5, 52, 11, 1.5, 1.5, 'FD');
+      doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.setTextColor(22,163,74);
+      doc.text('PAID', margin+5, barY+1.5);
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(34,150,80);
+      doc.text(new Date(order.paidAt).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}), margin+20, barY+1.5);
     }
 
     // ── Footer ──
@@ -8187,7 +8212,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                     <div key={cp.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
                                              background:C.surface,border:"1px solid "+C.border,borderRadius:8,marginBottom:6,fontSize:12}}>
                       <div><div style={{fontWeight:600,color:C.text}}>{fmtDate(cp.paidAt)}</div><div style={{fontSize:10,color:C.dim}}>{cp.orderId}</div></div>
-                      <div style={{fontFamily:"monospace",fontWeight:800,color:C.success,fontSize:14}}>{fmtMoney(cp.amount)}</div>
+                      <div style={{fontFamily:"monospace",fontWeight:800,color:C.success,fontSize:14}}>{fmtMoney(payoutNet(cp))}</div>
                     </div>
                   );})}
                 </div>
@@ -10834,7 +10859,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 
   var totalHeld    = heldOrders.reduce(function(s,o){return s+((o.totals&&o.totals.commission)||0);}, 0);
   var totalAvail   = availableOrds.reduce(function(s,o){return s+((o.totals&&o.totals.commission)||0);}, 0);
-  var totalPaidF   = paidComms.reduce(function(s,c){return s+(c.amount||0);}, 0);
+  var totalPaidF   = paidComms.reduce(function(s,c){return s+payoutNet(c);}, 0);
   var totalForfeit = forfeitedOrds.reduce(function(s,o){return s+((o.totals&&o.totals.commission)||0);}, 0);
 
   // Helpers — countdown + progress for each held row
@@ -10942,6 +10967,10 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 
     var rec = {id:genId("pay"),orderId:order.id,repId:order.repId,repName:rep.name,
                amount:amount,paidAt:new Date().toISOString(),note:connectId?"Stripe Connect transfer":"Manual payout"};
+    // Lock the platform-fee math onto the record so historical payouts never re-compute at a later rate
+    rec.grossAmount = amount;
+    rec.feePct = platformFee;
+    rec.netAmount = Math.round(amount*(1-platformFee/100)*100)/100;
 
     if(connectFn&&connectId){
       var netAmount = Math.round(amount*(1-platformFee/100)*100);
@@ -11046,7 +11075,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
   }
 
   var totalUnpaid = unpaid.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
-  var totalPaid = (commissions||[]).reduce(function(s,c){return s+(c.amount||0);},0);
+  var totalPaid = (commissions||[]).reduce(function(s,c){return s+payoutNet(c);},0);
 
   return (
     <div>
@@ -11170,7 +11199,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:14,marginBottom:24}}>
         <KpiCard label="⏳ Held" value={fmtMoney(netAfterFee(totalHeld))} sub={heldOrders.length+" order"+(heldOrders.length===1?"":"s")+(feeNote()?" · "+feeNote():"")} color={C.warning}/>
         <KpiCard label="✅ Available" value={fmtMoney(netAfterFee(totalAvail))} sub={availableOrds.length+" ready to pay"+(feeNote()?" · "+feeNote():"")} color={C.success}/>
-        <KpiCard label="💸 Paid" value={fmtMoney(totalPaidF)} sub={paidComms.length+" payment"+(paidComms.length===1?"":"s")} color={C.accent}/>
+        <KpiCard label="💸 Paid" value={fmtMoney(totalPaidF)} sub={paidComms.length+" payment"+(paidComms.length===1?"":"s")+(feeNote()?" · "+feeNote():"")} color={C.accent}/>
         <KpiCard label="❌ Forfeited" value={fmtMoney(totalForfeit)} sub={forfeitedOrds.length+" order"+(forfeitedOrds.length===1?"":"s")} color={C.danger}/>
       </div>
 
@@ -13292,6 +13321,7 @@ function getPlatformFeePct(){
   try{ return parseFloat(JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").platformFee)||0; }catch(e){ return 0; }
 }
 function netAfterFee(gross){ var f=getPlatformFeePct(); return f>0 ? gross*(1-f/100) : gross; }
+function payoutNet(cp){ if(cp && cp.netAmount != null) return cp.netAmount; return netAfterFee((cp && cp.amount) || 0); }
 function feeNote(){ var f=getPlatformFeePct(); return f>0 ? ("after "+f+"% platform fee") : ""; }
 function openOrderPO(path){
   var sb=getSB(); if(!sb||!path){ return; }
@@ -16104,7 +16134,7 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
   var paidIds = myComm.map(function(cp){return cp.orderId;});
   var held = myOrds.filter(function(o){return commissionStateFor(o, myComm) === "held";});
   var released = myOrds.filter(function(o){return commissionStateFor(o, myComm) === "available";});
-  var totalPaid  = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
+  var totalPaid  = myComm.reduce(function(s,cp){return s+payoutNet(cp);},0);
   var totalHeld  = held.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
   var totalReady = released.reduce(function(s,o){return s+(o.totals&&o.totals.commission||0);},0);
 
@@ -16113,7 +16143,7 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
       <PageHeader title="My Commissions"/>
       <CommissionStatement repId={repId} orders={orders} commissions={commissions} repName={repName}/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:14,marginBottom:24}}>
-        <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub="Paid out (net)" color={C.success}/>
+        <KpiCard label="Total Earned" value={fmtMoney(totalPaid)} sub={"Paid out"+(feeNote()?" · "+feeNote():"")} color={C.success}/>
         <KpiCard label="Ready to Collect" value={fmtMoney(netAfterFee(totalReady))} sub={released.length+" orders"+(feeNote()?" · "+feeNote():"")} color={C.gold}/>
         <KpiCard label="In Return Window" value={fmtMoney(netAfterFee(totalHeld))} sub={"Held · 15–46 day window"+(feeNote()?" · "+feeNote():"")} color={C.warning}/>
       </div>
@@ -16168,7 +16198,7 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
                 <tr key={cp.id} style={{borderTop:"1px solid "+C.border}}>
                   <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(cp.paidAt)}</td>
                   <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.dim}}>{cp.orderId}</td>
-                  <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(cp.amount)}</td>
+                  <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(payoutNet(cp))}</td>
                 </tr>
               );})}</tbody>
             </table>
@@ -20413,8 +20443,8 @@ function MobileProfile({currentUser, repData, commissions, preferDesktop, setPre
   var myRepId = repData ? repData.id : (currentUser && currentUser.rep_id);
   var myComms = (commissions||[]).filter(function(cp){return cp.repId===myRepId;});
   var nowY = new Date().getFullYear();
-  var ytdComm = myComms.filter(function(cp){var d=new Date(cp.paidAt||cp.createdAt||0); return d.getFullYear()===nowY;}).reduce(function(s,cp){return s+(Number(cp.amount)||0);},0);
-  var mtdComm = myComms.filter(function(cp){var d=new Date(cp.paidAt||cp.createdAt||0); return d.getFullYear()===nowY && d.getMonth()===new Date().getMonth();}).reduce(function(s,cp){return s+(Number(cp.amount)||0);},0);
+  var ytdComm = myComms.filter(function(cp){var d=new Date(cp.paidAt||cp.createdAt||0); return d.getFullYear()===nowY;}).reduce(function(s,cp){return s+payoutNet(cp);},0);
+  var mtdComm = myComms.filter(function(cp){var d=new Date(cp.paidAt||cp.createdAt||0); return d.getFullYear()===nowY && d.getMonth()===new Date().getMonth();}).reduce(function(s,cp){return s+payoutNet(cp);},0);
   var plan = REP_PLANS.find(function(p){return p.id===(repData&&repData.planId);});
   var subStatus = (repData&&repData.subscriptionStatus)||"trial";
   var w9St = repData && repData.w9ReviewStatus==="approved" ? "Approved" : (repData&&repData.w9SubmittedAt?"Pending review":"Not submitted");
