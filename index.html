@@ -9525,6 +9525,28 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
       {/* Order Detail Modal */}
       {viewOrder&&(
         <Modal title={"Order "+viewOrder.id} wide={true} onClose={function(){setViewOrder(null);}}>
+          {(function(){
+            var matched=(reps||[]).find(function(x){return x.id===viewOrder.repId;});
+            var matchedName=matched?(matched.name||(matched.data&&matched.data.name)||matched.id):null;
+            return (
+              <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap",padding:"10px 12px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,marginBottom:16}}>
+                <span style={{fontSize:12,fontWeight:700,color:C.muted,whiteSpace:"nowrap"}}>Assigned rep</span>
+                <select value={(matched?viewOrder.repId:"")||""} onChange={function(e){
+                  var nid=e.target.value;
+                  var rep=(reps||[]).find(function(r){return r.id===nid;})||null;
+                  var updated=Object.assign({},viewOrder,{repId:nid||null,repName:(rep&&(rep.name||(rep.data&&rep.data.name)))||(nid?viewOrder.repName:"")});
+                  onUpdate(updated); setViewOrder(updated); dbSave("crm_orders",viewOrder.id,updated);
+                  addToast(nid?("Order reassigned to "+(updated.repName||nid)):"Order rep cleared","success");
+                }} style={{flex:1,minWidth:200,background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:13,fontFamily:"inherit",cursor:"pointer"}}>
+                  <option value="">— Unassigned —</option>
+                  {(reps||[]).slice().sort(function(a,b){return ((a.name||(a.data&&a.data.name))||"").localeCompare((b.name||(b.data&&b.data.name))||"");}).map(function(r){var nm=r.name||(r.data&&r.data.name)||r.id;var em=r.email||(r.data&&r.data.email)||"";return <option key={r.id} value={r.id}>{nm}{em?(" · "+em):""}</option>;})}
+                </select>
+                <span style={{fontSize:11,color:matched?C.muted:C.warning}}>
+                  Current: <code style={{color:C.text}}>{viewOrder.repId||"none"}</code>{matched?(" — "+matchedName):" — no matching rep (likely a duplicate/old account). Pick the correct rep so it shows in their view."}
+                </span>
+              </div>
+            );
+          })()}
           {/* Freight callout — shows pre-quote, quoted, or expired state */}
           {viewOrder.shippingType==="freight" && (function(){
             if(viewOrder.status==="Awaiting Freight Quote") {
