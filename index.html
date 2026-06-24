@@ -10206,6 +10206,27 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast,currentUser
 /* ─── Rep Activity helpers ───────────────────────────────────────────────
    Pure functions that derive activity insights from already-synced tables.
    No new data collection — leverages orders/quotes/customers + lastSeenAt. */
+/* Move every order/quote/customer/commission from one rep id to another — used to
+   consolidate a duplicate rep account so Rep Activity (and payouts) read correctly. */
+function reassignRepRecords(fromId, toId, toName, ctx, addToast){
+  if(!fromId || !toId || fromId===toId) return;
+  var moved = {orders:0, quotes:0, customers:0, commissions:0};
+  if(ctx.setOrders) ctx.setOrders(function(prev){ return (prev||[]).map(function(o){
+    if(o.repId===fromId){ moved.orders++; var u=Object.assign({},o,{repId:toId,repName:toName||o.repName}); dbSave("crm_orders",o.id,u); return u; } return o; }); });
+  if(ctx.setQuotes) ctx.setQuotes(function(prev){ return (prev||[]).map(function(q){
+    if(q.repId===fromId){ moved.quotes++; var u=Object.assign({},q,{repId:toId,repName:toName||q.repName}); dbSave("crm_quotes",q.id,u); return u; } return q; }); });
+  if(ctx.setCustomers) ctx.setCustomers(function(prev){ return (prev||[]).map(function(c){
+    if(c.repId===fromId || c.assignedRepId===fromId || c.createdByRepId===fromId){ moved.customers++;
+      var u=Object.assign({},c);
+      if(c.repId===fromId) u.repId=toId;
+      if(c.assignedRepId===fromId) u.assignedRepId=toId;
+      if(c.createdByRepId===fromId) u.createdByRepId=toId;
+      dbSave("crm_customers",c.id,u); return u; } return c; }); });
+  if(ctx.setCommissions) ctx.setCommissions(function(prev){ return (prev||[]).map(function(cp){
+    if(cp.repId===fromId){ moved.commissions++; var u=Object.assign({},cp,{repId:toId,repName:toName||cp.repName}); dbSave("crm_commission_payouts",cp.id,u); return u; } return cp; }); });
+  if(addToast) addToast("Moved "+moved.orders+" orders · "+moved.quotes+" quotes · "+moved.customers+" customers · "+moved.commissions+" commissions","success");
+  return moved;
+}
 function computeRepStats(orders, quotes, customers, repId, sinceMs){
   var since = sinceMs;
   var orderRows  = (orders||[]).filter(function(o){return o.repId===repId && new Date(o.createdAt).getTime()>=since && o.status!=="Cancelled";});
@@ -10245,9 +10266,18 @@ function computeRepActionFeed(orders, quotes, customers, repId, limit){
 
 /* ─── Admin Rep Activity ─────────────────────────────────────────────────
    Overview of all reps: online status, period stats, recent action feed. */
-function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeStatus}){
+function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeStatus, setOrders, setQuotes, setCustomers, setCommissions}){
   const [expandedId, setExpandedId] = useState(null);
   const [now,        setNow]        = useState(Date.now());
+  const [mergeTarget, setMergeTarget] = useState({});
+  function doMerge(rep){
+    var toId = mergeTarget[rep.id]; if(!toId) return;
+    var toRep = (reps||[]).find(function(r){return r.id===toId;});
+    var toName = (toRep&&toRep.name)||toId;
+    if(!window.confirm("Move ALL orders, quotes, customers and commissions from "+(rep.name||rep.id)+" to "+toName+"?\n\nUse this to consolidate a duplicate account. This can't be auto-undone.")) return;
+    reassignRepRecords(rep.id, toId, (toRep&&toRep.name)||"", {setOrders:setOrders,setQuotes:setQuotes,setCustomers:setCustomers,setCommissions:setCommissions}, addToast);
+    setMergeTarget(function(p){var n=Object.assign({},p); delete n[rep.id]; return n;});
+  }
   // Bump "now" every 30s so the relative-time labels stay fresh ("Just now" → "2 min ago")
   useEffect(function(){
     var t = setInterval(function(){ setNow(Date.now()); }, 30000);
@@ -10369,6 +10399,18 @@ function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeSt
                       })}
                     </div>
                   )}
+                  <div style={{marginTop:16,paddingTop:12,borderTop:"1px solid "+C.border}}>
+                    <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>Merge / reassign all records</div>
+                    <div style={{fontSize:10,color:C.dim,marginBottom:8,lineHeight:1.5}}>Move every order, quote, customer &amp; commission from this rep to another — use this to consolidate a duplicate account so the counts read correctly.</div>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                      <select value={mergeTarget[rep.id]||""} onChange={function(e){var v=e.target.value;setMergeTarget(function(p){return Object.assign({},p,{[rep.id]:v});});}}
+                        style={{background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"7px 10px",color:C.text,fontSize:12,fontFamily:"inherit",cursor:"pointer",minWidth:220}}>
+                        <option value="">Choose target rep…</option>
+                        {sortedReps.filter(function(r){return r.id!==rep.id;}).map(function(r){return <option key={r.id} value={r.id}>{r.name||r.id}{r.email?(" · "+r.email):""}</option>;})}
+                      </select>
+                      <Btn small variant="danger" onClick={function(){doMerge(rep);}}>Move all →</Btn>
+                    </div>
+                  </div>
                 </div>
               )}
             </React.Fragment>
@@ -21703,7 +21745,7 @@ function App() {
             onViewAsRep={function(rep){setViewAsRep(rep);setActiveTab("dashboard");}}/>
         )}
         {isAdmin&&activeTab==="rep_activity"&&(
-          <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast} realtimeStatus={realtimeStatus}/>
+          <AdminRepActivity reps={reps} orders={orders} quotes={quotes} customers={customers} addToast={addToast} realtimeStatus={realtimeStatus} setOrders={setOrders} setQuotes={setQuotes} setCustomers={setCustomers} setCommissions={setCommissions}/>
         )}
         {(isAdmin||isAccount)&&activeTab==="commissions"&&(
           <AdminCommissions orders={orders} setOrders={setOrders} reps={reps} commissions={commissions}
