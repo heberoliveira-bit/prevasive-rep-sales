@@ -2983,7 +2983,13 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     doc.text('Invoice #:  ' + order.id, margin, y); y += 5;
     if(order.poNumber){ doc.text('PO #:       ' + String(order.poNumber).slice(0,40), margin, y); y += 5; }
     doc.text('Date:       ' + new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}), margin, y); y += 5;
-    doc.text('Status:     ' + (order.paidAt ? 'PAID' : 'DUE ON RECEIPT'), margin, y); y += 10;
+    doc.text('Status:     ' + (order.paidAt ? 'PAID' : 'DUE ON RECEIPT'), margin, y); y += 5;
+    if(order.pickup || order.shippingType==="pickup"){
+      var _pc = getPickupCfg();
+      doc.text('Pickup:     ' + String(_pc.address||"").slice(0,52), margin, y); y += 5;
+      if(_pc.hours){ doc.text('Hours:      ' + String(_pc.hours).slice(0,52), margin, y); y += 5; }
+    }
+    y += 5;
 
     // ── Bill To / Ship To (two columns) ──
     var colR = 115;
@@ -3129,7 +3135,7 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
   var initLink = getSiteUrl()+"#pay="+initTok;
   var sb0=getSB();if(sb0){sb0.from("crm_pay_tokens").upsert({id:initTok,data:initPd,created_at:initPd.createdAt}).then(function(){});}
 
-  var initBody = "Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+(order.poNumber?("\nPO #: "+order.poNumber):"")+"\nTotal Due: $"+grand.toFixed(2)+"\n\nThank you,\n"+company;
+  var initBody = "Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+(order.poNumber?("\nPO #: "+order.poNumber):"")+((order.pickup||order.shippingType==="pickup")?("\nPickup: "+getPickupCfg().address+(getPickupCfg().hours?(" ("+getPickupCfg().hours+")"):"")):"")+"\nTotal Due: $"+grand.toFixed(2)+"\n\nThank you,\n"+company;
 
   const [toEmail,  setToEmail]  = useState(cust.email||"");
   const [subject,  setSubject]  = useState("Invoice from "+company+" — Order "+order.id);
@@ -11501,7 +11507,7 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
 }
 
 
-function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns}) {
   const [tab,      setTab]      = useState("supabase");
   const [nprefs,   setNprefs]   = useState((function(){var d=Object.assign({},DEFAULT_NOTIF_PREFS);try{return Object.assign(d,JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}"));}catch(e){return d;}})());
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
@@ -12117,6 +12123,31 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
 
       {tab==="shipping"&&(
         <div style={{maxWidth:680}}>
+          <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Pickup Location</div>
+          <div style={{fontSize:12,color:C.muted,marginBottom:12,lineHeight:1.6}}>
+            Shown to reps and customers when an order is set to customer pickup — and on the invoice &amp; payment receipt.
+          </div>
+          <div style={{display:"grid",gap:12,marginBottom:26,padding:"14px 16px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Address</div>
+              <input value={(pickupCfg&&pickupCfg.address)||""} onChange={function(e){var v=e.target.value;onSavePickup(Object.assign({},pickupCfg||{},{address:v}));}}
+                placeholder="176 Enterprise Dr #2, Pendergrass, GA 30567"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Pickup hours / schedule</div>
+              <input value={(pickupCfg&&pickupCfg.hours)||""} onChange={function(e){var v=e.target.value;onSavePickup(Object.assign({},pickupCfg||{},{hours:v}));}}
+                placeholder="Mon–Fri, 9:00 AM – 5:00 PM"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+            <div>
+              <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Note (optional)</div>
+              <input value={(pickupCfg&&pickupCfg.note)||""} onChange={function(e){var v=e.target.value;onSavePickup(Object.assign({},pickupCfg||{},{note:v}));}}
+                placeholder="e.g. Call ahead 30 min · ring bell at loading dock"
+                style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"}}/>
+            </div>
+          </div>
+
           <div style={{fontWeight:700,fontSize:15,color:C.text,marginBottom:4}}>Shipping Rules</div>
           <div style={{fontSize:12,color:C.muted,marginBottom:20,lineHeight:1.6}}>
             Rules are shown to reps at checkout. Live carrier rates (from ShipStation) are always shown when configured. Rules appear below them.
@@ -13210,6 +13241,11 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
    prefix. We persist the storage PATH (+ original filename + PO number) on the
    order; the file is opened via a short-lived signed URL so the private bucket
    stays private. */
+function getPickupCfg(){
+  var D={address:"176 Enterprise Dr #2, Pendergrass, GA 30567", hours:"Mon–Fri, 9:00 AM – 5:00 PM", note:""};
+  try{ var c=JSON.parse(localStorage.getItem("__pv__pickupCfg")||"{}"); return {address:c.address||D.address, hours:c.hours||D.hours, note:c.note||""}; }
+  catch(e){ return D; }
+}
 function openOrderPO(path){
   var sb=getSB(); if(!sb||!path){ return; }
   sb.storage.from("tax-exemptions").createSignedUrl(path, 3600).then(function(res){
@@ -14299,7 +14335,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                 }} style={{width:16,height:16,accentColor:C.accent,cursor:"pointer"}}/>
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:C.text}}>🏬 Customer pickup — no shipping</div>
-                  <div style={{fontSize:11,color:C.muted,marginTop:2}}>Customer picks up the order. No shipping is calculated or charged.</div>
+                  <div style={{fontSize:11,color:C.muted,marginTop:3,lineHeight:1.7}}>
+                    {(function(){var pc=getPickupCfg();return (<span><span>📍 {pc.address}</span>{pc.hours?<span><br/>🕒 {pc.hours}</span>:null}{pc.note?<span><br/>{pc.note}</span>:null}</span>);})()}
+                  </div>
                 </div>
               </label>
 
@@ -17021,6 +17059,7 @@ function buildPaymentConfirmationEmail(order, customer, company, receiptUrl){
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Date</span><span>"+paidDateStr+"</span></div>"
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Payment method</span><span>"+escHtml(paymentLine)+"</span></div>"
     +((order&&order.poNumber)?"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>PO #</span><span>"+escHtml(order.poNumber)+"</span></div>":"")
+    +((order&&(order.pickup||order.shippingType==="pickup"))?(function(){var pc=getPickupCfg();return "<div style='display:flex;justify-content:space-between;gap:16px;padding:3px 0;color:#4a5568'><span>Pickup</span><span style='text-align:right'>"+escHtml(pc.address)+(pc.hours?(" · "+escHtml(pc.hours)):"")+"</span></div>";})():"")
     +"</div>"
     + itemsBlock
     + addressBlock
@@ -19583,7 +19622,9 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           }} style={{width:18,height:18,accentColor:C.accent}}/>
           <div>
             <div style={{fontSize:14,fontWeight:700,color:C.text}}>🏬 Customer pickup</div>
-            <div style={{fontSize:12,color:C.muted,marginTop:2}}>No shipping calculated or charged.</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:3,lineHeight:1.7}}>
+              {(function(){var pc=getPickupCfg();return (<span><span>📍 {pc.address}</span>{pc.hours?<span><br/>🕒 {pc.hours}</span>:null}{pc.note?<span><br/>{pc.note}</span>:null}</span>);})()}
+            </div>
           </div>
         </label>
       </div>
@@ -20461,6 +20502,7 @@ function App() {
   const [invoiceCfg,    setInvoiceCfg]    = useLS("invoiceCfg",    {prefix:"INV",company:"PreVasive USA",footer:"Thank you for your business.",paymentTerms:"Net 30"});
   const [shipStationCfg,setShipStationCfg]= useLS("shipStationCfg",{apiKey:"",apiSecret:"",enabled:false,warehouseAddr:"",warehouseCity:"",warehouseState:"",warehouseZip:"",defaultWeight:"1",weightUnit:"pounds",dimL:"12",dimW:"10",dimH:"6",ratesFnUrl:""});
   const [taxCfg,        setTaxCfg]        = useLS("taxCfg",        {mode:"manual",rate:0,apiKey:""});
+  const [pickupCfg,     setPickupCfg]     = useLS("pickupCfg",     {address:"176 Enterprise Dr #2, Pendergrass, GA 30567", hours:"Mon–Fri, 9:00 AM – 5:00 PM", note:""});
   const [googleCfg,     setGoogleCfg]     = useLS("googleCfg",     {apiKey:"",enabled:false});
   const [emailCfg,      setEmailCfg]      = useLS("emailCfg",      {fromName:"",fromEmail:"",tenantId:"",clientId:"",clientSecret:"",edgeFnUrl:""});
   const [campaigns,     setCampaigns]     = useLS("campaigns",     []);
@@ -20779,6 +20821,7 @@ function App() {
     sb.from("crm_settings").select("data").eq("id","public_settings").single().then(function(r){
       var d = r && r.data && r.data.data; if(!d) return;
       if(d.invoice && Object.keys(d.invoice).length) setInvoiceCfg(d.invoice);
+      if(d.pickup && Object.keys(d.pickup).length) setPickupCfg(d.pickup);
       if(d.tax && Object.keys(d.tax).length) setTaxCfg(d.tax);
       if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
       if(d.campaigns && Array.isArray(d.campaigns)) setCampaigns(d.campaigns);
@@ -20889,7 +20932,7 @@ function App() {
   useEffect(function(){
     if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
     var sb=getSB(); if(!sb) return;
-    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, stripeLinks:stripeLinks||{}, campaigns:campaigns||[], discountCodes:discountCodes||[],
+    var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, pickup:pickupCfg||{}, stripeLinks:stripeLinks||{}, campaigns:campaigns||[], discountCodes:discountCodes||[],
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
                 stripeChargeFnUrl:(stripeAccountA&&stripeAccountA.edgeFnUrl)||"",
                 stripeConnectFnUrl:(stripeAccountA&&stripeAccountA.connectFnUrl)||"",
@@ -20912,7 +20955,7 @@ function App() {
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(r){
       if(r&&r.error){ try{console.warn("[public_settings] sync write failed:",r.error.message);}catch(_){} }
     });
-  },[invoiceCfg,taxCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,pickupCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
   // v89: publish admin-only secrets so they sync across admin browsers.
   // Same anti-echo pattern as public_settings.
@@ -21685,6 +21728,7 @@ function App() {
           <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg}
             discountCodes={discountCodes} onSaveDiscountCodes={setDiscountCodes}
             invoiceCfg={invoiceCfg} onSaveInvoice={setInvoiceCfg}
+            pickupCfg={pickupCfg} onSavePickup={setPickupCfg}
             shippingRules={shippingRules} onSaveShippingRules={setShippingRules}
             shipStationCfg={shipStationCfg} onSaveShipStation={setShipStationCfg}
             taxCfg={taxCfg} onSaveTax={setTaxCfg}
