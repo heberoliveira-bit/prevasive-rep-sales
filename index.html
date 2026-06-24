@@ -13323,6 +13323,18 @@ function getPlatformFeePct(){
 function netAfterFee(gross){ var f=getPlatformFeePct(); return f>0 ? gross*(1-f/100) : gross; }
 function payoutNet(cp){ if(cp && cp.netAmount != null) return cp.netAmount; return netAfterFee((cp && cp.amount) || 0); }
 function feeNote(){ var f=getPlatformFeePct(); return f>0 ? ("after "+f+"% platform fee") : ""; }
+/* All rep-record ids that belong to the signed-in person — keyed off their email so
+   duplicate/legacy rep records (same email, different id) still resolve to one identity.
+   Used by every rep-facing view so a rep sees their orders/customers regardless of which
+   of their rep records the data was stamped to. */
+function myRepIdSet(user, reps){
+  var ids=[];
+  function add(x){ if(x && ids.indexOf(x)<0) ids.push(x); }
+  if(user){ add(user.rep_id); add(user.id); }
+  var email=((user&&user.email)||"").toLowerCase();
+  if(email){ (reps||[]).forEach(function(r){ if(r && (r.email||"").toLowerCase()===email){ add(r.id); add(r.rep_id); } }); }
+  return ids;
+}
 function openOrderPO(path){
   var sb=getSB(); if(!sb||!path){ return; }
   sb.storage.from("tax-exemptions").createSignedUrl(path, 3600).then(function(res){
@@ -13378,7 +13390,7 @@ function POBlock({orderId, poNumber, poFileName, poFilePath, onChange, onCommit,
 }
 
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
-                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules,currentUser}) {
+                    editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules,currentUser,myRepIds}) {
   const [step,       setStep]       = useState(1);
   const [showErrors, setShowErrors]  = useState(false);
   const [custId,     setCustId]     = useState((editOrder&&editOrder.custId)||"");
@@ -13522,8 +13534,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
   var isEdit = !!(editOrder&&editOrder.id);
   var activeProds = products.filter(function(p){return p.active!==false;});
+  var _myIds=(myRepIds&&myRepIds.length)?myRepIds:[repId];
   var myCusts = custId==="_new" ? [] : customers.filter(function(c2){
-    return c2.repId===repId;
+    return _myIds.indexOf(c2.repId)>=0;
   });
   var selCust = customers.find(function(c2){return c2.id===custId;})||null;
 
@@ -15000,15 +15013,16 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
 </script>
 <script id="c13" type="text/plain">
-function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast,reps,currentUser}) {
+function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast,reps,currentUser,myRepIds}) {
+  var _myIds=(myRepIds&&myRepIds.length)?myRepIds:[repId]; function _mine(id){return _myIds.indexOf(id)>=0;}
   var now4 = Date.now();
-  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var myOrds = orders.filter(function(o){return _mine(o.repId);});
   var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
   var totalEarned = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
   var _myBuckets = commissionBuckets(myOrds, myComm);
   var heldComm = _myBuckets.held.amount;
   var releasedComm = _myBuckets.available.amount;
-  var myCusts = customers.filter(function(c2){return c2.repId===repId;});
+  var myCusts = customers.filter(function(c2){return _mine(c2.repId);});
 
   return (
     <div>
@@ -15281,7 +15295,8 @@ function FinishFreightOrderModal({order, customer, repName, onFinish, onClose, a
   );
 }
 
-function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,returns,setReturns,autoOpen,compliance,onOpenWall}) {
+function RepOrders({repId,repName,currentUser,repData,orders,customers,products,setOrders,setCustomers,addToast,showResult,discountCodes,shippingRules,returns,setReturns,autoOpen,compliance,onOpenWall,myRepIds}) {
+  var _myIds=(myRepIds&&myRepIds.length)?myRepIds:[repId]; function _mine(id){return _myIds.indexOf(id)>=0;}
   const [showReturn,    setShowReturn]    = useState(false);
   const [showForm,      setShowForm]      = useState(false);
   const [filter,        setFilter]        = useState("all");
@@ -15296,7 +15311,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
   useEffect(function(){
     if(autoOpen) setShowForm(true);
   }, [autoOpen]);
-  var myOrds = orders.filter(function(o){return o.repId===repId;});
+  var myOrds = orders.filter(function(o){return _mine(o.repId);});
   var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
 
   // Pending Your Action — freight orders where rep still has work, or is waiting on customer/admin
@@ -15608,14 +15623,15 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
         setCustomers:setCustomers,setOrders:setOrders,
         editOrder:editOrder,
         onClose:function(){setShowForm(false); setEditOrder(null);},
-        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,currentUser:currentUser,
+        addToast:addToast,showResult:showResult,repData:repData,shippingRules:shippingRules,discountCodes:discountCodes,currentUser:currentUser,myRepIds:myRepIds,
       })}
     </div>
   );
 }
 
 /* ─── Rep Customers ──────────────────────────────────────────────────────── */
-function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests,setTermsRequests,addToast}) {
+function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests,setTermsRequests,addToast,myRepIds}) {
+  var _myIds=(myRepIds&&myRepIds.length)?myRepIds:[repId]; function _mine(id){return _myIds.indexOf(id)>=0;}
   const [showForm, setShowForm] = useState(false);
   const [editCust, setEditCust] = useState(null);
   const [viewCust2,setViewCust2] = useState(null);
@@ -15649,7 +15665,7 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
     {id:"federal",    icon:"🇺🇸", label:"Federal Government"},
     {id:"other",      icon:"📄", label:"Other / Custom"},
   ];
-  var myCusts = customers.filter(function(c2){return c2.repId===repId;});
+  var myCusts = customers.filter(function(c2){return _mine(c2.repId);});
   var filtered = myCusts.filter(function(c2){
     if(!search) return true; var s=search.toLowerCase();
     return (c2.name||"").toLowerCase().indexOf(s)>=0||(c2.company||"").toLowerCase().indexOf(s)>=0;
@@ -16125,9 +16141,9 @@ function RepCustomers({repId,repData,customers,setCustomers,orders,termsRequests
 
 </script>
 <script id="c14" type="text/plain">
-function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData}) {
+function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayoutRequests,addToast,repData,myRepIds}) {
   var now6 = Date.now();
-  var myIds = [repId]; if(repData&&repData.id&&myIds.indexOf(repData.id)<0) myIds.push(repData.id);
+  var myIds = (myRepIds&&myRepIds.length)?myRepIds.slice():[repId]; if(repData&&repData.id&&myIds.indexOf(repData.id)<0) myIds.push(repData.id);
   function _isMine(id){ return myIds.indexOf(id)>=0; }
   var myOrds = orders.filter(function(o){return _isMine(o.repId);});
   var myComm = (commissions||[]).filter(function(cp){return _isMine(cp.repId);});
@@ -18987,8 +19003,9 @@ function MobileShell(props){
   const [preselectCustId, setPreselectCustId] = useState("");
 
   var myRepId = repData ? repData.id : (currentUser && currentUser.rep_id);
-  var myOrders = (orders||[]).filter(function(o){return o.repId===myRepId;});
-  var myCustomers = (customers||[]).filter(function(c){return c.repId===myRepId;});
+  var _myIds = myRepIdSet(currentUser, reps); if(myRepId&&_myIds.indexOf(myRepId)<0)_myIds.push(myRepId); function _mine(id){return _myIds.indexOf(id)>=0;}
+  var myOrders = (orders||[]).filter(function(o){return _mine(o.repId);});
+  var myCustomers = (customers||[]).filter(function(c){return _mine(c.repId);});
 
   function go(t){
     setTab(t);
@@ -21549,6 +21566,7 @@ function App() {
   // Impersonation override
   var _imRep = viewAsRep ? (reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData||{}) : null;
   var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName,email:(_imRep&&_imRep.email)||viewAsRep.repEmail||currentUser.email,_isImpersonated:true}) : currentUser;
+  var myRepIds = myRepIdSet(effectiveUser, reps);
   var isAdmin = !viewAsRep && currentUser.role==="admin";
   // v99: account role — financial-only access. Can mark paid, refund, approve
   // commission payouts, verify tax exemptions, but cannot edit products or reps.
@@ -21832,7 +21850,7 @@ function App() {
         {/* Rep Modules */}
         {!isAdmin&&activeTab==="dashboard"&&(
           <RepDashboard repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
-            orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast} reps={reps} currentUser={effectiveUser}/>
+            orders={orders} customers={customers} commissions={commissions} onNav={setActiveTab} addToast={addToast} reps={reps} currentUser={effectiveUser} myRepIds={myRepIds}/>
         )}
         {!isAdmin&&activeTab==="new_order"&&!repSetupComplete&&(
           <RepSetupChecklist myRepData={myRepData} setReps={setReps}
@@ -21841,7 +21859,7 @@ function App() {
         )}
         {!isAdmin&&(activeTab==="orders"||(activeTab==="new_order"&&repSetupComplete))&&(
           <RepOrders repId={effectiveUser.rep_id||effectiveUser.id} repName={effectiveUser.name}
-            currentUser={effectiveUser} repData={myRepData} orders={orders} customers={customers} products={products}
+            currentUser={effectiveUser} repData={myRepData} myRepIds={myRepIds} orders={orders} customers={customers} products={products}
             setOrders={setOrders} setCustomers={setCustomers}
             addToast={addToast} showResult={showResult} discountCodes={discountCodes}
             shippingRules={shippingRules}
@@ -21853,7 +21871,7 @@ function App() {
         {!isAdmin&&activeTab==="customers"&&(
           <RepCustomers repId={effectiveUser.rep_id||effectiveUser.id}
             repData={reps.find(function(r){return r.id===(effectiveUser.rep_id||effectiveUser.id);})}
-            customers={customers} setCustomers={setCustomers}
+            customers={customers} setCustomers={setCustomers} myRepIds={myRepIds}
             orders={orders} termsRequests={termsRequests}
             setTermsRequests={setTermsRequests} addToast={addToast}/>
         )}
@@ -21861,7 +21879,7 @@ function App() {
           <RepCommissions repId={effectiveUser.rep_id||effectiveUser.id}
             orders={orders} commissions={commissions} repName={effectiveUser.name}
             payoutRequests={payoutRequests} setPayoutRequests={setPayoutRequests}
-            addToast={addToast} repData={myRepData}/>
+            addToast={addToast} repData={myRepData} myRepIds={myRepIds}/>
         )}
         {!isAdmin&&activeTab==="profile"&&(
           <RepProfile user={effectiveUser} repData={myRepData} setReps={setReps} commissions={commissions} addToast={addToast} legalDocs={legalDocs} signatures={signatures}/>
