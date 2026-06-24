@@ -2524,6 +2524,44 @@ function InviteRegistration({token,onComplete}) {
 }
 
 
+/* ─── UpdateBanner ─────────────────────────────────────────────────────────
+   Polls /version.json (written fresh on every deploy) and compares it to the
+   value captured when this tab loaded. If it changes, a new version shipped →
+   show a click-to-refresh banner. No build constant to keep in sync; the deploy
+   script just needs to write a new version.json each push. */
+function UpdateBanner(){
+  const [stale, setStale] = useState(false);
+  const boot = useRef(null);
+  useEffect(function(){
+    var alive = true;
+    function fetchV(){
+      return fetch("version.json?_="+Date.now(), {cache:"no-store"})
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){ return d && (d.v || d.version || ""); })
+        .catch(function(){ return null; });
+    }
+    fetchV().then(function(v){ if(alive && v && boot.current==null) boot.current = v; });
+    function check(){
+      if(document.hidden) return;
+      fetchV().then(function(v){ if(alive && v && boot.current && v!==boot.current) setStale(true); });
+    }
+    var iv = setInterval(check, 60000);
+    function onVis(){ if(!document.hidden) check(); }
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    return function(){ alive=false; clearInterval(iv); document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };
+  }, []);
+  if(!stale) return null;
+  function refresh(){
+    try{ window.location.replace(window.location.pathname + "?u=" + Date.now() + (window.location.hash||"")); }
+    catch(e){ window.location.reload(); }
+  }
+  return React.createElement("div", {style:{position:"fixed",top:0,left:0,right:0,zIndex:2147483647,background:"#635bff",color:"#fff",padding:"9px 16px",display:"flex",alignItems:"center",justifyContent:"center",gap:14,flexWrap:"wrap",fontFamily:"Inter,system-ui,sans-serif",fontSize:13,boxShadow:"0 2px 14px rgba(0,0,0,.25)"}},
+    React.createElement("span", {style:{fontWeight:600}}, "🚀 A new version of the app is available."),
+    React.createElement("button", {onClick:refresh, style:{background:"#fff",color:"#635bff",border:"none",borderRadius:6,padding:"6px 16px",fontWeight:700,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}, "Update now")
+  );
+}
+
 function AppLanding({onLogin}) {
   const [showSignIn,  setShowSignIn]  = useState(false);
   const [showReg,     setShowReg]     = useState(false);
@@ -21690,7 +21728,7 @@ window.addEventListener('load',function(){
           +"  }\n"
           +"}\n";
       for(var i=0;i<N;i++){var src=document.getElementById('c'+i).textContent;code+=Babel.transform(src,{presets:[['react',{}]],sourceType:'script',filename:'c'+i+'.jsx'}).code+'\n';}
-      code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(ErrorBoundary, null, React.createElement(App)));';
+      code+='\nReactDOM.createRoot(document.getElementById(\'root\')).render(React.createElement(ErrorBoundary, null, React.createElement(React.Fragment, null, React.createElement(UpdateBanner), React.createElement(App))));';
       new Function('React','ReactDOM',code)(React,ReactDOM);
     }catch(ex){showErr('Error: '+ex.message+'\n\n'+(ex.stack||''));}
   }
