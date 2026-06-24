@@ -7811,6 +7811,19 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
   function approve()  { updateRep({status:"active",   approvedAt:new Date().toISOString()}); addToast(rep.name+" approved","success"); }
   function suspend()  { updateRep({status:"suspended"}); addToast(rep.name+" suspended","warning"); }
   function reactivate(){ updateRep({status:"active"}); addToast(rep.name+" reactivated","success"); }
+  // Point this person's login (crm_users, matched by email) at THIS rep record. Use when a rep
+  // signs in but sees no orders/customers because their login is linked to a different/duplicate
+  // record than the one the data is under. Admin already has write access to crm_users.
+  function repairLogin(){
+    var sb=getSB(); if(!sb||!rep.email){ addToast("This rep record has no email to match a login","warning"); return; }
+    window.appConfirm("Link the login for "+rep.email+" to THIS account ("+(rep.name||rep.id)+")?\n\nUse this when the rep can sign in but sees no orders or customers — it points their login at this record (where the data lives). They'll need to refresh afterward.",{okLabel:"Link login"}).then(function(ok){
+      if(!ok) return;
+      sb.from("crm_users").update({rep_id:rep.id, role:"rep"}).ilike("email", rep.email).then(function(r){
+        if(r.error){ addToast("Could not update login: "+r.error.message,"danger"); }
+        else { addToast("Login for "+rep.email+" linked to this account. Ask them to refresh.","success"); }
+      }, function(e){ addToast("Could not update login: "+(e&&e.message||"error"),"danger"); });
+    });
+  }
   function approveW9(){ updateRep({w9ReviewStatus:"approved",w9ApprovedAt:new Date().toISOString()}); addToast("W-9 approved","success"); }
   function rejectW9() { updateRep({w9ReviewStatus:"rejected"}); addToast("W-9 rejected","warning"); }
   function changePlan(planId){
@@ -7945,6 +7958,13 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
               </div>
             </div>
             <div style={{display:"flex",gap:6,alignItems:"center"}}>
+              <button onClick={repairLogin}
+                title="Point this rep's login at this record (fixes 'rep sees no orders/customers')"
+                style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.border,
+                        background:C.surface2,color:C.text,cursor:"pointer",
+                        fontFamily:"inherit",fontWeight:700,fontSize:12}}>
+                🔗 Link login
+              </button>
               <button onClick={function(){onViewAsRep({repId:rep.id,repName:rep.name,repData:rep});onClose();}}
                 style={{padding:"6px 12px",borderRadius:6,border:"1px solid "+C.accent+"40",
                         background:C.accent+"10",color:C.accent,cursor:"pointer",
