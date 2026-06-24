@@ -2981,6 +2981,7 @@ function buildInvoicePdf(order, cust, products, company, cb) {
     doc.setFont('helvetica','normal'); doc.setFontSize(9);
     doc.setTextColor(80, 80, 100);
     doc.text('Invoice #:  ' + order.id, margin, y); y += 5;
+    if(order.poNumber){ doc.text('PO #:       ' + String(order.poNumber).slice(0,40), margin, y); y += 5; }
     doc.text('Date:       ' + new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'}), margin, y); y += 5;
     doc.text('Status:     ' + (order.paidAt ? 'PAID' : 'DUE ON RECEIPT'), margin, y); y += 10;
 
@@ -3128,7 +3129,7 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
   var initLink = getSiteUrl()+"#pay="+initTok;
   var sb0=getSB();if(sb0){sb0.from("crm_pay_tokens").upsert({id:initTok,data:initPd,created_at:initPd.createdAt}).then(function(){});}
 
-  var initBody = "Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+"\nTotal Due: $"+grand.toFixed(2)+"\n\nThank you,\n"+company;
+  var initBody = "Hi "+(cust.name||"there")+",\n\nPlease find your invoice attached.\n\nOrder: "+order.id+(order.poNumber?("\nPO #: "+order.poNumber):"")+"\nTotal Due: $"+grand.toFixed(2)+"\n\nThank you,\n"+company;
 
   const [toEmail,  setToEmail]  = useState(cust.email||"");
   const [subject,  setSubject]  = useState("Invoice from "+company+" — Order "+order.id);
@@ -9547,6 +9548,17 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               </div>
             );
           })()}
+          {/* PO number + uploaded PO file */}
+          <div style={{padding:"10px 12px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:8}}>Purchase Order</div>
+            <POBlock orderId={viewOrder.id} poNumber={viewOrder.poNumber} poFileName={viewOrder.poFileName} poFilePath={viewOrder.poFilePath}
+              onChange={function(v){ setViewOrder(Object.assign({},viewOrder,{poNumber:v.poNumber,poFilePath:v.poFilePath,poFileName:v.poFileName})); }}
+              onCommit={function(v){
+                if((v.poNumber||"")===(viewOrder.poNumber||"") && (v.poFilePath||"")===(viewOrder.poFilePath||"")) return;
+                var u=Object.assign({},viewOrder,{poNumber:v.poNumber,poFilePath:v.poFilePath,poFileName:v.poFileName});
+                onUpdate(u); setViewOrder(u); dbSave("crm_orders",viewOrder.id,u); addToast("PO updated","success");
+              }}/>
+          </div>
           {/* Freight callout — shows pre-quote, quoted, or expired state */}
           {viewOrder.shippingType==="freight" && (function(){
             if(viewOrder.status==="Awaiting Freight Quote") {
@@ -13193,6 +13205,65 @@ function EmailModule({currentUser,customers,orders,products,reps,repId,isAdmin,a
 }
 
 /* ─── Order Form (3-step) ────────────────────────────────────────────────── */
+/* ─── Purchase Order (PO) helpers ──────────────────────────────────────────
+   Files live in the existing "tax-exemptions" Storage bucket under an orders/
+   prefix. We persist the storage PATH (+ original filename + PO number) on the
+   order; the file is opened via a short-lived signed URL so the private bucket
+   stays private. */
+function openOrderPO(path){
+  var sb=getSB(); if(!sb||!path){ return; }
+  sb.storage.from("tax-exemptions").createSignedUrl(path, 3600).then(function(res){
+    if(res && res.data && res.data.signedUrl){ window.open(res.data.signedUrl, "_blank"); }
+    else { alert("Could not open the PO file. It may have been removed."); }
+  }).catch(function(){ alert("Could not open the PO file."); });
+}
+
+function POBlock({orderId, poNumber, poFileName, poFilePath, onChange, onCommit, label}) {
+  const [busy,setBusy]=useState(false);
+  var inputStyle={width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:6,padding:"8px 10px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none",boxSizing:"border-box"};
+  function pick(){
+    var inp=document.createElement("input"); inp.type="file"; inp.accept=".pdf,.jpg,.jpeg,.png,.doc,.docx";
+    inp.onchange=function(e){
+      var f=e.target.files&&e.target.files[0]; if(!f) return;
+      if(f.size>10*1024*1024){ alert("File too large (max 10 MB)"); return; }
+      var sb=getSB(); if(!sb){ alert("Storage unavailable"); return; }
+      setBusy(true);
+      var path="orders/"+(orderId||genId("ord"))+"/"+genId("po")+"-"+f.name.replace(/[^\w.-]/g,"_");
+      sb.storage.from("tax-exemptions").upload(path,f,{upsert:true}).then(function(res){
+        setBusy(false);
+        if(res&&res.error){ alert("Upload failed: "+res.error.message); return; }
+        var nv={poNumber:poNumber||"", poFilePath:path, poFileName:f.name};
+        onChange(nv); if(onCommit) onCommit(nv);
+      }).catch(function(err){ setBusy(false); alert("Upload failed: "+((err&&err.message)||"unknown")); });
+    };
+    inp.click();
+  }
+  function removeFile(){ var nv={poNumber:poNumber||"",poFilePath:"",poFileName:""}; onChange(nv); if(onCommit) onCommit(nv); }
+  return (
+    <div style={{display:"grid",gap:8}}>
+      <div>
+        <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>{label||"PO Number"}</div>
+        <input value={poNumber||""}
+          onChange={function(e){onChange({poNumber:e.target.value,poFilePath:poFilePath||"",poFileName:poFileName||""});}}
+          onBlur={function(e){ if(onCommit) onCommit({poNumber:e.target.value,poFilePath:poFilePath||"",poFileName:poFileName||""}); }}
+          placeholder="Customer PO # (optional)" style={inputStyle}/>
+      </div>
+      <div>
+        {poFilePath
+          ? <div style={{display:"flex",alignItems:"center",gap:12,flexWrap:"wrap",fontSize:12,color:C.text}}>
+              <span>📎 {poFileName||"PO file"}</span>
+              <span onClick={function(){openOrderPO(poFilePath);}} style={{color:C.accent,cursor:"pointer",fontWeight:600}}>View</span>
+              <span onClick={removeFile} style={{color:C.danger,cursor:"pointer"}}>Remove</span>
+            </div>
+          : <button onClick={pick} disabled={busy}
+              style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:6,padding:"7px 12px",color:C.text,fontSize:12,fontWeight:600,cursor:busy?"default":"pointer",fontFamily:"inherit"}}>
+              {busy?"Uploading…":"📎 Upload PO (PDF / image)"}
+            </button>}
+      </div>
+    </div>
+  );
+}
+
 function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     editOrder,onClose,addToast,showResult,discountCodes,repData,maxCommRate,shippingRules,currentUser}) {
   const [step,       setStep]       = useState(1);
@@ -13239,6 +13310,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     }
   }, [custId, customers, repData&&repData.defaultCommissionRate, repData&&repData.id]);
   const [notes,      setNotes]      = useState((editOrder&&editOrder.notes)||"");
+  const [poNumber,   setPoNumber]   = useState((editOrder&&editOrder.poNumber)||"");
+  const [poFilePath, setPoFilePath] = useState((editOrder&&editOrder.poFilePath)||"");
+  const [poFileName, setPoFileName] = useState((editOrder&&editOrder.poFileName)||"");
+  const [formOrderId] = useState((editOrder&&editOrder.id)||("ORD-"+String(Date.now()).slice(-6)));
   const [agreed,     setAgreed]     = useState(false);
   const [placing,    setPlacing]    = useState(false);
   const [sendConfirm,setSendConfirm]= useState(true);
@@ -13594,6 +13669,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       cardRef:(payMethod==="credit_card"||(payMethod==="due_receipt"&&dorPath==="card"))&&cardLast4?{last4:cardLast4,expiry:cardExpiry,holder:cardHolder,zip:cardZip}:null,
       dorPath:payMethod==="due_receipt"?dorPath:null,
       notes:notes,
+      poNumber:poNumber, poFilePath:poFilePath, poFileName:poFileName,
       status: isEdit ? (editOrder.status||"Submitted") : (isFreight ? "Awaiting Freight Quote" : "Submitted"),
       shippingType: pickup ? "pickup" : (isFreight ? "freight" : "parcel"),
       fulfillment: pickup ? "pickup" : "ship", pickup: !!pickup,
@@ -14085,6 +14161,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
               </div>
 
               <TextArea label="Notes (optional)" value={notes} onChange={setNotes} rows={2} placeholder="Special instructions…"/>
+              <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid "+C.border}}>
+                <POBlock orderId={formOrderId} poNumber={poNumber} poFileName={poFileName} poFilePath={poFilePath}
+                  onChange={function(v){setPoNumber(v.poNumber);setPoFilePath(v.poFilePath);setPoFileName(v.poFileName);}}/>
+              </div>
             </div>
           )}
 
@@ -16940,6 +17020,7 @@ function buildPaymentConfirmationEmail(order, customer, company, receiptUrl){
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Amount paid</span><span style='font-weight:700;color:#1a1a2e'>$"+total.toFixed(2)+"</span></div>"
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Date</span><span>"+paidDateStr+"</span></div>"
     +"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>Payment method</span><span>"+escHtml(paymentLine)+"</span></div>"
+    +((order&&order.poNumber)?"<div style='display:flex;justify-content:space-between;padding:3px 0;color:#4a5568'><span>PO #</span><span>"+escHtml(order.poNumber)+"</span></div>":"")
     +"</div>"
     + itemsBlock
     + addressBlock
@@ -18933,6 +19014,10 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   // Freight (mobile) — same triggers as desktop
   const [freightAcc, setFreightAcc] = useState({residential:false,liftgate:false,inside:false,appointment:false,limitedAccess:false});
   const [freightNotes, setFreightNotes] = useState("");
+  const [poNumber, setPoNumber] = useState("");
+  const [poFilePath, setPoFilePath] = useState("");
+  const [poFileName, setPoFileName] = useState("");
+  const [mPoOrderId] = useState("ORD-"+String(Date.now()).slice(-6));
   const [forceParcel, setForceParcel] = useState(false);
   const [shippingChoice, setShippingChoice] = useState(null); // null = auto, "parcel" or "freight"
   const [pickup, setPickup] = useState(false);
@@ -19139,6 +19224,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           weightPerPackage: selectedRate.weightPerPackage||null,
         } : null,
         commissionRate: commRate, commissionAmount: commission,
+        poNumber: poNumber, poFilePath: poFilePath, poFileName: poFileName,
         paymentMethod: payMethod==="card" ? "card" : (payMethod==="invoice" ? "invoice_link" : ((selCust&&selCust.termsType)||"due_receipt")),
         terms: payMethod==="due" && selCust && selCust.termsStatus==="active",
         createdAt: new Date().toISOString(),
@@ -19779,6 +19865,12 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           {payMethod==="card" && !cardComplete && <div>• Complete the card details</div>}
         </div>
       )}
+
+      <div style={{padding:"12px 14px",background:C.surface2,border:"1px solid "+C.border,borderRadius:12,marginBottom:14}}>
+        <div style={{fontSize:10,fontWeight:700,color:C.muted,marginBottom:8,textTransform:"uppercase",letterSpacing:".06em"}}>Purchase Order</div>
+        <POBlock orderId={mPoOrderId} poNumber={poNumber} poFileName={poFileName} poFilePath={poFilePath}
+          onChange={function(v){setPoNumber(v.poNumber);setPoFilePath(v.poFilePath);setPoFileName(v.poFileName);}}/>
+      </div>
 
       <button onClick={place} disabled={!canPlace || placing}
         style={{display:"block",width:"100%",padding:"18px",borderRadius:14,
