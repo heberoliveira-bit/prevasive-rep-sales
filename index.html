@@ -11765,8 +11765,10 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
 }
 
 
-function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns,onWipeRep}) {
   const [tab,      setTab]      = useState("supabase");
+  const [wipeRepId,  setWipeRepId]  = useState("");
+  const [wipeConfirm,setWipeConfirm]= useState("");
   const [nprefs,   setNprefs]   = useState((function(){var d=Object.assign({},DEFAULT_NOTIF_PREFS);try{return Object.assign(d,JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}"));}catch(e){return d;}})());
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -11780,7 +11782,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"campaigns",l:"Campaigns"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"campaigns",l:"Campaigns"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"},{id:"danger",l:"⚠ Danger Zone"}];
   const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
@@ -12691,6 +12693,50 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
               </div>
             );})}
           </div>
+        </div>
+      )}
+      {tab==="danger"&&(
+        <div style={{maxWidth:640}}>
+          <div style={{background:C.danger+"12",border:"1px solid "+C.danger+"40",borderRadius:10,padding:"14px 16px",marginBottom:18}}>
+            <div style={{fontWeight:800,color:C.danger,fontSize:14}}>⚠ Danger Zone</div>
+            <div style={{fontSize:12,color:C.muted,marginTop:4,lineHeight:1.5}}>Permanently delete a rep account and <strong>all</strong> of their data — orders, quotes, customers, commissions, payouts, returns, and tickets. Intended for test or abandoned accounts. This cannot be undone.</div>
+          </div>
+          <Field label="Rep to wipe">
+            <select value={wipeRepId} onChange={function(e){setWipeRepId(e.target.value);setWipeConfirm("");}}
+              style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}>
+              <option value="">Choose a rep…</option>
+              {(reps||[]).slice().sort(function(a,b){return (a.name||"").localeCompare(b.name||"");}).map(function(r){return <option key={r.id} value={r.id}>{(r.name||r.id)+(r.email?(" · "+r.email):"")+(r.status==="suspended"?" (suspended)":"")}</option>;})}
+            </select>
+          </Field>
+          {(function(){
+            var sel = (reps||[]).find(function(r){return r.id===wipeRepId;});
+            if(!sel) return null;
+            var c = (typeof onWipeRep==="function") ? onWipeRep(sel,{dryRun:true}) : {};
+            var match = wipeConfirm.trim().toLowerCase() === String(sel.email||"").toLowerCase() && !!sel.email;
+            return (
+              <div style={{marginTop:8}}>
+                <div style={{background:C.surface2,border:"1px solid "+C.border,borderRadius:8,padding:"12px 14px",fontSize:12,color:C.text,lineHeight:1.7}}>
+                  <div style={{fontWeight:700,marginBottom:6,color:C.danger}}>Will permanently delete:</div>
+                  {(c.orders||0)+" orders · "+(c.quotes||0)+" quotes · "+(c.customers||0)+" customers · "+(c.commissions||0)+" payouts · "+(c.returns||0)+" returns · "+(c.payoutRequests||0)+" payout requests · "+(c.tickets||0)+" tickets"}
+                  <div style={{marginTop:6,color:C.muted}}>…plus {(c.repRecords||1)} rep record(s) and the login for <strong>{sel.email||"(no email)"}</strong>.</div>
+                </div>
+                <div style={{marginTop:12,fontSize:12,color:C.muted}}>Type <strong style={{color:C.text}}>{sel.email}</strong> to confirm:</div>
+                <input value={wipeConfirm} onChange={function(e){setWipeConfirm(e.target.value);}} placeholder={sel.email||"email"}
+                  style={{width:"100%",marginTop:6,background:C.bg,border:"1px solid "+(match?C.danger:C.border),borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}/>
+                <div style={{marginTop:12}}>
+                  <button disabled={!match} onClick={function(){
+                    if(!match) return;
+                    if(!window.confirm("Permanently delete "+(sel.name||sel.email)+" and ALL their data? This cannot be undone.")) return;
+                    onWipeRep(sel);
+                    setWipeRepId(""); setWipeConfirm("");
+                  }} style={{padding:"10px 16px",borderRadius:8,border:"none",background:match?C.danger:C.border,color:"#fff",fontWeight:700,fontSize:13,fontFamily:"inherit",cursor:match?"pointer":"not-allowed",opacity:match?1:0.6}}>
+                    Permanently delete this rep &amp; all data
+                  </button>
+                </div>
+                <div style={{marginTop:14,fontSize:11,color:C.dim,lineHeight:1.6}}>Note: this removes the app login (crm_users). The Supabase Auth account is separate — to free the email for re-registration, also delete it under Authentication → Users in your Supabase dashboard.</div>
+              </div>
+            );
+          })()}
         </div>
       )}
     </div>
@@ -21758,6 +21804,53 @@ function App() {
   var _imRep = viewAsRep ? (reps.find(function(r){return r.id===viewAsRep.repId;})||viewAsRep.repData||{}) : null;
   var effectiveUser = viewAsRep ? Object.assign({},currentUser,{role:"rep",rep_id:viewAsRep.repId,name:viewAsRep.repName,email:(_imRep&&_imRep.email)||viewAsRep.repEmail||currentUser.email,_isImpersonated:true}) : currentUser;
   var myRepIds = myRepIdSet(effectiveUser, reps);
+  function wipeRep(rep, opts){
+    opts = opts || {};
+    var empty = {orders:0,quotes:0,commissions:0,customers:0,payoutRequests:0,termsRequests:0,tickets:0,returns:0,repRecords:0};
+    if(!rep) return empty;
+    var ids = myRepIdSet(rep, reps);
+    if(rep.id && ids.indexOf(rep.id)<0) ids.push(rep.id);
+    function rm(x){ return x && ids.indexOf(x.repId)>=0; }
+    var oIds   = (orders||[]).filter(rm).map(function(x){return x.id;});
+    var qIds   = (quotes||[]).filter(rm).map(function(x){return x.id;});
+    var cpIds  = (commissions||[]).filter(rm).map(function(x){return x.id;});
+    var custIds= (customers||[]).filter(function(c){return ids.indexOf(c.repId)>=0||ids.indexOf(c.assignedRepId)>=0||ids.indexOf(c.createdByRepId)>=0;}).map(function(x){return x.id;});
+    var prIds  = (payoutRequests||[]).filter(rm).map(function(x){return x.id;});
+    var trIds  = (termsRequests||[]).filter(rm).map(function(x){return x.id;});
+    var tkIds  = (tickets||[]).filter(rm).map(function(x){return x.id;});
+    var retIds = (returns||[]).filter(function(r){return rm(r) || oIds.indexOf(r.orderId)>=0;}).map(function(x){return x.id;});
+    var counts = {orders:oIds.length, quotes:qIds.length, commissions:cpIds.length, customers:custIds.length,
+                  payoutRequests:prIds.length, termsRequests:trIds.length, tickets:tkIds.length, returns:retIds.length, repRecords:ids.length};
+    if(opts.dryRun) return counts;
+    var sb = getSB();
+    function delIn(table, idList){
+      if(!sb || !idList || !idList.length) return;
+      for(var i=0;i<idList.length;i+=100){
+        sb.from(table).delete().in("id", idList.slice(i,i+100)).then(function(){},function(){});
+      }
+    }
+    delIn("crm_orders", oIds);
+    delIn("crm_quotes", qIds);
+    delIn("crm_commission_payouts", cpIds);
+    delIn("crm_customers", custIds);
+    delIn("crm_payout_requests", prIds);
+    delIn("crm_terms_requests", trIds);
+    delIn("crm_tickets", tkIds);
+    delIn("crm_returns", retIds);
+    delIn("crm_reps", ids);
+    if(sb && rep.email){ sb.from("crm_users").delete().eq("email", rep.email).then(function(){},function(){}); }
+    setOrders(function(p){return (p||[]).filter(function(x){return oIds.indexOf(x.id)<0;});});
+    setQuotes(function(p){return (p||[]).filter(function(x){return qIds.indexOf(x.id)<0;});});
+    setCommissions(function(p){return (p||[]).filter(function(x){return cpIds.indexOf(x.id)<0;});});
+    setCustomers(function(p){return (p||[]).filter(function(x){return custIds.indexOf(x.id)<0;});});
+    setPayoutRequests(function(p){return (p||[]).filter(function(x){return prIds.indexOf(x.id)<0;});});
+    setTermsRequests(function(p){return (p||[]).filter(function(x){return trIds.indexOf(x.id)<0;});});
+    setTickets(function(p){return (p||[]).filter(function(x){return tkIds.indexOf(x.id)<0;});});
+    setReturns(function(p){return (p||[]).filter(function(x){return retIds.indexOf(x.id)<0;});});
+    setReps(function(p){return (p||[]).filter(function(x){return ids.indexOf(x.id)<0;});});
+    addToast("Wiped "+(rep.name||rep.email)+": "+counts.orders+" orders · "+counts.quotes+" quotes · "+counts.customers+" customers · "+counts.commissions+" payouts","success");
+    return counts;
+  }
   var isAdmin = !viewAsRep && currentUser.role==="admin";
   // v99: account role — financial-only access. Can mark paid, refund, approve
   // commission payouts, verify tax exemptions, but cannot edit products or reps.
@@ -22025,7 +22118,7 @@ function App() {
             stripeAccountA={stripeAccountA} onSaveStripeAccountA={setStripeAccountA}
             twoFAEnabled={twoFAEnabled} setTwoFAEnabled={setTwoFAEnabled}
             orders={orders} customers={customers} commissions={commissions}
-            reps={reps} addToast={addToast} campaigns={campaigns} setCampaigns={setCampaigns}/>
+            reps={reps} addToast={addToast} campaigns={campaigns} setCampaigns={setCampaigns} onWipeRep={wipeRep}/>
         )}
 
         {isAdmin&&activeTab==="helpdesk"&&(
