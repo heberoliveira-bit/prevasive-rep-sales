@@ -11520,7 +11520,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                       <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(c.paidAt)}</td>
                       <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{c.repName}</td>
                       <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.dim}}>{c.orderId}</td>
-                      <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(c.amount)}</td>
+                      <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(payoutNet(c))}</td>
                       <td style={{padding:"10px 14px"}}>
                         <span title={c.transferError||c.stripeTransferId||""} style={{padding:"3px 8px",borderRadius:20,fontSize:10,fontWeight:700,background:badge.color+"18",color:badge.color}}>{badge.label}</span>
                         {(ts==="failed"||ts==="no_connect") && (function(){
