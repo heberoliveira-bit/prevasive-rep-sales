@@ -8731,7 +8731,7 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
   });
   var totalStuckByConnect = unconnectedWithBalance.reduce(function(s,r){
     var b = commissionBuckets(orders, commissions, r.id);
-    return s + b.available.amount;
+    return s + netAfterFee(b.available.amount);
   }, 0);
 
   // ─── B5: Forfeiture summary for the selected period ───
@@ -8873,7 +8873,7 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
           ].map(function(it,i){return (
             <div key={i} style={{padding:"14px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:10}}>
               <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>{it.label}</div>
-              <div style={{fontSize:18,fontWeight:800,color:it.color,fontFamily:"monospace"}}>{fmtMoney(it.val.amount)}</div>
+              <div style={{fontSize:18,fontWeight:800,color:it.color,fontFamily:"monospace"}}>{fmtMoney(netAfterFee(it.val.amount))}</div>
               <div style={{fontSize:10,color:C.dim,marginTop:2}}>{it.val.count} order{it.val.count===1?"":"s"} · {it.hint}</div>
             </div>
           );})}
@@ -8953,7 +8953,7 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
                 <div style={{fontSize:11,color:C.warning,fontWeight:700,marginBottom:4}}>⚠ {fmtMoney(totalStuckByConnect)} stuck</div>
                 {unconnectedWithBalance.slice(0,3).map(function(r){
                   var b = commissionBuckets(orders, commissions, r.id);
-                  return <div key={r.id} style={{fontSize:11,color:C.muted,padding:"2px 0"}}>{r.name} — {fmtMoney(b.available.amount)}</div>;
+                  return <div key={r.id} style={{fontSize:11,color:C.muted,padding:"2px 0"}}>{r.name} — {fmtMoney(netAfterFee(b.available.amount))}</div>;
                 })}
               </div>
             )}
