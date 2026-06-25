@@ -2952,6 +2952,110 @@ function PageHeader({title,subtitle,action}) {
 
 /* ─── SendInvoiceModal ───────────────────────────────────────────────────── */
 
+/* ─── Commission Payout Receipt (proof of payment) ──────────────────────── */
+function buildPayoutReceiptPdf(payout, rep, company, cb){
+  var jsPDFLib = (window.jspdf&&window.jspdf.jsPDF) || (window.jsPDF&&window.jsPDF.jsPDF) || window.jsPDF;
+  if(!jsPDFLib){ cb("jsPDF not loaded", null); return; }
+  try{
+    var doc = new jsPDFLib({orientation:'portrait', unit:'mm', format:'a4'});
+    var W=210, H=297, M=20;
+    var BRAND=[99,91,255], INK=[28,28,46], MUT=[110,116,140], LINE=[226,228,238], GOOD=[22,163,74];
+    function ink(c){ doc.setTextColor(c[0],c[1],c[2]); }
+    var gross = (payout.grossAmount!=null?payout.grossAmount:payout.amount)||0;
+    var feePct = payout.feePct||0;
+    var net = (payout.netAmount!=null?payout.netAmount:Math.round(gross*(1-feePct/100)*100)/100);
+    var fee = Math.round((gross-net)*100)/100;
+    var method = payout.note || (payout.stripeTransferId?"Stripe Connect transfer":"Manual payout");
+    var failed = payout.transferStatus==="failed";
+    var status = failed ? "FAILED" : (payout.stripeTransferId?"Completed":"Recorded");
+    var paidDate = payout.paidAt ? new Date(payout.paidAt) : new Date();
+
+    doc.setFillColor(BRAND[0],BRAND[1],BRAND[2]); doc.rect(0,0,W,30,'F');
+    doc.setTextColor(255,255,255);
+    doc.setFont('helvetica','bold'); doc.setFontSize(17); doc.text(company||'PreVasive USA', M, 14);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(224,222,255);
+    doc.text('Commission Payout', M, 21);
+    doc.setFont('helvetica','bold'); doc.setFontSize(18); doc.setTextColor(255,255,255);
+    doc.text('PAYMENT RECEIPT', W-M, 15, {align:'right'});
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(224,222,255);
+    doc.text('#'+(payout.id||''), W-M, 22, {align:'right'});
+
+    var y=44;
+    var meta=[['Date', paidDate.toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'})],
+              ['Method', method],
+              ['Status', status]];
+    if(payout.orderId) meta.push(['Order', String(payout.orderId)]);
+    if(payout.stripeTransferId) meta.push(['Reference', String(payout.stripeTransferId)]);
+    var boxW=82, boxX=W-M-boxW, boxH=8+meta.length*6;
+    doc.setFillColor(247,247,252); doc.setDrawColor(LINE[0],LINE[1],LINE[2]); doc.setLineWidth(0.3);
+    doc.roundedRect(boxX, y-4, boxW, boxH, 2,2,'FD');
+    var my=y+2;
+    meta.forEach(function(m){
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); ink(MUT); doc.text(m[0], boxX+4, my);
+      doc.setFont('helvetica','bold'); ink(INK);
+      var val=String(m[1]); if(val.length>24) val=val.slice(0,23)+'...';
+      doc.text(val, boxX+boxW-4, my, {align:'right'}); my+=6;
+    });
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(8.5); ink(BRAND); doc.text('PAID TO', M, y);
+    doc.setFont('helvetica','bold'); doc.setFontSize(12); ink(INK);
+    doc.text(String(payout.repName||(rep&&rep.name)||'Sales Rep'), M, y+7);
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); ink(MUT);
+    var ry=y+12.5;
+    if(rep&&rep.email){ doc.text(String(rep.email), M, ry); ry+=4.5; }
+    doc.text('Independent sales representative', M, ry); ry+=4.5;
+
+    y = Math.max(y-4+boxH, ry) + 10;
+
+    doc.setFillColor(BRAND[0],BRAND[1],BRAND[2]); doc.rect(M, y-5, W-2*M, 8, 'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(8); doc.setTextColor(255,255,255);
+    doc.text('DESCRIPTION', M+3, y); doc.text('AMOUNT', W-M-2, y, {align:'right'});
+    y+=8;
+    function row(label, val, color){
+      doc.setFont('helvetica','normal'); doc.setFontSize(9.5); ink(color||INK);
+      doc.text(label, M+3, y); doc.text(val, W-M-2, y, {align:'right'}); y+=7;
+    }
+    row('Commission'+(payout.orderId?(' \u2014 Order '+payout.orderId):''), '$'+gross.toFixed(2));
+    if(feePct>0) row('Platform fee ('+feePct+'%)', '-$'+fee.toFixed(2), MUT);
+    doc.setDrawColor(LINE[0],LINE[1],LINE[2]); doc.setLineWidth(0.3); doc.line(M, y-3, W-M, y-3); y+=3;
+    doc.setFillColor(BRAND[0],BRAND[1],BRAND[2]); doc.roundedRect(M, y-5, W-2*M, 12, 2,2,'F');
+    doc.setFont('helvetica','bold'); doc.setFontSize(12); doc.setTextColor(255,255,255);
+    doc.text('AMOUNT PAID', M+4, y+2.5);
+    doc.text('$'+net.toFixed(2), W-M-4, y+2.5, {align:'right'});
+    y+=18;
+
+    if(!failed){
+      doc.setDrawColor(34,197,94); doc.setLineWidth(0.8); doc.setFillColor(240,253,244);
+      doc.roundedRect(M, y-5, 62, 11, 1.5,1.5,'FD');
+      doc.setFont('helvetica','bold'); doc.setFontSize(10); ink(GOOD); doc.text('PAID', M+5, y+1.5);
+      doc.setFont('helvetica','normal'); doc.setFontSize(7.5); doc.setTextColor(34,150,80);
+      doc.text(paidDate.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}), M+22, y+1.5);
+      y+=18;
+    }
+
+    ink(MUT); doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+    doc.text('This document confirms a commission payment'+(payout.stripeTransferId?' transferred via Stripe Connect':'')+'.', M, y); y+=5;
+    if(payout.stripeTransferId){ doc.text('Stripe transfer reference: '+payout.stripeTransferId, M, y); y+=5; }
+
+    doc.setFillColor(BRAND[0],BRAND[1],BRAND[2]); doc.rect(0, H-12, W, 12, 'F');
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(255,255,255);
+    doc.text((company||'PreVasive USA')+'  \u00b7  Commission payout receipt', W/2, H-4.5, {align:'center'});
+
+    cb(null, doc.output('datauristring').split(',')[1]);
+  }catch(e){ cb(e.message, null); }
+}
+function openPayoutReceipt(payout, rep, addToast){
+  var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+  buildPayoutReceiptPdf(payout, rep, company, function(err, b64){
+    if(err){ if(addToast) addToast("Receipt error: "+err,"danger"); return; }
+    try{
+      var a=document.createElement('a');
+      a.href='data:application/pdf;base64,'+b64;
+      a.download='Payout-Receipt-'+(payout.id||'payout')+'.pdf';
+      document.body.appendChild(a); a.click(); setTimeout(function(){a.remove();},100);
+    }catch(e){ if(addToast) addToast("Could not open receipt","danger"); }
+  });
+}
 /* ─── Invoice PDF Generator ─────────────────────────────────────────────── */
 function buildInvoicePdf(order, cust, products, company, cb) {
   // jsPDF UMD exposes as window.jspdf (lowercase)
@@ -8232,7 +8336,14 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                     <div key={cp.id} style={{display:"flex",justifyContent:"space-between",padding:"10px 14px",
                                              background:C.surface,border:"1px solid "+C.border,borderRadius:8,marginBottom:6,fontSize:12}}>
                       <div><div style={{fontWeight:600,color:C.text}}>{fmtDate(cp.paidAt)}</div><div style={{fontSize:10,color:C.dim}}>{cp.orderId}</div></div>
-                      <div style={{fontFamily:"monospace",fontWeight:800,color:C.success,fontSize:14}}>{fmtMoney(payoutNet(cp))}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{fontFamily:"monospace",fontWeight:800,color:C.success,fontSize:14}}>{fmtMoney(payoutNet(cp))}</div>
+                        <button onClick={function(){openPayoutReceipt(cp, rep, addToast);}}
+                          title="Download proof of payment (PDF)"
+                          style={{padding:"4px 9px",borderRadius:6,border:"1px solid "+C.border,background:C.surface2,color:C.text,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>
+                          📄 Receipt
+                        </button>
+                      </div>
                     </div>
                   );})}
                 </div>
@@ -16229,12 +16340,16 @@ function RepCommissions({repId,orders,commissions,repName,payoutRequests,setPayo
           <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>Payment History</div>
           <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
             <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{background:C.surface2}}>{["Date","Order","Amount"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
+              <thead><tr style={{background:C.surface2}}>{["Date","Order","Amount","Receipt"].map(function(h){return <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>;})}</tr></thead>
               <tbody>{myComm.map(function(cp){return (
                 <tr key={cp.id} style={{borderTop:"1px solid "+C.border}}>
                   <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(cp.paidAt)}</td>
                   <td style={{padding:"10px 14px",fontSize:11,fontFamily:"monospace",color:C.dim}}>{cp.orderId}</td>
                   <td style={{padding:"10px 14px",fontSize:13,fontFamily:"monospace",fontWeight:700,color:C.success}}>{fmtMoney(payoutNet(cp))}</td>
+                  <td style={{padding:"10px 14px"}}>
+                    <button onClick={function(){openPayoutReceipt(cp, repData, addToast);}} title="Download proof of payment (PDF)"
+                      style={{padding:"4px 9px",borderRadius:6,border:"1px solid "+C.border,background:C.surface2,color:C.text,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>📄 Receipt</button>
+                  </td>
                 </tr>
               );})}</tbody>
             </table>
