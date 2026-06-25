@@ -8386,6 +8386,11 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                           style={{padding:"4px 9px",borderRadius:6,border:"1px solid "+C.border,background:C.surface2,color:C.text,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>
                           📄 Receipt
                         </button>
+                        <button onClick={function(){if(!rep.email){addToast("No email on file for "+rep.name,"warning");return;} emailPayoutReceipt(cp, rep, addToast);}}
+                          title={rep.email?("Email this receipt to "+rep.email):"No email on file for this rep"}
+                          style={{padding:"4px 9px",borderRadius:6,border:"1px solid "+C.accent+"40",background:C.accent+"12",color:C.accent,cursor:"pointer",fontFamily:"inherit",fontWeight:700,fontSize:11,whiteSpace:"nowrap"}}>
+                          ✉ Resend
+                        </button>
                       </div>
                     </div>
                   );})}
