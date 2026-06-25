@@ -17286,7 +17286,7 @@ function getEmailCfg(){
 }
 function requestPasswordReset(email){
   var cfg = (typeof getEmailCfg==="function") ? getEmailCfg() : null;
-  var url = SUPABASE_URL + "/functions/v1/auth-reset";
+  var url = SUPABASE_URL + "/functions/v1/auth-reset-ts";
   return fetch(url, {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({
