@@ -15204,11 +15204,11 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
   var _myIds=(myRepIds&&myRepIds.length)?myRepIds:[repId]; function _mine(id){return _myIds.indexOf(id)>=0;}
   var now4 = Date.now();
   var myOrds = orders.filter(function(o){return _mine(o.repId);});
-  var myComm = (commissions||[]).filter(function(cp){return cp.repId===repId;});
-  var totalEarned = myComm.reduce(function(s,cp){return s+(cp.amount||0);},0);
+  var myComm = (commissions||[]).filter(function(cp){return _mine(cp.repId);});
+  var totalEarned = myComm.reduce(function(s,cp){return s+payoutNet(cp);},0);
   var _myBuckets = commissionBuckets(myOrds, myComm);
-  var heldComm = _myBuckets.held.amount;
-  var releasedComm = _myBuckets.available.amount;
+  var heldComm = netAfterFee(_myBuckets.held.amount);
+  var releasedComm = netAfterFee(_myBuckets.available.amount);
   var myCusts = customers.filter(function(c2){return _mine(c2.repId);});
 
   return (
