@@ -2622,9 +2622,9 @@ function AppLanding({onLogin}) {
     if(!em||!/^[^@]+@[^@]+\.[^@]+$/.test(em)){setSiErr("Enter your email above first, then click \u201CForgot password?\u201D.");return;}
     var sb=getSB(); if(!sb){setSiErr("Service unavailable.");return;}
     setSiErr("");
-    sb.auth.resetPasswordForEmail(em, {redirectTo: window.location.origin + window.location.pathname})
+    requestPasswordReset(em)
       .then(function(){ setForgotSent(true); })
-      .catch(function(e){ setSiErr((e&&e.message)||"Could not send reset email."); });
+      .catch(function(){ setForgotSent(true); });
   }
 
   function handleReset() {
@@ -11785,10 +11785,15 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
 }
 
 
-function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns,onWipeRep}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns,onWipeRep,qboCfg,onSaveQbo}) {
   const [tab,      setTab]      = useState("supabase");
   const [wipeRepId,  setWipeRepId]  = useState("");
   const [wipeConfirm,setWipeConfirm]= useState("");
+  const [qboUrl,    setQboUrl]    = useState((qboCfg&&qboCfg.fnUrl)||"");
+  const [qboKey,    setQboKey]    = useState((qboCfg&&qboCfg.key)||"");
+  const [qboStatus, setQboStatus] = useState(null);
+  const [qboBusy,   setQboBusy]   = useState(false);
+  const [qboOrderId,setQboOrderId]= useState("");
   const [nprefs,   setNprefs]   = useState((function(){var d=Object.assign({},DEFAULT_NOTIF_PREFS);try{return Object.assign(d,JSON.parse(localStorage.getItem("__pv__notifPrefs")||"{}"));}catch(e){return d;}})());
   const [url,      setUrl]      = useState((supabaseCfg&&supabaseCfg.url)||SUPABASE_URL);
   const [anonKey,  setAnonKey]  = useState((supabaseCfg&&supabaseCfg.anonKey)||"");
@@ -11802,7 +11807,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
   const [newType,  setNewType]  = useState("percent");
   const [newVal,   setNewVal]   = useState("");
 
-  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"campaigns",l:"Campaigns"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"},{id:"danger",l:"⚠ Danger Zone"}];
+  var TABS = [{id:"supabase",l:"Supabase"},{id:"stripe",l:"Stripe"},{id:"qbo",l:"QuickBooks"},{id:"invoice",l:"Invoice"},{id:"email",l:"Email"},{id:"campaigns",l:"Campaigns"},{id:"notifications",l:"Notifications"},{id:"shipping",l:"Shipping"},{id:"shipstation",l:"ShipStation"},{id:"tax",l:"Tax"},{id:"address",l:"Address"},{id:"discounts",l:"Discount Codes"},{id:"agreement",l:"Credit Agreement"},{id:"export",l:"Export Data"},{id:"danger",l:"⚠ Danger Zone"}];
   const [newSrLabel,setNewSrLabel] = useState(""); const [newSrMax,setNewSrMax] = useState(""); const [newSrRate,setNewSrRate] = useState("");
   const [invPrefix,setInvPrefix] = useState((invoiceCfg&&invoiceCfg.prefix)||"INV");
   const [invComp,  setInvComp]   = useState((invoiceCfg&&invoiceCfg.company)||"PreVasive USA");
@@ -12715,6 +12720,77 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
           </div>
         </div>
       )}
+      {tab==="qbo"&&(function(){
+        function qboCall(action, body){
+          if(!qboUrl){ addToast("Enter the QBO function URL first","warning"); return Promise.resolve({ok:false}); }
+          return fetch(qboUrl, {
+            method:"POST",
+            headers:{"Content-Type":"application/json","x-pv-key":qboKey},
+            body:JSON.stringify(Object.assign({action:action, pvKey:qboKey}, body||{}))
+          }).then(function(r){return r.json();}).catch(function(e){ return {ok:false, error:(e&&e.message)||"network error"}; });
+        }
+        function doConnect(){
+          setQboBusy(true);
+          qboCall("authorize").then(function(d){ setQboBusy(false);
+            if(d&&d.url){ window.open(d.url,"_blank","width=620,height=780"); addToast("Complete the QuickBooks consent in the popup, then click Refresh status.","info"); }
+            else addToast((d&&d.error)||"Could not start QuickBooks connect","danger");
+          });
+        }
+        function doStatus(){
+          setQboBusy(true);
+          qboCall("status").then(function(d){ setQboBusy(false); setQboStatus(d);
+            if(d&&d.connected) addToast("QuickBooks connected"+(d.company?(" — "+d.company):""),"success");
+            else if(d&&!d.error) addToast("Not connected yet","warning");
+            else if(d&&d.error) addToast("Status error: "+d.error,"danger");
+          });
+        }
+        function doPush(){
+          var o = (orders||[]).find(function(x){return x.id===qboOrderId;});
+          if(!o){ addToast("Pick an order to push","warning"); return; }
+          setQboBusy(true);
+          qboCall("pushInvoice",{order:o}).then(function(d){ setQboBusy(false);
+            if(d&&d.ok) addToast("✓ Pushed to QuickBooks — Invoice "+(d.invoiceId||"")+" (total $"+(d.total!=null?d.total:"?")+")","success");
+            else addToast("Push failed: "+((d&&d.error)||"error"),"danger");
+          });
+        }
+        var recentOrders = (orders||[]).slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);}).slice(0,40);
+        return (
+          <div style={{maxWidth:660}}>
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"18px 20px",marginBottom:16}}>
+              <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:4}}>QuickBooks Online</div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.5,marginBottom:14}}>Direct connection via your <code>qbo</code> Supabase edge function. The OAuth secrets live in the function — only the function URL and shared key are stored here.</div>
+              <Field label="QBO function URL"><input value={qboUrl} onChange={function(e){setQboUrl(e.target.value);}} placeholder="https://<project>.supabase.co/functions/v1/qbo" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}/></Field>
+              <Field label="Shared key (PV_QBO_KEY)"><input value={qboKey} onChange={function(e){setQboKey(e.target.value);}} placeholder="must match the PV_QBO_KEY secret" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}/></Field>
+              <div style={{display:"flex",gap:8,marginTop:6}}>
+                <Btn small onClick={function(){onSaveQbo&&onSaveQbo({fnUrl:qboUrl,key:qboKey});addToast("QuickBooks settings saved","success");}}>Save</Btn>
+                <Btn small variant="outline" onClick={doConnect} disabled={qboBusy}>🔗 Connect QuickBooks</Btn>
+                <Btn small variant="ghost" onClick={doStatus} disabled={qboBusy}>↻ Refresh status</Btn>
+              </div>
+            </div>
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 20px",marginBottom:16}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Connection</div>
+              {qboStatus==null ? (
+                <div style={{fontSize:12,color:C.dim}}>Click "Refresh status" to check.</div>
+              ) : qboStatus.connected ? (
+                <div style={{fontSize:13,color:C.success,fontWeight:700}}>✓ Connected{qboStatus.company?(" — "+qboStatus.company):""} <span style={{color:C.dim,fontWeight:400,fontSize:11}}>(realm {qboStatus.realmId} · {qboStatus.env})</span></div>
+              ) : (
+                <div style={{fontSize:13,color:C.warning,fontWeight:700}}>Not connected{qboStatus.error?(" — "+qboStatus.error):""}</div>
+              )}
+            </div>
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 20px"}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:8}}>Test: push one order as an invoice</div>
+              <div style={{fontSize:11,color:C.dim,marginBottom:10,lineHeight:1.5}}>Phase 1 sanity check — sends a single order to QuickBooks as an Invoice (keyed by order id, so re-pushing won't duplicate). Tax mapping comes in Phase 2.</div>
+              <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                <select value={qboOrderId} onChange={function(e){setQboOrderId(e.target.value);}} style={{flex:1,background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}>
+                  <option value="">Choose a recent order…</option>
+                  {recentOrders.map(function(o){return <option key={o.id} value={o.id}>{o.id+" · "+(o.custName||"customer")+" · $"+(((o.totals&&o.totals.grand)||o.total||0).toFixed?((o.totals&&o.totals.grand)||o.total||0).toFixed(2):((o.totals&&o.totals.grand)||0))}</option>;})}
+                </select>
+                <Btn small onClick={doPush} disabled={qboBusy||!qboOrderId}>Push to QBO →</Btn>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       {tab==="danger"&&(
         <div style={{maxWidth:640}}>
           <div style={{background:C.danger+"12",border:"1px solid "+C.danger+"40",borderRadius:10,padding:"14px 16px",marginBottom:18}}>
@@ -17208,6 +17284,20 @@ function getEmailCfg(){
   }catch(e){}
   return null;
 }
+function requestPasswordReset(email){
+  var cfg = (typeof getEmailCfg==="function") ? getEmailCfg() : null;
+  var url = SUPABASE_URL + "/functions/v1/auth-reset";
+  return fetch(url, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      email: email,
+      redirectTo: window.location.origin + window.location.pathname,
+      emailFnUrl: (cfg && cfg.edgeFnUrl) || "",
+      fromEmail:  (cfg && cfg.fromEmail) || "",
+      fromName:   (cfg && cfg.fromName)  || "PreVasive USA"
+    })
+  }).then(function(r){return r.json();});
+}
 function setEmailCfgCache(cfg){
   __emailCfgCache = cfg || null;
 }
@@ -19138,9 +19228,9 @@ function MobileLanding({onLogin}){
     if(!email){setErr("Enter your email first.");return;}
     var sb = getSB(); if(!sb){setErr("Connection error.");return;}
     setBusy(true); setErr("");
-    sb.auth.resetPasswordForEmail(email, {redirectTo: window.location.origin + window.location.pathname})
+    requestPasswordReset(email)
       .then(function(){setBusy(false); setResetSent(true);})
-      .catch(function(e){setBusy(false); setErr((e&&e.message)||String(e));});
+      .catch(function(){setBusy(false); setResetSent(true);});
   }
 
   function doSetNewPass(){
@@ -21142,6 +21232,7 @@ function App() {
   const [stripeAccountA, setStripeAccountA] = useLS("stripeAccountA",{
     publishableKey:"", secretKey:"", webhookSecret:"", edgeFnUrl:"", connectFnUrl:"", platformFee:0,
   });
+  const [qboCfg, setQboCfg] = useLS("qboCfg", { fnUrl:"", key:"" });
   const [stripeLinks, setStripeLinks] = useLS("stripeLinks",{
     membershipMonthly:"", membershipAnnual:"", membershipCompany:"",
     starter:"", pro:"", elite:"", portal:"",
@@ -22139,7 +22230,8 @@ function App() {
             stripeAccountA={stripeAccountA} onSaveStripeAccountA={setStripeAccountA}
             twoFAEnabled={twoFAEnabled} setTwoFAEnabled={setTwoFAEnabled}
             orders={orders} customers={customers} commissions={commissions}
-            reps={reps} addToast={addToast} campaigns={campaigns} setCampaigns={setCampaigns} onWipeRep={wipeRep}/>
+            reps={reps} addToast={addToast} campaigns={campaigns} setCampaigns={setCampaigns} onWipeRep={wipeRep}
+            qboCfg={qboCfg} onSaveQbo={setQboCfg}/>
         )}
 
         {isAdmin&&activeTab==="helpdesk"&&(
