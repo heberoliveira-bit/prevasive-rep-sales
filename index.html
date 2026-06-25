@@ -12541,7 +12541,7 @@ function generateInvoice(order, customers, products, currentUser, returnHtml) {
     var p    = products.find(function(x){return x.id===it.prodId;})||{name:"Product",price:0};
     var cup  = it.customerPrice||p.price||0; // marked-up customer price
     var line = cup*it.qty;
-    return "<tr><td style='padding:8px 12px;border-bottom:1px solid #e8ecef'>"+p.name+"</td><td style='padding:8px 12px;text-align:center;border-bottom:1px solid #e8ecef'>"+it.qty+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef'>"+fmtMoney(cup)+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef;font-weight:600'>"+fmtMoney(line)+"</td></tr>";
+    return "<tr><td style='padding:8px 12px;border-bottom:1px solid #e8ecef'>"+p.name+(it.variantName?"<div style='font-size:11px;color:#6b7c93;margin-top:2px'>"+String(it.variantName).replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>":"")+"</td><td style='padding:8px 12px;text-align:center;border-bottom:1px solid #e8ecef'>"+it.qty+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef'>"+fmtMoney(cup)+"</td><td style='padding:8px 12px;text-align:right;border-bottom:1px solid #e8ecef;font-weight:600'>"+fmtMoney(line)+"</td></tr>";
   }).join("");
   var totals = order.totals||{};
   var html = "<!DOCTYPE html><html><head><meta charset='UTF-8'><style>*{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,Inter,sans-serif;color:#1a1a2e;max-width:720px;margin:0 auto;padding:40px 24px;font-size:13px}h1{font-size:28px;font-weight:800;letter-spacing:-.03em}.muted{color:#6b7c93}.mono{font-family:monospace}table{width:100%;border-collapse:collapse}.th{padding:8px 12px;background:#f6f9fc;text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#6b7c93;font-weight:600}</style></head><body>"
@@ -13867,7 +13867,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         })();
         var itemsRows = order.items.map(function(it){
           var p = (products||[]).find(function(px){return px.id===it.prodId;}) || {};
-          return "<tr><td style='padding:5px 10px;border:1px solid #e8ecef;'>"+(p.name||it.prodId)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>"+(it.qty||0)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)).toFixed(2)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)*(it.qty||0)).toFixed(2)+"</td></tr>";
+          return "<tr><td style='padding:5px 10px;border:1px solid #e8ecef;'>"+(p.name||it.prodId)+(it.variantName?"<div style='font-size:11px;color:#6b7c93'>"+String(it.variantName).replace(/</g,"&lt;").replace(/>/g,"&gt;")+"</div>":"")+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>"+(it.qty||0)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)).toFixed(2)+"</td><td style='padding:5px 10px;border:1px solid #e8ecef;text-align:right;'>$"+((it.unitPrice||0)*(it.qty||0)).toFixed(2)+"</td></tr>";
         }).join("");
         var freightCfg = getFreightCfg();
         var freightAdminEmail = freightCfg.notifyEmail || getAdminNotifyEmail();
