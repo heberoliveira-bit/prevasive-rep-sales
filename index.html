@@ -2962,8 +2962,8 @@ function buildPayoutReceiptPdf(payout, rep, company, cb){
     var BRAND=[99,91,255], INK=[28,28,46], MUT=[110,116,140], LINE=[226,228,238], GOOD=[22,163,74];
     function ink(c){ doc.setTextColor(c[0],c[1],c[2]); }
     var gross = (payout.grossAmount!=null?payout.grossAmount:payout.amount)||0;
-    var feePct = payout.feePct||0;
-    var net = (payout.netAmount!=null?payout.netAmount:Math.round(gross*(1-feePct/100)*100)/100);
+    var feePct = (payout.feePct!=null) ? payout.feePct : ((typeof getPlatformFeePct==="function")?getPlatformFeePct():0);
+    var net = (payout.netAmount!=null) ? payout.netAmount : Math.round(gross*(1-feePct/100)*100)/100;
     var fee = Math.round((gross-net)*100)/100;
     var method = payout.note || (payout.stripeTransferId?"Stripe Connect transfer":"Manual payout");
     var failed = payout.transferStatus==="failed";
@@ -3052,8 +3052,8 @@ function emailPayoutReceipt(payout, rep, addToast, opts){
   if(!cfg || !cfg.edgeFnUrl || !cfg.fromEmail){ if(addToast && !opts.silent) addToast("Email not configured — receipt not sent","warning"); return; }
   var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
   var gross=(payout.grossAmount!=null?payout.grossAmount:payout.amount)||0;
-  var feePct=payout.feePct||0;
-  var net=(payout.netAmount!=null?payout.netAmount:Math.round(gross*(1-feePct/100)*100)/100);
+  var feePct=(payout.feePct!=null)?payout.feePct:((typeof getPlatformFeePct==="function")?getPlatformFeePct():0);
+  var net=(payout.netAmount!=null)?payout.netAmount:Math.round(gross*(1-feePct/100)*100)/100;
   var name=(rep&&rep.name)||payout.repName||"there";
   var ref = payout.stripeTransferId ? ("<p style='margin:0 0 6px;color:#6b7c93;font-size:12px'>Stripe transfer reference: <span style='font-family:monospace'>"+payout.stripeTransferId+"</span></p>") : "";
   var html = "<div style=\"font-family:-apple-system,Segoe UI,Inter,sans-serif;max-width:560px;margin:0 auto;color:#1a1a2e\">"
@@ -11208,12 +11208,15 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
     if(!rep.stripeConnectId){ addToast(rep.name+" hasn't connected Stripe — can't transfer","warning"); return; }
     setEarlySaving(true);
     var amount = (o.totals && o.totals.commission) || 0;
+    var platformFee = (typeof getPlatformFeePct==="function") ? getPlatformFeePct() : 0;
     var nowIso = new Date().toISOString();
     var actor = (currentUser && currentUser.name) || "Admin";
     var pay = {
       id: genId("pay"),
       repId: o.repId, repName: rep.name,
       orderId: o.id, amount: amount,
+      grossAmount: amount, feePct: platformFee,
+      netAmount: Math.round(amount*(1-platformFee/100)*100)/100,
       method: "early_release",
       note: "Early release by "+actor+": "+reason,
       paidAt: nowIso,
@@ -11235,12 +11238,14 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
           transferStatus: result.ok ? "sent" : "failed",
           stripeTransferId: result.transferId,
           transferError: result.error,
+          netAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.netAmount,
           note: result.ok ? pay.note+" — Transfer "+result.transferId : pay.note+" — FAILED: "+result.error
         });
         dbSave("crm_commission_payouts", pay.id, done);
         setCommissions(function(prev){return prev.map(function(c){return c.id===pay.id?done:c;});});
         if(result.ok){
           addToast("✓ "+fmtMoney(amount)+" early-released to "+rep.name,"success");
+          emailPayoutReceipt(done, rep, addToast, {silent:true});
           try{
             var n = {id:genId("n"), ts:nowIso, type:"success", repId:o.repId,
                      msg:"💰 Commission of "+fmtMoney(amount)+" released early for "+o.id+(reason?" — "+reason:""),
