@@ -21157,7 +21157,7 @@ function App() {
       if(d.stripeLinks && Object.keys(d.stripeLinks).length) setStripeLinks(d.stripeLinks);
       if(d.campaigns && Array.isArray(d.campaigns)) setCampaigns(d.campaigns);
       if(d.discountCodes && Array.isArray(d.discountCodes)) setDiscountCodes(d.discountCodes);
-      if(d.stripePublishableKey||d.stripeChargeFnUrl||d.stripeConnectFnUrl) setStripeAccountA(function(prev){var p=prev||{}; return Object.assign({},p,{publishableKey:p.publishableKey||d.stripePublishableKey||"",edgeFnUrl:p.edgeFnUrl||d.stripeChargeFnUrl||"",connectFnUrl:p.connectFnUrl||d.stripeConnectFnUrl||""});});
+      if(d.stripePublishableKey||d.stripeChargeFnUrl||d.stripeConnectFnUrl||d.platformFee!=null) setStripeAccountA(function(prev){var p=prev||{}; var localFee=(p.platformFee==null||p.platformFee===""||Number(p.platformFee)===0); return Object.assign({},p,{publishableKey:p.publishableKey||d.stripePublishableKey||"",edgeFnUrl:p.edgeFnUrl||d.stripeChargeFnUrl||"",connectFnUrl:p.connectFnUrl||d.stripeConnectFnUrl||"",platformFee:(localFee&&d.platformFee!=null)?d.platformFee:p.platformFee});});
       if(d.emailFnUrl) setEmailCfg(function(prev){var p=prev||{}; return Object.assign({},p,{edgeFnUrl:p.edgeFnUrl||d.emailFnUrl||"",fromName:p.fromName||d.emailFromName||"",fromEmail:p.fromEmail||d.emailFromEmail||""});});
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
       if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
@@ -21278,7 +21278,8 @@ function App() {
                   carrierFilter:shipStationCfg.carrierFilter||""
                 } : null,
                 shippingRules: Array.isArray(shippingRules) ? shippingRules : [],
-                twoFAEnabled: !!twoFAEnabled };
+                twoFAEnabled: !!twoFAEnabled,
+                platformFee: (stripeAccountA && stripeAccountA.platformFee!=null ? stripeAccountA.platformFee : 0) };
     var serialized;
     try{ serialized = JSON.stringify(row); }catch(e){ return; }
     if(serialized === publicSettingsLastWritten.current) return; // no actual change — skip the write
@@ -21286,7 +21287,7 @@ function App() {
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(r){
       if(r&&r.error){ try{console.warn("[public_settings] sync write failed:",r.error.message);}catch(_){} }
     });
-  },[invoiceCfg,taxCfg,pickupCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,pickupCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),(stripeAccountA&&stripeAccountA.platformFee),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
 
   // v89: publish admin-only secrets so they sync across admin browsers.
   // Same anti-echo pattern as public_settings.
