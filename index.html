@@ -10433,9 +10433,11 @@ function reassignRepRecords(fromId, toId, toName, ctx, addToast){
 }
 function computeRepStats(orders, quotes, customers, repId, sinceMs){
   var since = sinceMs;
-  var orderRows  = (orders||[]).filter(function(o){return o.repId===repId && new Date(o.createdAt).getTime()>=since && o.status!=="Cancelled";});
-  var quoteRows  = (quotes||[]).filter(function(q){return q.repId===repId && new Date(q.createdAt).getTime()>=since;});
-  var custRows   = (customers||[]).filter(function(c){return (c.repId===repId || c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt && new Date(c.createdAt).getTime()>=since;});
+  var ids = Array.isArray(repId) ? repId : [repId];
+  function has(id){ return id!=null && ids.indexOf(id)>=0; }
+  var orderRows  = (orders||[]).filter(function(o){return has(o.repId) && new Date(o.createdAt).getTime()>=since && o.status!=="Cancelled";});
+  var quoteRows  = (quotes||[]).filter(function(q){return has(q.repId) && new Date(q.createdAt).getTime()>=since;});
+  var custRows   = (customers||[]).filter(function(c){return (has(c.repId) || has(c.assignedRepId) || has(c.createdByRepId)) && c.createdAt && new Date(c.createdAt).getTime()>=since;});
   var revenue    = orderRows.reduce(function(s,o){return s + ((o.totals&&o.totals.grand)||o.total||0);}, 0);
   return {
     orderCount:    orderRows.length,
@@ -10446,7 +10448,9 @@ function computeRepStats(orders, quotes, customers, repId, sinceMs){
 }
 function computeRepActionFeed(orders, quotes, customers, repId, limit){
   var actions = [];
-  (orders||[]).filter(function(o){return o.repId===repId;}).forEach(function(o){
+  var ids = Array.isArray(repId) ? repId : [repId];
+  function has(id){ return id!=null && ids.indexOf(id)>=0; }
+  (orders||[]).filter(function(o){return has(o.repId);}).forEach(function(o){
     actions.push({ts:o.createdAt, kind:"order_placed", label:"Order "+o.id+" placed — "+(o.custName||"customer"), amount:(o.totals&&o.totals.grand)||o.total||0, orderId:o.id});
     if(o.invoiceSentAt) actions.push({ts:o.invoiceSentAt, kind:"invoice_sent", label:"Invoice sent — "+o.id, orderId:o.id});
     if(o.paidAt)         actions.push({ts:o.paidAt, kind:"order_paid", label:"Order paid — "+o.id, orderId:o.id});
@@ -10457,11 +10461,11 @@ function computeRepActionFeed(orders, quotes, customers, repId, limit){
       }
     });
   });
-  (quotes||[]).filter(function(q){return q.repId===repId;}).forEach(function(q){
+  (quotes||[]).filter(function(q){return has(q.repId);}).forEach(function(q){
     actions.push({ts:q.createdAt, kind:"quote_created", label:"Quote "+q.id+" sent — "+(q.custName||"customer"), amount:q.total||0, quoteId:q.id});
     if(q.acceptedAt) actions.push({ts:q.acceptedAt, kind:"quote_accepted", label:"Quote accepted — "+q.id, quoteId:q.id});
   });
-  (customers||[]).filter(function(c){return (c.repId===repId || c.assignedRepId===repId || c.createdByRepId===repId) && c.createdAt;}).forEach(function(c){
+  (customers||[]).filter(function(c){return (has(c.repId) || has(c.assignedRepId) || has(c.createdByRepId)) && c.createdAt;}).forEach(function(c){
     actions.push({ts:c.createdAt, kind:"customer_added", label:"Customer added — "+c.name, customerId:c.id});
   });
   actions.sort(function(a,b){return new Date(b.ts).getTime() - new Date(a.ts).getTime();});
@@ -10488,9 +10492,24 @@ function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeSt
     return function(){ clearInterval(t); };
   }, []);
 
+  function idSetFor(rep){
+    var ids = (typeof myRepIdSet==="function") ? myRepIdSet(rep, reps) : [rep.id];
+    if(rep && rep.id && ids.indexOf(rep.id)<0) ids.push(rep.id);
+    return ids;
+  }
+  function effSeen(rep){
+    var ids = idSetFor(rep);
+    var best = rep.lastSeenAt ? new Date(rep.lastSeenAt).getTime() : 0;
+    var bestIso = rep.lastSeenAt || null;
+    (reps||[]).forEach(function(r){
+      if(ids.indexOf(r.id)>=0 && r.lastSeenAt){ var t=new Date(r.lastSeenAt).getTime(); if(t>best){ best=t; bestIso=r.lastSeenAt; } }
+    });
+    return bestIso;
+  }
   function statusFor(rep){
-    if(!rep.lastSeenAt) return {dot:"⚪", label:"never signed in", color:C.dim};
-    var ageMs = now - new Date(rep.lastSeenAt).getTime();
+    var seen = effSeen(rep);
+    if(!seen) return {dot:"⚪", label:"never signed in", color:C.dim};
+    var ageMs = now - new Date(seen).getTime();
     if(ageMs < 2*60*1000)        return {dot:"🟢", label:"online",  color:C.success};
     if(ageMs < 24*60*60*1000)    return {dot:"🟡", label:"today",   color:C.warning};
     return {dot:"⚪", label:"inactive", color:C.dim};
@@ -10555,11 +10574,12 @@ function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeSt
           <div style={{padding:"40px 18px",textAlign:"center",color:C.dim,fontSize:13}}>No reps yet.</div>
         )}
         {sortedReps.map(function(rep){
+          var _ids = idSetFor(rep);
           var st  = statusFor(rep);
-          var s7  = computeRepStats(orders, quotes, customers, rep.id, since7);
-          var s30 = computeRepStats(orders, quotes, customers, rep.id, since30);
+          var s7  = computeRepStats(orders, quotes, customers, _ids, since7);
+          var s30 = computeRepStats(orders, quotes, customers, _ids, since30);
           var isOpen = expandedId === rep.id;
-          var feed = isOpen ? computeRepActionFeed(orders, quotes, customers, rep.id, 20) : [];
+          var feed = isOpen ? computeRepActionFeed(orders, quotes, customers, _ids, 20) : [];
           return (
             <React.Fragment key={rep.id}>
               <div style={{display:"grid",gridTemplateColumns:"2fr 1.4fr 1.4fr 1.4fr 40px",padding:"14px 18px",borderBottom:"1px solid "+C.border,alignItems:"center",cursor:"pointer",background:isOpen?C.surface2:"transparent"}}
@@ -10572,7 +10592,7 @@ function AdminRepActivity({reps, orders, quotes, customers, addToast, realtimeSt
                   </div>
                   <div style={{fontSize:11,color:C.muted}}>{rep.email||""}{rep.status?" · "+rep.status:""}</div>
                 </div>
-                <div style={{fontSize:12,color:C.text}}>{relTime(rep.lastSeenAt)}</div>
+                <div style={{fontSize:12,color:C.text}}>{relTime(effSeen(rep))}</div>
                 <div>
                   <div style={{fontSize:12,color:C.text,fontWeight:600}}>{s7.orderCount} order{s7.orderCount===1?"":"s"} · ${(s7.revenue/1000).toFixed(1)}K</div>
                   <div style={{fontSize:10,color:C.muted}}>{s7.quoteCount} quotes · {s7.customerCount} customers</div>
