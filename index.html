@@ -3328,11 +3328,14 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     }
     // Itemized products
     var itemsRows = "";
+    var _commR = Number(order.commRate||0);
     (order.items||[]).forEach(function(it){
       var qty = Number(it.qty||it.quantity||1);
-      var price = Number(it.price||it.unitPrice||0);
+      var base = Number(it.unitPrice||it.price||0);
+      var price = (it.customerPrice!=null && it.customerPrice!=="") ? Number(it.customerPrice) : Math.round(base*(1+_commR/100)*100)/100;
       var lineTotal = Math.round(qty*price*100)/100;
-      var nm = (it.name||"Item") + (it.variantName ? (" — "+it.variantName) : "");
+      var _prod = (products||[]).find(function(p){return p.id===it.prodId;});
+      var nm = (typeof lineLabel==="function" && _prod) ? lineLabel(_prod, it) : ((it.name||(_prod&&_prod.name)||"Item") + (it.variantName ? (" — "+it.variantName) : ""));
       itemsRows += "<tr><td style='padding:8px 0;border-bottom:1px solid #f0f3f7;font-size:13px;color:#1a1a2e;vertical-align:top'>"+esc(nm)
         +"<div style='font-size:11px;color:#a0aec0;margin-top:2px'>"+qty+" &times; $"+price.toFixed(2)+"</div></td>"
         +"<td style='padding:8px 0;border-bottom:1px solid #f0f3f7;font-size:13px;color:#1a1a2e;text-align:right;white-space:nowrap;vertical-align:top'>$"+lineTotal.toFixed(2)+"</td></tr>";
