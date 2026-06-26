@@ -3322,16 +3322,33 @@ function SendInvoiceModal({order,customers,products,currentUser,addToast,showRes
     // v102q: build the Subtotal/Shipping/Tax breakdown from order.totals — shows
     // customer what the total is composed of, not just the grand total.
     var t = order.totals || {};
+    function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
     function row(label, value){
       return "<div style='display:flex;justify-content:space-between;font-size:12px;color:#6b7c93;padding:3px 0'><span>"+label+"</span><span>"+value+"</span></div>";
     }
+    // Itemized products
+    var itemsRows = "";
+    (order.items||[]).forEach(function(it){
+      var qty = Number(it.qty||it.quantity||1);
+      var price = Number(it.price||it.unitPrice||0);
+      var lineTotal = Math.round(qty*price*100)/100;
+      var nm = (it.name||"Item") + (it.variantName ? (" — "+it.variantName) : "");
+      itemsRows += "<tr><td style='padding:8px 0;border-bottom:1px solid #f0f3f7;font-size:13px;color:#1a1a2e;vertical-align:top'>"+esc(nm)
+        +"<div style='font-size:11px;color:#a0aec0;margin-top:2px'>"+qty+" &times; $"+price.toFixed(2)+"</div></td>"
+        +"<td style='padding:8px 0;border-bottom:1px solid #f0f3f7;font-size:13px;color:#1a1a2e;text-align:right;white-space:nowrap;vertical-align:top'>$"+lineTotal.toFixed(2)+"</td></tr>";
+    });
+    var itemsBlock = itemsRows
+      ? "<table style='width:100%;border-collapse:collapse;margin-bottom:10px'><tr><td style='text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#a0aec0;border-bottom:2px solid #e8ecef;padding-bottom:6px'>Item</td><td style='text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#a0aec0;border-bottom:2px solid #e8ecef;padding-bottom:6px'>Amount</td></tr>"+itemsRows+"</table>"
+      : "";
+    // Clean shipping label (strip stray "undefined" from legacy/quote-converted data)
+    var shipSvc = String(t.shippingService||"").replace(/\bundefined\b/gi,"").replace(/\s+/g," ").trim();
     var breakdownLines = "";
     if(t.subtotal > 0)                  breakdownLines += row("Subtotal",                                              "$"+t.subtotal.toFixed(2));
-    if(t.shipping > 0)                  breakdownLines += row("Shipping" + (t.shippingService ? (" — "+t.shippingService) : ""), "$"+t.shipping.toFixed(2));
+    if(t.shipping > 0)                  breakdownLines += row("Shipping" + (shipSvc ? (" — "+esc(shipSvc)) : ""), "$"+t.shipping.toFixed(2));
     if(t.tax > 0)                       breakdownLines += row("Tax" + (t.taxRate ? (" ("+(t.taxRate*100).toFixed(2)+"%)") : ""),    "$"+t.tax.toFixed(2));
     if(t.taxExempt && (!t.tax || t.tax===0)) breakdownLines += row("Tax", "Exempt");
-    var breakdownBlock = breakdownLines
-      ? "<div style='background:#f6f9fc;border-radius:8px;padding:14px 18px;margin-bottom:14px'>"+breakdownLines+"</div>"
+    var breakdownBlock = (itemsBlock || breakdownLines)
+      ? "<div style='background:#f6f9fc;border-radius:8px;padding:14px 18px;margin-bottom:14px'>"+itemsBlock+breakdownLines+"</div>"
       : "";
     return "<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>"
       +"<body style='margin:0;padding:0;background:#f6f9fc;font-family:Arial,sans-serif'>"
@@ -6955,7 +6972,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var q = {id:id,repId:(existing&&existing.repId) || (currentUser&&(currentUser.rep_id||currentUser.id)),
               repName:(existing&&existing.repName) || (currentUser&&currentUser.name),
               shipping:ship,
-              shippingService: quoteIsFreight ? "TBD — Freight" : (quoteRate?(quoteRate.carrierName+" "+quoteRate.serviceName):""),
+              shippingService: quoteIsFreight ? "TBD — Freight" : (quoteRate ? [quoteRate.carrierName, quoteRate.serviceName].filter(Boolean).join(" ").trim() : ""),
               shippingType: quoteIsFreight ? "freight" : "parcel",
               freightDetails: quoteIsFreight ? {
                 pallets: computeFreightSummary(items, products).suggestedPallets || 1,
