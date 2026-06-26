@@ -14015,6 +14015,15 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(!custEmail.trim()){ addToast("Email is required","warning"); return; }
     if(!custPhone.trim()){ addToast("Phone is required","warning"); return; }
     if(!custAddr.trim()||!custCity.trim()||!custState2.trim()||!custZip.trim()){ addToast("Complete the shipping address (street, city, state, zip)","warning"); return; }
+    var _emailNorm = custEmail.trim().toLowerCase();
+    var _existing = (customers||[]).find(function(c){ return c.email && String(c.email).trim().toLowerCase()===_emailNorm; });
+    if(_existing){
+      addToast("A customer with that email already exists — selecting \""+(_existing.name||_existing.email)+"\" instead of creating a duplicate.","info");
+      setNewCust(false);
+      setCustId(_existing.id);
+      setPlaceEmail(_existing.email||_emailNorm);
+      return;
+    }
     var nid = genId("cust");
     var nc = {
       id:nid, repId:repId, name:custName.trim(), email:custEmail.trim(),
@@ -14088,6 +14097,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     var totals = calcTotals();
     var cid = custId; var cname = selCust?selCust.name:custName;
     if(newCust&&custName.trim()) {
+      var _en = custEmail.trim().toLowerCase();
+      var _ex = _en ? (customers||[]).find(function(c){ return c.email && String(c.email).trim().toLowerCase()===_en; }) : null;
+      if(_ex){
+        cid=_ex.id; cname=_ex.name||custName.trim();
+      } else {
       var nid = genId("cust");
       var nc = {id:nid,repId:repId,name:custName.trim(),email:custEmail.trim(),
                 phone:custPhone.trim(),company:custComp.trim(),
@@ -14099,6 +14113,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       setCustomers(function(prev){return [nc].concat(prev);});
       dbSave("crm_customers",nid,nc);
       cid=nid; cname=custName.trim();
+      }
     }
     var id = isEdit?editOrder.id:(preId||("ORD-"+String(Date.now()).slice(-6)));
 
