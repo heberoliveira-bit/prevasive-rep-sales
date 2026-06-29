@@ -3311,6 +3311,7 @@ function buildInternalInvoiceHtml(order, cust, products, company){
   baseSubtotal = Math.round(baseSubtotal*100)/100;
   custSubtotal = (t.subtotal>0)?t.subtotal:Math.round(custSubtotal*100)/100;
   var grossComm = (t.commission!=null) ? t.commission : Math.round((custSubtotal-baseSubtotal)*100)/100;
+  var displayRate = (commR>0) ? commR : ((baseSubtotal>0) ? Math.round((grossComm/baseSubtotal)*1000)/10 : 0);
   var netToRep = Math.round(grossComm*(1-feePct/100)*100)/100;
   var feeAmt = Math.round((grossComm-netToRep)*100)/100;
   var disc = Number(t.discount||0), ship = Number(t.shipping||0), tax = Number(t.tax||0);
@@ -3333,10 +3334,10 @@ function buildInternalInvoiceHtml(order, cust, products, company){
     +"<div class=bar>INTERNAL COPY — COMMISSION DETAIL · NOT FOR CUSTOMER</div>"
     +"<div class=head><div><div class=co>"+esc(company)+"</div><div class=muted>Internal commission invoice</div></div><div><h1>INVOICE</h1><div class=muted style='text-align:right'>"+esc(order.id)+"<br>"+esc(dateStr)+"</div></div></div>"
     +"<div class=meta><div><div class=muted>Customer</div><strong>"+esc(custName)+"</strong>"+(custCompany?("<br>"+esc(custCompany)):"")+(custEmail?("<br>"+esc(custEmail)):"")+"</div>"
-    +"<div><div class=muted>Rep</div><strong>"+esc(repName)+"</strong></div><div><div class=muted>Commission rate</div><strong>"+commR+"%</strong></div></div>"
+    +"<div><div class=muted>Rep</div><strong>"+esc(repName)+"</strong></div><div><div class=muted>Commission rate</div><strong>"+displayRate+"%</strong></div></div>"
     +"<table><thead><tr><th>Description</th><th class=r>Qty</th><th class=r>Cost</th><th class=r>Price</th><th class=r>Margin</th><th class=r>Amount</th></tr></thead><tbody>"+rows+"</tbody></table>"
     +"<div class=tot><div class=row><span>Product cost (base)</span><span>"+money(baseSubtotal)+"</span></div>"
-    +"<div class=row><span>Commission ("+commR+"%)</span><span>"+money(grossComm)+"</span></div>"
+    +"<div class=row><span>Commission ("+displayRate+"%)</span><span>"+money(grossComm)+"</span></div>"
     +"<div class=row><span>Customer subtotal</span><span>"+money(custSubtotal)+"</span></div>"
     +(disc>0?"<div class=row><span>Discount</span><span>-"+money(disc)+"</span></div>":"")
     +(ship>0?"<div class=row><span>Shipping</span><span>"+money(ship)+"</span></div>":"")
