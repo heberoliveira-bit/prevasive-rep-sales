@@ -3321,6 +3321,19 @@ function buildInternalInvoiceHtml(order, cust, products, company){
   var custCompany = (cust&&cust.company)||"";
   var custEmail = (cust&&cust.email)||order.custEmail||"";
   var dateStr = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : "";
+  function fmtAddr(a){
+    if(!a) return "";
+    if(typeof a === "string") return esc(a);
+    var l1 = a.address||a.street||"";
+    var l2 = [a.city, a.state].filter(Boolean).join(", ");
+    if(a.zip) l2 = (l2 ? l2+" " : "")+a.zip;
+    return [l1, l2].filter(Boolean).map(esc).join("<br>");
+  }
+  var shipAddr = (cust && (cust.address||cust.city)) ? {address:cust.address, city:cust.city, state:cust.state, zip:cust.zip} : null;
+  var billRaw = cust && cust.billingAddress;
+  var billAddr = (cust && cust.billSameAsShip) ? shipAddr : (billRaw || shipAddr);
+  var shipHtml = fmtAddr(shipAddr) || "—";
+  var billHtml = fmtAddr(billAddr) || "—";
   return "<!doctype html><html><head><meta charset=utf-8><title>Internal Invoice "+esc(order.id)+"</title>"
     +"<style>*{box-sizing:border-box}body{font-family:-apple-system,Segoe UI,Inter,Arial,sans-serif;color:#1a1a2e;margin:0;padding:28px;background:#fff}"
     +".wrap{max-width:760px;margin:0 auto}.bar{background:#fff4e5;border:1px solid #f0a23b;color:#9a5b00;font-weight:700;font-size:12px;padding:8px 12px;border-radius:8px;margin-bottom:18px;text-align:center;letter-spacing:.04em}"
@@ -3335,6 +3348,7 @@ function buildInternalInvoiceHtml(order, cust, products, company){
     +"<div class=head><div><div class=co>"+esc(company)+"</div><div class=muted>Internal commission invoice</div></div><div><h1>INVOICE</h1><div class=muted style='text-align:right'>"+esc(order.id)+"<br>"+esc(dateStr)+"</div></div></div>"
     +"<div class=meta><div><div class=muted>Customer</div><strong>"+esc(custName)+"</strong>"+(custCompany?("<br>"+esc(custCompany)):"")+(custEmail?("<br>"+esc(custEmail)):"")+"</div>"
     +"<div><div class=muted>Rep</div><strong>"+esc(repName)+"</strong></div><div><div class=muted>Commission rate</div><strong>"+displayRate+"%</strong></div></div>"
+    +"<div class=meta><div><div class=muted>Bill to</div>"+billHtml+"</div><div><div class=muted>Ship to</div>"+shipHtml+"</div></div>"
     +"<table><thead><tr><th>Description</th><th class=r>Qty</th><th class=r>Cost</th><th class=r>Price</th><th class=r>Margin</th><th class=r>Amount</th></tr></thead><tbody>"+rows+"</tbody></table>"
     +"<div class=tot><div class=row><span>Product cost (base)</span><span>"+money(baseSubtotal)+"</span></div>"
     +"<div class=row><span>Commission ("+displayRate+"%)</span><span>"+money(grossComm)+"</span></div>"
