@@ -3290,6 +3290,70 @@ function buildInvoicePdf(order, cust, products, company, cb) {
 
 </script>
 <script id="c2" type="text/plain">
+function buildInternalInvoiceHtml(order, cust, products, company){
+  function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+  function money(n){return "$"+(Math.round((Number(n)||0)*100)/100).toFixed(2);}
+  var t = order.totals || {};
+  var commR = Number(order.commRate||0);
+  var feePct = (typeof getPlatformFeePct==="function") ? getPlatformFeePct() : 0;
+  var rows = "", baseSubtotal = 0, custSubtotal = 0;
+  (order.items||[]).forEach(function(it){
+    var prod = (products||[]).find(function(p){return p.id===it.prodId;});
+    var nm = (typeof lineLabel==="function" && prod) ? lineLabel(prod, it) : ((it.name||(prod&&prod.name)||"Item")+(it.variantName?(" — "+it.variantName):""));
+    var qty = Number(it.qty||it.quantity||1);
+    var base = Number(it.unitPrice||(prod&&prod.price)||it.price||0);
+    var custUnit = (it.customerPrice!=null&&it.customerPrice!=="") ? Number(it.customerPrice) : Math.round(base*(1+commR/100)*100)/100;
+    var lineCost = Math.round(base*qty*100)/100;
+    var lineCust = Math.round(custUnit*qty*100)/100;
+    baseSubtotal += lineCost; custSubtotal += lineCust;
+    rows += "<tr><td>"+esc(nm)+"</td><td class=r>"+qty+"</td><td class=r>"+money(base)+"</td><td class=r>"+money(custUnit)+"</td><td class=r>"+money(lineCust-lineCost)+"</td><td class=r>"+money(lineCust)+"</td></tr>";
+  });
+  baseSubtotal = Math.round(baseSubtotal*100)/100;
+  custSubtotal = (t.subtotal>0)?t.subtotal:Math.round(custSubtotal*100)/100;
+  var grossComm = (t.commission!=null) ? t.commission : Math.round((custSubtotal-baseSubtotal)*100)/100;
+  var netToRep = Math.round(grossComm*(1-feePct/100)*100)/100;
+  var feeAmt = Math.round((grossComm-netToRep)*100)/100;
+  var disc = Number(t.discount||0), ship = Number(t.shipping||0), tax = Number(t.tax||0);
+  var grand = (t.grand>0)?t.grand:Math.round((custSubtotal-disc+ship+tax)*100)/100;
+  var repName = order.repName || "—";
+  var custName = (cust&&cust.name)||order.custName||"Customer";
+  var custCompany = (cust&&cust.company)||"";
+  var custEmail = (cust&&cust.email)||order.custEmail||"";
+  var dateStr = order.createdAt ? new Date(order.createdAt).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : "";
+  return "<!doctype html><html><head><meta charset=utf-8><title>Internal Invoice "+esc(order.id)+"</title>"
+    +"<style>*{box-sizing:border-box}body{font-family:-apple-system,Segoe UI,Inter,Arial,sans-serif;color:#1a1a2e;margin:0;padding:28px;background:#fff}"
+    +".wrap{max-width:760px;margin:0 auto}.bar{background:#fff4e5;border:1px solid #f0a23b;color:#9a5b00;font-weight:700;font-size:12px;padding:8px 12px;border-radius:8px;margin-bottom:18px;text-align:center;letter-spacing:.04em}"
+    +".head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px}.co{font-weight:800;font-size:20px}.muted{color:#6b7c93;font-size:12px}h1{font-size:22px;margin:0;text-align:right}"
+    +".meta{display:flex;gap:40px;margin-bottom:18px;font-size:13px}table{width:100%;border-collapse:collapse;margin-bottom:16px;font-size:13px}"
+    +"th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8a96a3;border-bottom:2px solid #e8ecef;padding:6px 8px}th.r{text-align:right}"
+    +"td{padding:8px;border-bottom:1px solid #f0f3f7}.r{text-align:right;white-space:nowrap}"
+    +".tot{width:320px;margin-left:auto;font-size:13px}.tot .row{display:flex;justify-content:space-between;padding:4px 0}.tot .grand{border-top:2px solid #1a1a2e;margin-top:6px;padding-top:8px;font-weight:800;font-size:16px}"
+    +".comm{margin-top:18px;background:#f6f9fc;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;max-width:340px;margin-left:auto}.comm h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:#635bff}.comm .row{display:flex;justify-content:space-between;font-size:13px;padding:3px 0}.comm .net{border-top:1px solid #cbd5e1;margin-top:6px;padding-top:6px;font-weight:800}"
+    +"@media print{.noprint{display:none}body{padding:0}}.noprint{margin-top:24px;text-align:center}.btn{background:#635bff;color:#fff;border:none;padding:10px 22px;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer}</style></head><body><div class=wrap>"
+    +"<div class=bar>INTERNAL COPY — COMMISSION DETAIL · NOT FOR CUSTOMER</div>"
+    +"<div class=head><div><div class=co>"+esc(company)+"</div><div class=muted>Internal commission invoice</div></div><div><h1>INVOICE</h1><div class=muted style='text-align:right'>"+esc(order.id)+"<br>"+esc(dateStr)+"</div></div></div>"
+    +"<div class=meta><div><div class=muted>Customer</div><strong>"+esc(custName)+"</strong>"+(custCompany?("<br>"+esc(custCompany)):"")+(custEmail?("<br>"+esc(custEmail)):"")+"</div>"
+    +"<div><div class=muted>Rep</div><strong>"+esc(repName)+"</strong></div><div><div class=muted>Commission rate</div><strong>"+commR+"%</strong></div></div>"
+    +"<table><thead><tr><th>Description</th><th class=r>Qty</th><th class=r>Cost</th><th class=r>Price</th><th class=r>Margin</th><th class=r>Amount</th></tr></thead><tbody>"+rows+"</tbody></table>"
+    +"<div class=tot><div class=row><span>Product cost (base)</span><span>"+money(baseSubtotal)+"</span></div>"
+    +"<div class=row><span>Commission ("+commR+"%)</span><span>"+money(grossComm)+"</span></div>"
+    +"<div class=row><span>Customer subtotal</span><span>"+money(custSubtotal)+"</span></div>"
+    +(disc>0?"<div class=row><span>Discount</span><span>-"+money(disc)+"</span></div>":"")
+    +(ship>0?"<div class=row><span>Shipping</span><span>"+money(ship)+"</span></div>":"")
+    +(tax>0?"<div class=row><span>Tax</span><span>"+money(tax)+"</span></div>":"")
+    +"<div class='row grand'><span>Grand total</span><span>"+money(grand)+"</span></div></div>"
+    +"<div class=comm><h3>Rep commission payout</h3><div class=row><span>Gross commission</span><span>"+money(grossComm)+"</span></div>"
+    +"<div class=row><span>Platform fee ("+feePct+"%)</span><span>-"+money(feeAmt)+"</span></div>"
+    +"<div class='row net'><span>Net to rep</span><span>"+money(netToRep)+"</span></div></div>"
+    +"<div class=noprint><button class=btn onclick='window.print()'>Print</button></div>"
+    +"</div><script>setTimeout(function(){try{window.print()}catch(e){}},400);<\/script></body></html>";
+}
+function openInternalInvoice(order, cust, products, company){
+  var w = window.open("", "_blank");
+  if(!w) return;
+  w.document.write(buildInternalInvoiceHtml(order, cust, products, company));
+  w.document.close();
+}
 function SendInvoiceModal({order,customers,products,currentUser,addToast,showResult,onClose,embedded}) {
   var cust=(customers||[]).find(function(c2){return c2.id===order.custId;})||{};
   var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
@@ -9779,6 +9843,15 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
             );
           })()}
           {/* PO number + uploaded PO file */}
+          {currentUser && currentUser.role==="admin" && (
+            <div style={{marginBottom:16}}>
+              <Btn small variant="outline" onClick={function(){
+                var c=(customers||[]).find(function(x){return x.id===viewOrder.custId;}) || {name:viewOrder.custName, email:viewOrder.custEmail};
+                var company=(function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}})();
+                openInternalInvoice(viewOrder, c, products, company);
+              }}>🧾 Internal invoice (commission) — admin only</Btn>
+            </div>
+          )}
           <div style={{padding:"10px 12px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:C.muted,marginBottom:8}}>Purchase Order</div>
             <POBlock orderId={viewOrder.id} poNumber={viewOrder.poNumber} poFileName={viewOrder.poFileName} poFilePath={viewOrder.poFilePath}
