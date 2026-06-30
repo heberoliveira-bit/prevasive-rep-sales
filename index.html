@@ -2780,7 +2780,7 @@ function AppLanding({onLogin}) {
             </button>
           </div>
           <div style={{display:"flex",justifyContent:"center",borderTop:"1px solid "+C.border,paddingTop:28}}>
-            {["Orders tracked end-to-end","Commissions automated","15-day trial free"].map(function(item,i){return (
+            {["Orders tracked end-to-end","Commissions automated"].map(function(item,i){return (
               <div key={i} style={{flex:1,maxWidth:200,borderRight:i<2?"1px solid "+C.border:"none",
                                    padding:"0 20px",textAlign:"center"}}>
                 <div style={{fontSize:11,color:C.muted,lineHeight:1.5}}>{item}</div>
@@ -8815,6 +8815,19 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
 
   // ─── A1+A2: unified commission buckets via the helper (no deliveredAt gate) ───
   var allBuckets = commissionBuckets(filtOrders, commissions);
+  // Paid bucket: use the LOCKED net from each payout record (payoutNet), not a
+  // recomputed netAfterFee — so it's correct even when platformFee isn't seeded.
+  var paidNet = 0;
+  (filtOrders||[]).forEach(function(o){
+    if(commissionStateFor(o, commissions)!=="paid") return;
+    var pc=(commissions||[]).find(function(cp){return cp.orderId===o.id;});
+    if(pc) paidNet += ((typeof payoutNet==="function")?payoutNet(pc):(pc.netAmount!=null?pc.netAmount:(pc.amount||0)));
+  });
+  (commissions||[]).forEach(function(cp){
+    if(cp.orderId) return;
+    if(cp.kind==="adjustment") paidNet += (cp.netAmount!=null?cp.netAmount:(cp.amount||0));
+  });
+  paidNet = Math.round(paidNet*100)/100;
 
   var activeReps = reps.filter(function(r){return r.status==="active";}).length;
 
@@ -8989,12 +9002,12 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
           {[
             {label:"⏳ Held", val:allBuckets.held, color:C.warning, hint:"Shipped, in hold window"},
             {label:"✅ Available", val:allBuckets.available, color:C.success, hint:"Ready to pay out"},
-            {label:"💸 Paid (period)", val:allBuckets.paid, color:C.accent, hint:"Settled via Stripe Connect"},
+            {label:"💸 Paid (period)", val:allBuckets.paid, color:C.accent, hint:"Settled via Stripe Connect", netOverride:paidNet},
             {label:"❌ Forfeited", val:{count:forfeitedOrders.length, amount:forfeitTotal}, color:C.danger, hint:"Cancelled/Refunded/Returned"},
           ].map(function(it,i){return (
             <div key={i} style={{padding:"14px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:10}}>
               <div style={{fontSize:11,fontWeight:700,color:C.muted,marginBottom:4}}>{it.label}</div>
-              <div style={{fontSize:18,fontWeight:800,color:it.color,fontFamily:"monospace"}}>{fmtMoney(netAfterFee(it.val.amount))}</div>
+              <div style={{fontSize:18,fontWeight:800,color:it.color,fontFamily:"monospace"}}>{fmtMoney(it.netOverride!=null ? it.netOverride : netAfterFee(it.val.amount))}</div>
               <div style={{fontSize:10,color:C.dim,marginTop:2}}>{it.val.count} order{it.val.count===1?"":"s"} · {it.hint}</div>
             </div>
           );})}
