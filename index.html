@@ -5466,6 +5466,10 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                   setFulfillTarget(stamped);
                 },
               });
+              if(result.trackingNumber){
+                var _zc=(customers||[]).find(function(x){return x.id===updated.custId;});
+                fireZapierInvoiceHook(updated, _zc, products||[]);
+              }
             }
             addToast("Order "+fulfillTarget.id+" → "+result.status,"success");
           }}
@@ -9843,6 +9847,10 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
             // v102o: shared fireShippedEmail → customer email + rep bell + admin bell
             if(result.status==="Shipped"){
               fireShippedEmail(updated);
+              if(result.trackingNumber){
+                var _zc2=(customers||[]).find(function(x){return x.id===updated.custId;});
+                fireZapierInvoiceHook(updated, _zc2, products||[]);
+              }
             }
             addToast("Order "+fulfillTarget2.id+" → "+result.status,"success");
           }}
@@ -11940,6 +11948,7 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
   const [wipeConfirm,setWipeConfirm]= useState("");
   const [qboUrl,    setQboUrl]    = useState((qboCfg&&qboCfg.fnUrl)||"");
   const [qboKey,    setQboKey]    = useState((qboCfg&&qboCfg.key)||"");
+  const [zapHook,   setZapHook]   = useState((qboCfg&&qboCfg.zapierHook)||"");
   const [qboStatus, setQboStatus] = useState(null);
   const [qboBusy,   setQboBusy]   = useState(false);
   const [qboOrderId,setQboOrderId]= useState("");
@@ -12911,9 +12920,25 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
               <Field label="QBO function URL"><input value={qboUrl} onChange={function(e){setQboUrl(e.target.value);}} placeholder="https://<project>.supabase.co/functions/v1/qbo" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}/></Field>
               <Field label="Shared key (PV_QBO_KEY)"><input value={qboKey} onChange={function(e){setQboKey(e.target.value);}} placeholder="must match the PV_QBO_KEY secret" style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}/></Field>
               <div style={{display:"flex",gap:8,marginTop:6}}>
-                <Btn small onClick={function(){onSaveQbo&&onSaveQbo({fnUrl:qboUrl,key:qboKey});addToast("QuickBooks settings saved","success");}}>Save</Btn>
+                <Btn small onClick={function(){onSaveQbo&&onSaveQbo({fnUrl:qboUrl,key:qboKey,zapierHook:zapHook});addToast("QuickBooks settings saved","success");}}>Save</Btn>
                 <Btn small variant="outline" onClick={doConnect} disabled={qboBusy}>🔗 Connect QuickBooks</Btn>
                 <Btn small variant="ghost" onClick={doStatus} disabled={qboBusy}>↻ Refresh status</Btn>
+              </div>
+            </div>
+            <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"18px 20px",marginBottom:16}}>
+              <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:4}}>Zapier → QuickBooks invoice (on tracking added)</div>
+              <div style={{fontSize:12,color:C.muted,lineHeight:1.5,marginBottom:14}}>When a tracking number is added to an order, the app posts the order to this Zapier <strong>Catch Hook</strong> URL; your Zap creates the QuickBooks invoice. Tip: add a Zapier <em>Filter</em> to only continue when <code>paymentStatus</code> is <code>unpaid</code>, so prepaid orders aren't invoiced twice.</div>
+              <Field label="Zapier Catch Hook URL"><input value={zapHook} onChange={function(e){setZapHook(e.target.value);}} placeholder="https://hooks.zapier.com/hooks/catch/..." style={{width:"100%",background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"10px 12px",color:C.text,fontSize:13,fontFamily:"inherit"}}/></Field>
+              <div style={{display:"flex",gap:8,marginTop:6}}>
+                <Btn small onClick={function(){onSaveQbo&&onSaveQbo({fnUrl:qboUrl,key:qboKey,zapierHook:zapHook});addToast("Zapier webhook saved","success");}}>Save</Btn>
+                <Btn small variant="ghost" onClick={function(){
+                  if(!zapHook){addToast("Enter the Zapier hook URL first","warning");return;}
+                  onSaveQbo&&onSaveQbo({fnUrl:qboUrl,key:qboKey,zapierHook:zapHook});
+                  var sample=(orders||[]).slice().sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);})[0];
+                  var sc=sample?((customers||[]).find(function(x){return x.id===sample.custId;})||{name:sample.custName,email:sample.custEmail}):{name:"Test Customer",email:"test@example.com"};
+                  fireZapierInvoiceHook(sample||{id:"TEST-0001",totals:{grand:0},items:[]}, sc, products||[]);
+                  addToast("Sent a test payload to Zapier — check your Zap's task history","info");
+                }}>Send test</Btn>
               </div>
             </div>
             <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 20px",marginBottom:16}}>
@@ -17838,6 +17863,38 @@ function notifyEmail(key, to, subject, html, bell){
 //
 // Idempotent via order.shippedEmailSentAt — pass {force:true} to override.
 // Returns the stamped order so the caller can update local state.
+function fireZapierInvoiceHook(order, cust, products){
+  var url = "";
+  try{ url = (JSON.parse(localStorage.getItem("__pv__qboCfg")||"{}").zapierHook)||""; }catch(e){}
+  if(!url || !order) return;
+  var t = order.totals || {};
+  var commR = Number(order.commRate||0);
+  var lineItems = (order.items||[]).map(function(it){
+    var prod=(products||[]).find(function(p){return p.id===it.prodId;});
+    var qty=Number(it.qty||it.quantity||1);
+    var base=Number(it.unitPrice||(prod&&prod.price)||it.price||0);
+    var unit=(it.customerPrice!=null&&it.customerPrice!=="")?Number(it.customerPrice):Math.round(base*(1+commR/100)*100)/100;
+    var name=(typeof lineLabel==="function"&&prod)?lineLabel(prod,it):((it.name||(prod&&prod.name)||"Item")+(it.variantName?(" — "+it.variantName):""));
+    return {name:name, sku:(prod&&(prod.sku||prod.code))||"", quantity:qty, unitPrice:unit, amount:Math.round(unit*qty*100)/100};
+  });
+  function addr(a){ if(!a) return {}; if(typeof a==="string") return {line1:a}; return {line1:a.address||a.street||"", city:a.city||"", state:a.state||"", zip:a.zip||""}; }
+  var ship = cust ? {line1:cust.address||"", city:cust.city||"", state:cust.state||"", zip:cust.zip||""} : {};
+  var bill = (cust && cust.billSameAsShip) ? ship : addr(cust && cust.billingAddress);
+  var payload = {
+    event:"tracking_added",
+    orderId: order.id, orderDate: order.createdAt||"", shippedAt: order.shippedAt||new Date().toISOString(),
+    trackingNumber: order.trackingNumber||"", carrier: order.carrier||"", trackingUrl: order.trackingUrl||"",
+    poNumber: order.poNumber||"", paymentStatus: order.paidAt?"paid":"unpaid", paidAt: order.paidAt||"",
+    repName: order.repName||"",
+    customerName: (cust&&cust.name)||order.custName||"", customerCompany:(cust&&cust.company)||"",
+    customerEmail: (cust&&cust.email)||order.custEmail||"", customerPhone:(cust&&cust.phone)||"",
+    billingAddress: bill, shippingAddress: ship,
+    subtotal:Number(t.subtotal||0), discount:Number(t.discount||0), shipping:Number(t.shipping||0),
+    tax:Number(t.tax||0), grandTotal:Number(t.grand||0), currency:"USD",
+    lineItems: lineItems
+  };
+  try{ fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),keepalive:true}); }catch(e){}
+}
 function fireShippedNotifs(order, opts){
   opts = opts || {};
   if(!opts.force && order && order.shippedEmailSentAt) return order;  // already sent
