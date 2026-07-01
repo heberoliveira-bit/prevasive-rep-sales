@@ -8534,6 +8534,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                             transferStatus: result.ok?"sent":"failed",
                             stripeTransferId: result.transferId,
                             transferError: result.error,
+                            transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : payout.transferAmount,
                             note: result.ok ? "Stripe Connect — Transfer "+result.transferId : "Failed: "+result.error
                           });
                           dbSave("crm_commission_payouts",id,updated);
@@ -11266,7 +11267,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
               currency:"usd",description:"Commission — Order "+p.orderId+" — "+(rep3.name||p.repName)})})
           .then(function(r){return r.json();})
           .then(function(d){
-            var upd = d.ok ? Object.assign({},p,{stripeTransferId:d.transferId,transferStatus:"sent"})
+            var upd = d.ok ? Object.assign({},p,{stripeTransferId:d.transferId,transferStatus:"sent",transferAmount:Math.round(netCents)/100})
                            : Object.assign({},p,{transferStatus:"failed",transferError:(d.error||"Unknown error")});
             dbSave("crm_commission_payouts",p.id,upd);
             setCommissions(function(prev){return prev.map(function(c){return c.id===p.id?upd:c;});});
@@ -11335,6 +11336,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
           if(d.ok){
             rec.stripeTransferId = d.transferId;
             rec.transferStatus = "sent";
+            rec.transferAmount = Math.round(netAmount)/100;
             rec.note = "Stripe Connect — Transfer "+d.transferId;
             // Record the paid row ONLY on success, so a failed transfer stays unpaid and retryable.
             setCommissions(function(prev){return [rec].concat(prev||[]);});
@@ -11403,6 +11405,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
           stripeTransferId: result.transferId,
           transferError: result.error,
           netAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.netAmount,
+          transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.transferAmount,
           note: result.ok ? pay.note+" — Transfer "+result.transferId : pay.note+" — FAILED: "+result.error
         });
         dbSave("crm_commission_payouts", pay.id, done);
@@ -11495,6 +11498,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                           transferStatus: result.ok ? "sent" : "failed",
                           stripeTransferId: result.transferId,
                           transferError: result.error,
+                          transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.transferAmount,
                           note: result.ok ? "Stripe Connect — Transfer "+result.transferId : "Failed: "+result.error
                         });
                         dbSave("crm_commission_payouts",pay.id,updated);
@@ -11701,6 +11705,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                                     transferStatus: result.ok?"sent":"failed",
                                     stripeTransferId: result.transferId,
                                     transferError: result.error,
+                                    transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : c.transferAmount,
                                     note: result.ok ? "Stripe Connect — Transfer "+result.transferId : "Failed: "+result.error
                                   });
                                   dbSave("crm_commission_payouts",c.id,done);
@@ -13796,7 +13801,8 @@ function getPlatformFeePct(){
 function netAfterFee(gross){ var f=getPlatformFeePct(); return f>0 ? gross*(1-f/100) : gross; }
 function payoutNet(cp){
   if(!cp) return 0;
-  if(cp.netAmount != null) return cp.netAmount;
+  if(cp.transferAmount != null) return cp.transferAmount;   // actual $ Stripe transferred — authoritative
+  if(cp.netAmount != null) return cp.netAmount;             // net locked at payout time
   var gross = (cp.amount != null ? cp.amount : cp.grossAmount) || 0;
   if(cp.feePct != null) return Math.round(gross*(1-cp.feePct/100)*100)/100;
   return netAfterFee(gross);
