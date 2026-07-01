@@ -13794,7 +13794,13 @@ function getPlatformFeePct(){
   try{ return parseFloat(JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").platformFee)||0; }catch(e){ return 0; }
 }
 function netAfterFee(gross){ var f=getPlatformFeePct(); return f>0 ? gross*(1-f/100) : gross; }
-function payoutNet(cp){ if(cp && cp.netAmount != null) return cp.netAmount; return netAfterFee((cp && cp.amount) || 0); }
+function payoutNet(cp){
+  if(!cp) return 0;
+  if(cp.netAmount != null) return cp.netAmount;
+  var gross = (cp.amount != null ? cp.amount : cp.grossAmount) || 0;
+  if(cp.feePct != null) return Math.round(gross*(1-cp.feePct/100)*100)/100;
+  return netAfterFee(gross);
+}
 function feeNote(){ var f=getPlatformFeePct(); return f>0 ? ("after "+f+"% platform fee") : ""; }
 /* All rep-record ids that belong to the signed-in person — keyed off their email so
    duplicate/legacy rep records (same email, different id) still resolve to one identity.
@@ -21426,10 +21432,11 @@ function App() {
     }catch(e){}
   },[]);
 
+  var [settingsHydrated, setSettingsHydrated] = useState(false);
   useEffect(function(){
-    var sb=getSB(); if(!sb) return;
+    var sb=getSB(); if(!sb){ setSettingsHydrated(true); return; }
     sb.from("crm_settings").select("data").eq("id","public_settings").maybeSingle().then(function(r){
-      var d = r && r.data && r.data.data; if(!d) return;
+      var d = r && r.data && r.data.data; if(!d){ setSettingsHydrated(true); return; }
       if(d.invoice && Object.keys(d.invoice).length) setInvoiceCfg(d.invoice);
       if(d.pickup && Object.keys(d.pickup).length) setPickupCfg(d.pickup);
       if(d.tax && Object.keys(d.tax).length) setTaxCfg(d.tax);
@@ -21442,7 +21449,8 @@ function App() {
       if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
       if(Array.isArray(d.shippingRules)) setShippingRules(d.shippingRules);
       if(typeof d.twoFAEnabled === "boolean") setTwoFAEnabled(d.twoFAEnabled);
-    }).catch(function(){});
+      setSettingsHydrated(true);
+    }).catch(function(){ setSettingsHydrated(true); });
   },[]);
 
   // v89: admin-only secrets row — syncs email Microsoft Graph creds + ShipStation keys
@@ -21541,6 +21549,7 @@ function App() {
   var publicSettingsLastWritten = useRef(null);
   useEffect(function(){
     if(!currentUser || currentUser.role!=="admin" || viewAsRep) return;
+    if(!settingsHydrated) return; // wait for remote hydration so we never clobber seeded values with stale local defaults
     var sb=getSB(); if(!sb) return;
     var row = { invoice:invoiceCfg||{}, tax:taxCfg||{}, pickup:pickupCfg||{}, stripeLinks:stripeLinks||{}, campaigns:campaigns||[], discountCodes:discountCodes||[],
                 stripePublishableKey:(stripeAccountA&&stripeAccountA.publishableKey)||"",
@@ -21566,7 +21575,7 @@ function App() {
     sb.from("crm_settings").upsert({id:"public_settings",data:row,updated_at:new Date().toISOString()}).then(function(r){
       if(r&&r.error){ try{console.warn("[public_settings] sync write failed:",r.error.message);}catch(_){} }
     });
-  },[invoiceCfg,taxCfg,pickupCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),(stripeAccountA&&stripeAccountA.platformFee),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep]);
+  },[invoiceCfg,taxCfg,pickupCfg,stripeLinks,campaigns,discountCodes,(stripeAccountA&&stripeAccountA.publishableKey),(stripeAccountA&&stripeAccountA.edgeFnUrl),(stripeAccountA&&stripeAccountA.connectFnUrl),(stripeAccountA&&stripeAccountA.platformFee),emailCfg,(googleCfg&&googleCfg.apiKey),(googleCfg&&googleCfg.enabled),shipStationCfg,shippingRules,twoFAEnabled,currentUser,viewAsRep,settingsHydrated]);
 
   // v89: publish admin-only secrets so they sync across admin browsers.
   // Same anti-echo pattern as public_settings.
