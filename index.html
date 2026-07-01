@@ -11942,7 +11942,7 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
 }
 
 
-function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns,onWipeRep,qboCfg,onSaveQbo}) {
+function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discountCodes,onSaveDiscountCodes,invoiceCfg,onSaveInvoice,pickupCfg,onSavePickup,shippingRules,onSaveShippingRules,shipStationCfg,onSaveShipStation,taxCfg,onSaveTax,googleCfg,onSaveGoogle,creditAgreementTemplate,setCreditAgreementTemplate,stripeLinks,setStripeLinks,stripeAccountA,onSaveStripeAccountA,twoFAEnabled,setTwoFAEnabled,orders,customers,commissions,reps,addToast,campaigns,setCampaigns,onWipeRep,qboCfg,onSaveQbo,products}) {
   const [tab,      setTab]      = useState("supabase");
   const [wipeRepId,  setWipeRepId]  = useState("");
   const [wipeConfirm,setWipeConfirm]= useState("");
@@ -17893,7 +17893,7 @@ function fireZapierInvoiceHook(order, cust, products){
     tax:Number(t.tax||0), grandTotal:Number(t.grand||0), currency:"USD",
     lineItems: lineItems
   };
-  try{ fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),keepalive:true}); }catch(e){}
+  try{ fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=UTF-8"},body:JSON.stringify(payload),keepalive:true}); }catch(e){}
 }
 function fireShippedNotifs(order, opts){
   opts = opts || {};
@@ -22457,7 +22457,7 @@ function App() {
             addToast={addToast} showResult={showResult}/>
         )}
         {(isAdmin||isAccount)&&activeTab==="settings"&&(
-          <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg}
+          <AdminSettings supabaseCfg={supabaseCfg} onSaveSupabase={setSupabaseCfg} products={products}
             discountCodes={discountCodes} onSaveDiscountCodes={setDiscountCodes}
             invoiceCfg={invoiceCfg} onSaveInvoice={setInvoiceCfg}
             pickupCfg={pickupCfg} onSavePickup={setPickupCfg}
