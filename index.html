@@ -1424,6 +1424,7 @@ function lineUnit(p, it){
 }
 // Effective SKU/name for a line (variant overrides product).
 function lineSku(p, it){ var v=prodVariant(p,it); return (v&&v.sku)?v.sku:((p&&p.sku)||""); }
+function lineItemId(p, it){ var v=prodVariant(p,it); return (v&&v.itemId)?v.itemId:((p&&p.itemId)||""); }
 function lineLabel(p, it){ var v=prodVariant(p,it); return (p?p.name:"")+(v?(" — "+v.name):""); }
 // Per-line shipping packing: variant overrides product when set.
 function lineWeight(p, it){ var v=prodVariant(p,it); if(v&&v.weight!=null&&v.weight!=="") return parseFloat(v.weight)||0; return (p&&p.weight)?(parseFloat(p.weight)||0):0; }
@@ -5468,7 +5469,15 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
               });
               if(result.trackingNumber){
                 var _zc=(customers||[]).find(function(x){return x.id===updated.custId;});
-                fireZapierInvoiceHook(updated, _zc, products||[]);
+                var _qc={}; try{_qc=JSON.parse(localStorage.getItem("__pv__qboCfg")||"{}");}catch(e){}
+                if(_qc.fnUrl){
+                  pushOrderToQBO(updated,_zc,products||[]).then(function(res){
+                    var st=Object.assign({},updated,{qboInvoiceId:res.ok?(res.invoiceId||updated.qboInvoiceId):updated.qboInvoiceId,qboDocNumber:res.ok?res.docNumber:updated.qboDocNumber,qboSyncStatus:res.ok?"synced":"error",qboSyncedAt:res.ok?new Date().toISOString():updated.qboSyncedAt,qboSyncError:res.ok?"":(res.error||"failed")});
+                    setOrders(function(prev){return prev.map(function(o){return o.id===st.id?st:o;});});
+                    dbSave("crm_orders",st.id,st);
+                    addToast(res.ok?("QuickBooks invoice created"+(res.docNumber?(" #"+res.docNumber):"")):("QuickBooks push failed: "+(res.error||"")),res.ok?"success":"warning");
+                  });
+                } else { fireZapierInvoiceHook(updated, _zc, products||[]); }
               }
             }
             addToast("Order "+fulfillTarget.id+" → "+result.status,"success");
@@ -9849,7 +9858,14 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
               fireShippedEmail(updated);
               if(result.trackingNumber){
                 var _zc2=(customers||[]).find(function(x){return x.id===updated.custId;});
-                fireZapierInvoiceHook(updated, _zc2, products||[]);
+                var _qc2={}; try{_qc2=JSON.parse(localStorage.getItem("__pv__qboCfg")||"{}");}catch(e){}
+                if(_qc2.fnUrl){
+                  pushOrderToQBO(updated,_zc2,products||[]).then(function(res){
+                    var st=Object.assign({},updated,{qboInvoiceId:res.ok?(res.invoiceId||updated.qboInvoiceId):updated.qboInvoiceId,qboDocNumber:res.ok?res.docNumber:updated.qboDocNumber,qboSyncStatus:res.ok?"synced":"error",qboSyncedAt:res.ok?new Date().toISOString():updated.qboSyncedAt,qboSyncError:res.ok?"":(res.error||"failed")});
+                    onUpdate(st); setViewOrder(st); dbSave("crm_orders",st.id,st);
+                    addToast(res.ok?("QuickBooks invoice created"+(res.docNumber?(" #"+res.docNumber):"")):("QuickBooks push failed: "+(res.error||"")),res.ok?"success":"warning");
+                  });
+                } else { fireZapierInvoiceHook(updated, _zc2, products||[]); }
               }
             }
             addToast("Order "+fulfillTarget2.id+" → "+result.status,"success");
@@ -9910,6 +9926,30 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                 var payout=(commissions||[]).find(function(p){return p.orderId===viewOrder.id;});
                 openInternalInvoice(viewOrder, c, products, company, payout);
               }}>🧾 Order Statement (commission detail)</Btn>
+            </div>
+          )}
+          {currentUser && currentUser.role==="admin" && (
+            <div style={{marginBottom:16,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              {viewOrder.qboSyncStatus==="synced" ? (
+                <span style={{fontSize:12,color:C.success,fontWeight:600}}>✓ Synced to QuickBooks{(viewOrder.qboDocNumber||viewOrder.qboInvoiceId)?(" · Invoice "+(viewOrder.qboDocNumber||viewOrder.qboInvoiceId)):""}</span>
+              ) : viewOrder.qboSyncStatus==="error" ? (
+                <span style={{fontSize:12,color:C.danger,fontWeight:600}}>⚠ QuickBooks: {viewOrder.qboSyncError||"sync failed"}</span>
+              ) : null}
+              <Btn small variant="outline" onClick={function(){
+                var c=(customers||[]).find(function(x){return x.id===viewOrder.custId;}) || {name:viewOrder.custName, email:viewOrder.custEmail};
+                addToast("Pushing to QuickBooks…","info");
+                pushOrderToQBO(viewOrder, c, products).then(function(res){
+                  var stamped=Object.assign({},viewOrder,{
+                    qboInvoiceId:res.ok?(res.invoiceId||viewOrder.qboInvoiceId):viewOrder.qboInvoiceId,
+                    qboDocNumber:res.ok?(res.docNumber||viewOrder.qboDocNumber):viewOrder.qboDocNumber,
+                    qboSyncStatus:res.ok?"synced":"error",
+                    qboSyncedAt:res.ok?new Date().toISOString():viewOrder.qboSyncedAt,
+                    qboSyncError:res.ok?"":(res.error||"failed")
+                  });
+                  onUpdate(stamped); setViewOrder(stamped); dbSave("crm_orders",viewOrder.id,stamped);
+                  addToast(res.ok?("Invoice created in QuickBooks"+(res.docNumber?(" #"+res.docNumber):"")):("QuickBooks push failed: "+(res.error||"")), res.ok?"success":"error");
+                });
+              }}>{viewOrder.qboSyncStatus==="synced"?"↻ Re-push to QuickBooks":(viewOrder.qboSyncStatus==="error"?"↻ Retry QuickBooks":"📗 Push to QuickBooks")}</Btn>
             </div>
           )}
           <div style={{padding:"10px 12px",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,marginBottom:16}}>
@@ -10262,14 +10302,14 @@ function AdminProducts({products,setProducts,addToast}) {
   function removeVariant(id){ setVariants(function(prev){return prev.filter(function(v){return v.id!==id;});}); }
 
   function openNew() { setEditing(null);setName("");setSku("");setPrice("");setCategory("");setDesc("");setActive(true);setImgUrl("");setWeight("");setDimL("");setDimW("");setDimH("");setBarcode("");setStock("");setVariants([]);setFreightRequired(false);setUnitsPerPallet("");setShowForm(true); }
-  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):"",weight:v.weight!=null?String(v.weight):"",dimL:v.dimL!=null?String(v.dimL):"",dimW:v.dimW!=null?String(v.dimW):"",dimH:v.dimH!=null?String(v.dimH):""};}));setFreightRequired(!!p.freightRequired);setUnitsPerPallet(p.unitsPerPallet!=null?String(p.unitsPerPallet):"");setShowForm(true); }
+  function openEdit(p) { setEditing(p);setName(p.name||"");setSku(p.sku||"");setPrice(String(p.price||""));setCategory(p.category||"");setDesc(p.description||"");setActive(p.active!==false);setImgUrl(p.imageUrl||"");setWeight(String(p.weight||""));setDimL(String(p.dimL||""));setDimW(String(p.dimW||""));setDimH(String(p.dimH||""));setBarcode(p.barcode||"");setStock(String(p.stock||""));setVariants((p.variants||[]).map(function(v){return {id:v.id||genId("var"),name:v.name||"",sku:v.sku||"",itemId:v.itemId||"",price:v.price!=null?String(v.price):"",stock:v.stock!=null?String(v.stock):"",weight:v.weight!=null?String(v.weight):"",dimL:v.dimL!=null?String(v.dimL):"",dimW:v.dimW!=null?String(v.dimW):"",dimH:v.dimH!=null?String(v.dimH):""};}));setFreightRequired(!!p.freightRequired);setUnitsPerPallet(p.unitsPerPallet!=null?String(p.unitsPerPallet):"");setShowForm(true); }
 
   function save() {
     var anyNamedVariant = (variants||[]).some(function(v){return (v.name||"").trim();});
     if(!name.trim() || (!price && !anyNamedVariant)){return;}
     var cleanVariants = (variants||[])
       .filter(function(v){return (v.name||"").trim();})
-      .map(function(v){return {id:v.id||genId("var"),name:(v.name||"").trim(),sku:(v.sku||"").trim(),
+      .map(function(v){return {id:v.id||genId("var"),name:(v.name||"").trim(),sku:(v.sku||"").trim(),itemId:(v.itemId||"").trim(),
         price:v.price!==""?(parseFloat(v.price)||0):(parseFloat(price)||0),
         stock:v.stock!==""?(parseInt(v.stock)):null,
         weight:v.weight!==""?(parseFloat(v.weight)||0):null,
@@ -10446,6 +10486,11 @@ function AdminProducts({products,setProducts,addToast}) {
                           style={{padding:"8px 10px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:12.5,outline:"none"}}/>
                         <button onClick={function(){removeVariant(v.id);}} title="Remove variant"
                           style={{width:28,height:28,borderRadius:8,border:"1px solid "+C.border,background:C.surface,color:C.danger,cursor:"pointer",fontSize:14,lineHeight:1}}>×</button>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:8,alignItems:"center",marginTop:8}}>
+                        <span style={{fontSize:9.5,color:C.dim,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,whiteSpace:"nowrap"}}>🧾 QBO Item ID</span>
+                        <input value={v.itemId||""} onChange={function(e){updateVariant(v.id,"itemId",e.target.value);}} placeholder="QuickBooks Item ID — used for the Zapier invoice mapping"
+                          style={{padding:"7px 9px",borderRadius:8,border:"1px solid "+C.border,background:C.bg,color:C.text,fontSize:11.5,fontFamily:"monospace",outline:"none"}}/>
                       </div>
                       <div style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr 1fr 1fr",gap:8,alignItems:"center",marginTop:8}}>
                         <span style={{fontSize:9.5,color:C.dim,textTransform:"uppercase",letterSpacing:".05em",fontWeight:600,whiteSpace:"nowrap"}}>📦 Packing</span>
@@ -17876,7 +17921,8 @@ function fireZapierInvoiceHook(order, cust, products){
     var unit=(it.customerPrice!=null&&it.customerPrice!=="")?Number(it.customerPrice):Math.round(base*(1+commR/100)*100)/100;
     var name=(typeof lineLabel==="function"&&prod)?lineLabel(prod,it):((it.name||(prod&&prod.name)||"Item")+(it.variantName?(" — "+it.variantName):""));
     var sku = it.variantSku || ((typeof lineSku==="function") ? lineSku(prod, it) : ((prod&&(prod.sku||prod.code))||"")) || "";
-    return {name:name, sku:sku, quantity:qty, unitPrice:unit, amount:Math.round(unit*qty*100)/100};
+    var itemId = it.variantItemId || ((typeof lineItemId==="function") ? lineItemId(prod, it) : ((prod&&prod.itemId)||"")) || "";
+    return {name:name, sku:sku, itemId:itemId, quantity:qty, unitPrice:unit, amount:Math.round(unit*qty*100)/100};
   });
   function addr(a){ if(!a) return {}; if(typeof a==="string") return {line1:a}; return {line1:a.address||a.street||"", city:a.city||"", state:a.state||"", zip:a.zip||""}; }
   var ship = cust ? {line1:cust.address||"", city:cust.city||"", state:cust.state||"", zip:cust.zip||""} : {};
@@ -17895,6 +17941,36 @@ function fireZapierInvoiceHook(order, cust, products){
     lineItems: lineItems
   };
   try{ fetch(url,{method:"POST",headers:{"Content-Type":"text/plain;charset=UTF-8"},body:JSON.stringify(payload),keepalive:true}); }catch(e){}
+}
+function pushOrderToQBO(order, cust, products){
+  var cfg={}; try{ cfg=JSON.parse(localStorage.getItem("__pv__qboCfg")||"{}"); }catch(e){}
+  if(!cfg.fnUrl) return Promise.resolve({ok:false, error:"QuickBooks not configured (Settings → QuickBooks)"});
+  var t=order.totals||{}, commR=Number(order.commRate||0);
+  var items=(order.items||[]).map(function(it){
+    var prod=(products||[]).find(function(p){return p.id===it.prodId;});
+    var qty=Number(it.qty||it.quantity||1);
+    var base=Number(it.unitPrice||(prod&&prod.price)||it.price||0);
+    var unit=(it.customerPrice!=null&&it.customerPrice!=="")?Number(it.customerPrice):Math.round(base*(1+commR/100)*100)/100;
+    var name=(typeof lineLabel==="function"&&prod)?lineLabel(prod,it):((it.name||(prod&&prod.name)||"Item")+(it.variantName?(" — "+it.variantName):""));
+    var sku=it.variantSku||((typeof lineSku==="function")?lineSku(prod,it):((prod&&(prod.sku||prod.code))||""))||"";
+    return {sku:sku, name:name, variantName:it.variantName||"", qty:qty, unitPrice:unit};
+  });
+  function addr(a){ if(!a) return {}; if(typeof a==="string") return {line1:a}; return {line1:a.address||a.street||"",city:a.city||"",state:a.state||"",zip:a.zip||""}; }
+  var ship=cust?{line1:cust.address||"",city:cust.city||"",state:cust.state||"",zip:cust.zip||""}:{};
+  var bill=(cust&&cust.billSameAsShip)?ship:addr(cust&&cust.billingAddress);
+  var payload={
+    id:order.id, custName:(cust&&cust.name)||order.custName||"", custEmail:(cust&&cust.email)||order.custEmail||"",
+    customerCompany:(cust&&cust.company)||"", customerPhone:(cust&&cust.phone)||"",
+    billingAddress:bill, shippingAddress:ship, repName:order.repName||"", poNumber:order.poNumber||"",
+    totals:{subtotal:Number(t.subtotal||0),discount:Number(t.discount||0),shipping:Number(t.shipping||0),tax:Number(t.tax||0),grand:Number(t.grand||0)},
+    items:items
+  };
+  return fetch(cfg.fnUrl+"?action=pushInvoice",{
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({pvKey:cfg.key, order:payload})
+  }).then(function(r){return r.json();}).then(function(d){
+    return {ok:!!(d&&d.ok), invoiceId:d&&d.invoiceId, docNumber:d&&d.docNumber, error:d&&d.error};
+  }).catch(function(e){return {ok:false, error:(e&&e.message)||"network error"};});
 }
 function fireShippedNotifs(order, opts){
   opts = opts || {};
