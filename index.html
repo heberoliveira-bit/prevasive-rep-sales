@@ -17875,7 +17875,8 @@ function fireZapierInvoiceHook(order, cust, products){
     var base=Number(it.unitPrice||(prod&&prod.price)||it.price||0);
     var unit=(it.customerPrice!=null&&it.customerPrice!=="")?Number(it.customerPrice):Math.round(base*(1+commR/100)*100)/100;
     var name=(typeof lineLabel==="function"&&prod)?lineLabel(prod,it):((it.name||(prod&&prod.name)||"Item")+(it.variantName?(" — "+it.variantName):""));
-    return {name:name, sku:(prod&&(prod.sku||prod.code))||"", quantity:qty, unitPrice:unit, amount:Math.round(unit*qty*100)/100};
+    var sku = it.variantSku || ((typeof lineSku==="function") ? lineSku(prod, it) : ((prod&&(prod.sku||prod.code))||"")) || "";
+    return {name:name, sku:sku, quantity:qty, unitPrice:unit, amount:Math.round(unit*qty*100)/100};
   });
   function addr(a){ if(!a) return {}; if(typeof a==="string") return {line1:a}; return {line1:a.address||a.street||"", city:a.city||"", state:a.state||"", zip:a.zip||""}; }
   var ship = cust ? {line1:cust.address||"", city:cust.city||"", state:cust.state||"", zip:cust.zip||""} : {};
