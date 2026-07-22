@@ -1376,6 +1376,14 @@ function lineUnit(p, it){
   return (p && p.price!=null) ? (parseFloat(p.price)||0) : (it && it.unitPrice ? parseFloat(it.unitPrice)||0 : 0);
 }
 // Effective SKU/name for a line (variant overrides product).
+// Rate resolver: preserves an explicit 0 (a legitimate 0% commission) and falls back
+// only when the value is genuinely missing/blank/non-numeric. Plain `x||10` is wrong
+// here because 0 is falsy in JS, which silently turned a 0% rep into a 10% rep.
+function rateOr(v, dflt){
+  if(v===null || v===undefined || v==="") return dflt;
+  var n = parseFloat(v);
+  return isFinite(n) ? n : dflt;
+}
 function lineSku(p, it){ var v=prodVariant(p,it); return (v&&v.sku)?v.sku:((p&&p.sku)||""); }
 function lineItemId(p, it){ var v=prodVariant(p,it); return (v&&v.itemId)?v.itemId:((p&&p.itemId)||""); }
 function lineLabel(p, it){ var v=prodVariant(p,it); return (p?p.name:"")+(v?(" — "+v.name):""); }
@@ -6909,7 +6917,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   const [commRate,  setCommRate]  = useState(function(){
     // v88: initialize from rep's default commission rate
     var rep = (reps||[]).find(function(r){return r.id===(currentUser&&(currentUser.rep_id||currentUser.id));});
-    if(rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") return parseFloat(rep.defaultCommissionRate)||10;
+    if(rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") return rateOr(rep.defaultCommissionRate,10);
     return 10;
   });
 
@@ -6919,7 +6927,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   useEffect(function(){
     if(editingQuoteId) return;
     var rep = (reps||[]).find(function(r){return r.id===(currentUser&&(currentUser.rep_id||currentUser.id));});
-    var repDefault = (rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") ? parseFloat(rep.defaultCommissionRate)||10 : 10;
+    var repDefault = (rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") ? rateOr(rep.defaultCommissionRate,10) : 10;
     if(custId){
       var c = (customers||[]).find(function(x){return x.id===custId;});
       if(c && c.commissionRate!=null && c.commissionRate!=="") { setCommRate(parseFloat(c.commissionRate)||0); return; }
@@ -6986,7 +6994,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
       ? quote.items.map(function(it){return {prodId:it.prodId, qty:it.qty, variantId:it.variantId||"", variantName:it.variantName||""};})
       : [{prodId:"", qty:1}]);
     setNotes(quote.notes || "");
-    setCommRate(quote.commissionRate || 10);
+    setCommRate(rateOr(quote.commissionRate,10));
     // Validity recomputed from the existing expiry → days-from-now
     if(quote.validUntil){
       var daysLeft = Math.max(1, Math.round((new Date(quote.validUntil).getTime() - Date.now()) / (24*60*60*1000)));
@@ -7062,8 +7070,14 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
         // shows "PreVasive Botanical Disinfectant" instead of the raw "prod_005" id, and the
         // name stays stable even if the product is later renamed
         return Object.assign({},it,{
-          name: p.name || it.name || it.prodId,
-          sku:  p.sku  || it.sku  || "",
+          name: (lineLabel(p,it) || p.name || it.name || it.prodId),
+          sku:  (lineSku(p,it) || it.sku || ""),
+          variantName: ((prodVariant(p,it)||{}).name) || it.variantName || "",
+          variantSku:  ((prodVariant(p,it)||{}).sku)  || it.variantSku  || "",
+          weight: (function(){var _v=prodVariant(p,it)||{}; return (_v.weight!=null&&_v.weight!=="")?_v.weight:(p.weight!=null?p.weight:(it.weight!=null?it.weight:null));})(),
+          dimL: (function(){var _v=prodVariant(p,it)||{}; return (_v.dimL!=null&&_v.dimL!=="")?_v.dimL:(p.dimL!=null?p.dimL:null);})(),
+          dimW: (function(){var _v=prodVariant(p,it)||{}; return (_v.dimW!=null&&_v.dimW!=="")?_v.dimW:(p.dimW!=null?p.dimW:null);})(),
+          dimH: (function(){var _v=prodVariant(p,it)||{}; return (_v.dimH!=null&&_v.dimH!=="")?_v.dimH:(p.dimH!=null?p.dimH:null);})(),
           unitPrice:base,
           customerPrice:Math.round(base*(1+rate3/100)*100)/100,
           variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""
@@ -7102,8 +7116,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
 
   function convertToOrder(quote) {
     var id = "ORD-"+String(Date.now()).slice(-6);
-    var commR = quote.commissionRate||0;
-    if(!commR&&quote.repId) { var repForComm=reps.find(function(r){return r.id===quote.repId;}); commR=(repForComm&&repForComm.defaultCommissionRate)||10; }
+    var commR = rateOr(quote.commissionRate, null);
+    if(commR===null && quote.repId) { var repForComm=reps.find(function(r){return r.id===quote.repId;}); commR=rateOr(repForComm&&repForComm.defaultCommissionRate,10); }
+    if(commR===null) commR=0;
     // Backward-compat: older quotes stored the BASE subtotal in `total` and had no productBase
     var base = (quote.productBase!=null) ? quote.productBase : (quote.total||0);
     var qCust = customers.find(function(c2){return c2.id===quote.custId;})||{};
@@ -7226,8 +7241,11 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
         resolved: resolvedName,
       });
       return Object.assign({}, it, {
-        name: resolvedName,
-        sku: it.sku || (prod && prod.sku) || "",
+        name: (prod && prod.name) ? (lineLabel(prod,it)||prod.name) : (resolvedName + (it.variantName?(" — "+it.variantName):"")),
+        sku: (prod ? lineSku(prod,it) : "") || it.sku || (prod && prod.sku) || "",
+        variantName: it.variantName || (prod?((prodVariant(prod,it)||{}).name||""):""),
+        variantSku:  it.variantSku  || (prod?((prodVariant(prod,it)||{}).sku||""):""),
+        weight: (function(){var _v=prod?(prodVariant(prod,it)||{}):{}; return (_v.weight!=null&&_v.weight!=="")?_v.weight:(prod&&prod.weight!=null?prod.weight:(it.weight!=null?it.weight:null));})(),
       });
     });
     try{ console.info("[sendQuote] item enrichment report:", lookupReport); }catch(e){}
@@ -10818,7 +10836,7 @@ function AdminReps({reps,setReps,orders,commissions,setCommissions,applications,
       id:id, name:name.trim(), email:email.trim(),
       status:"pending", subscriptionStatus:"trial",
       trialStartedAt:new Date().toISOString(),
-      planId:"starter", defaultCommissionRate:parseFloat(repCommRate)||10,
+      planId:"starter", defaultCommissionRate:rateOr(repCommRate,10),
       createdAt:new Date().toISOString(),
     };
     setReps(function(prev){return [newRep].concat(prev);});
@@ -13924,9 +13942,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     if(editOrder&&editOrder.commissionRate!=null) return editOrder.commissionRate;
     if(custId) {
       var custObj=(customers||[]).find(function(x){return x.id===custId;})||{};
-      if(custObj.commissionRate!=null&&custObj.commissionRate!=="") return parseFloat(custObj.commissionRate)||10;
+      if(custObj.commissionRate!=null&&custObj.commissionRate!=="") return rateOr(custObj.commissionRate,10);
     }
-    return (repData&&repData.defaultCommissionRate)||10;
+    return rateOr(repData&&repData.defaultCommissionRate,10);
   })();
   const [commRate,   setCommRate]   = useState(initCommRate);
   // Keep commission rate in sync with whichever setting drives it:
@@ -14306,8 +14324,14 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         var base=lineUnit(p,it);
         // v94: snapshot name + sku for email templates and customer-facing views
         return Object.assign({},it,{
-          name: p.name || it.name || it.prodId,
-          sku:  p.sku  || it.sku  || "",
+          name: (lineLabel(p,it) || p.name || it.name || it.prodId),
+          sku:  (lineSku(p,it) || it.sku || ""),
+          variantName: ((prodVariant(p,it)||{}).name) || it.variantName || "",
+          variantSku:  ((prodVariant(p,it)||{}).sku)  || it.variantSku  || "",
+          weight: (function(){var _v=prodVariant(p,it)||{}; return (_v.weight!=null&&_v.weight!=="")?_v.weight:(p.weight!=null?p.weight:(it.weight!=null?it.weight:null));})(),
+          dimL: (function(){var _v=prodVariant(p,it)||{}; return (_v.dimL!=null&&_v.dimL!=="")?_v.dimL:(p.dimL!=null?p.dimL:null);})(),
+          dimW: (function(){var _v=prodVariant(p,it)||{}; return (_v.dimW!=null&&_v.dimW!=="")?_v.dimW:(p.dimW!=null?p.dimW:null);})(),
+          dimH: (function(){var _v=prodVariant(p,it)||{}; return (_v.dimH!=null&&_v.dimH!=="")?_v.dimH:(p.dimH!=null?p.dimH:null);})(),
           unitPrice:base,
           customerPrice:Math.round(base*(1+rate3/100)*100)/100,
           variantId:v?v.id:"",variantName:v?v.name:"",variantSku:v?(v.sku||""):""
@@ -17329,9 +17353,9 @@ function RepProfile({user,repData,setReps,commissions,addToast,legalDocs,signatu
 function getEffectiveCommRate(custId, repData, customers, globalDefault) {
   // Priority: customer-specific → rep default → global default
   var cust = (customers||[]).find(function(c2){return c2.id===custId;})||{};
-  if(cust.commissionRate!=null && cust.commissionRate!=="") return parseFloat(cust.commissionRate)||0;
-  if(repData&&repData.defaultCommissionRate!=null) return parseFloat(repData.defaultCommissionRate)||10;
-  return parseFloat(globalDefault)||10;
+  if(cust.commissionRate!=null && cust.commissionRate!=="") return rateOr(cust.commissionRate,0);
+  if(repData&&repData.defaultCommissionRate!=null) return rateOr(repData.defaultCommissionRate,10);
+  return rateOr(globalDefault,10);
 }
 
 function getSiteUrl(){
@@ -19748,7 +19772,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [productId, setProductId] = useState("");
   const [variantId, setVariantId] = useState("");
   const [qty, setQty] = useState(1);
-  const [commRate, setCommRate] = useState((repData&&repData.defaultCommissionRate)||10);
+  const [commRate, setCommRate] = useState(rateOr(repData&&repData.defaultCommissionRate,10));
   const [payMethod, setPayMethod] = useState("card");
   const [selectedRate, setSelectedRate] = useState(null);
   const [placing, setPlacing] = useState(false);
@@ -19955,6 +19979,12 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           return Object.assign({}, it, {
             prodId: it.productId,
             variantId: v?v.id:"", variantName: v?v.name:"", variantSku: v?(v.sku||""):"",
+            name: ((p&&p.name)||it.name||it.productId||"Item") + (v&&v.name?(" — "+v.name):""),
+            sku: (v&&v.sku) || (p&&p.sku) || it.sku || "",
+            weight: (v&&v.weight!=null&&v.weight!=="")?v.weight:((p&&p.weight!=null)?p.weight:null),
+            dimL: (v&&v.dimL!=null&&v.dimL!=="")?v.dimL:((p&&p.dimL!=null)?p.dimL:null),
+            dimW: (v&&v.dimW!=null&&v.dimW!=="")?v.dimW:((p&&p.dimW!=null)?p.dimW:null),
+            dimH: (v&&v.dimH!=null&&v.dimH!=="")?v.dimH:((p&&p.dimH!=null)?p.dimH:null),
             unitPrice: base,
             customerPrice: Math.round(base*(1+commRate/100)*100)/100,
           });
