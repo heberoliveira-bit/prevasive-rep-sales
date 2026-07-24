@@ -11849,8 +11849,14 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
 function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
   const [editing,setEditing]=useState(null);
   const [preview,setPreview]=useState(null);
-  const [audience,setAudience]=useState("customers");
-  const [manual,setManual]=useState("");
+  // Per-campaign audience + manual list (keyed by campaign id). Previously these were
+  // single values shared by every card, so typing in one recipient box mirrored into all.
+  const [audienceBy,setAudienceBy]=useState({});
+  const [manualBy,setManualBy]=useState({});
+  function audFor(id){ return audienceBy[id] || "customers"; }
+  function manFor(id){ return manualBy[id] || ""; }
+  function setAudFor(id,v){ setAudienceBy(function(p){var n=Object.assign({},p); n[id]=v; return n;}); }
+  function setManFor(id,v){ setManualBy(function(p){var n=Object.assign({},p); n[id]=v; return n;}); }
   const [progress,setProgress]=useState(null);
   var list=campaigns||[];
   function company(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").company||"PreVasive USA";}catch(e){return "PreVasive USA";}}
@@ -11862,14 +11868,15 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
     addToast&&addToast("Campaign saved","success"); setEditing(null);
   }
   function del(id){ if(!window.confirm("Delete this campaign?")) return; setCampaigns(list.filter(function(x){return x.id!==id;})); addToast&&addToast("Campaign deleted","success"); }
-  function recipientsFor(){
-    if(audience==="customers") return (customers||[]).filter(function(c){return c.email;}).map(function(c){return {name:c.name,email:c.email};});
-    if(audience==="reps") return (reps||[]).filter(function(r){return r.email;}).map(function(r){return {name:r.name,email:r.email};});
-    return manual.split(/[\s,;]+/).filter(function(e){return e.indexOf("@")>0;}).map(function(e){return {name:"",email:e.trim()};});
+  function recipientsFor(campId){
+    var aud=audFor(campId), man=manFor(campId);
+    if(aud==="customers") return (customers||[]).filter(function(c){return c.email;}).map(function(c){return {name:c.name,email:c.email};});
+    if(aud==="reps") return (reps||[]).filter(function(r){return r.email;}).map(function(r){return {name:r.name,email:r.email};});
+    return man.split(/[\s,;]+/).filter(function(e){return e.indexOf("@")>0;}).map(function(e){return {name:"",email:e.trim()};});
   }
   function send(camp, testOnly){
     var cfg=(typeof getEmailCfg==="function")?getEmailCfg():null;
-    var recips = testOnly ? [{name:"Test", email:(cfg&&cfg.fromEmail)||""}] : recipientsFor();
+    var recips = testOnly ? [{name:"Test", email:(cfg&&cfg.fromEmail)||""}] : recipientsFor(camp.id);
     if(!recips.length){ addToast&&addToast(testOnly?"Set a From address in Settings → Email first":"No recipients for this audience","warning"); return; }
     if(!testOnly && !window.confirm("Send \""+(camp.name||"campaign")+"\" to "+recips.length+" recipient(s)?")) return;
     setProgress({sent:0,failed:0,total:recips.length});
@@ -11922,14 +11929,14 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
               <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:8}}>
                 {[["customers","All Customers ("+(customers||[]).filter(function(c){return c.email;}).length+")"],["reps","All Reps ("+(reps||[]).filter(function(r){return r.email;}).length+")"],["manual","Manual list"]].map(function(opt){
                   return (
-                    <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",fontSize:12,color:audience===opt[0]?C.text:C.muted}}>
-                      <input type="radio" name={"aud_"+camp.id} checked={audience===opt[0]} onChange={function(){setAudience(opt[0]);}} style={{accentColor:C.accent}}/>{opt[1]}
+                    <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",fontSize:12,color:audFor(camp.id)===opt[0]?C.text:C.muted}}>
+                      <input type="radio" name={"aud_"+camp.id} checked={audFor(camp.id)===opt[0]} onChange={function(){setAudFor(camp.id,opt[0]);}} style={{accentColor:C.accent}}/>{opt[1]}
                     </label>
                   );
                 })}
               </div>
-              {audience==="manual"&&(
-                <textarea value={manual} onChange={function(e){setManual(e.target.value);}} placeholder="Paste emails separated by commas, spaces, or new lines"
+              {audFor(camp.id)==="manual"&&(
+                <textarea value={manFor(camp.id)} onChange={function(e){setManFor(camp.id,e.target.value);}} placeholder="Paste emails separated by commas, spaces, or new lines"
                   style={{width:"100%",minHeight:60,background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px",color:C.text,fontFamily:"monospace",fontSize:12,boxSizing:"border-box",marginBottom:8}}/>
               )}
               <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
