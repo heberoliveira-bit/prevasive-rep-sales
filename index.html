@@ -133,38 +133,11 @@ function commissionBuckets(orders, paidComms, repId){
        });
 */
 function transferRepCommission(rep, amountDollars, description){
-  var connectFn = "";
-  var platformFee = 0;
-  try{
-    var cfg = JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");
-    connectFn = cfg.connectFnUrl || cfg.edgeFnUrl || "";
-    platformFee = parseFloat(cfg.platformFee) || 0;
-  }catch(e){}
-  var connectId = rep && rep.stripeConnectId;
-  if(!connectFn) return Promise.resolve({ok:false, error:"Stripe Connect edge function not configured", status:"unconfigured"});
-  if(!connectId) return Promise.resolve({ok:false, error:"Rep hasn't connected Stripe", status:"no_connect"});
-  var netCents = Math.round(amountDollars*(1-platformFee/100)*100);
-  // v102e: attach session JWT — the transfer action requires admin role per v101.
-  var sb = getSB();
-  if(!sb) return Promise.resolve({ok:false, error:"No Supabase client — please reload", status:"failed"});
-  return sb.auth.getSession().then(function(res){
-    var token = (res && res.data && res.data.session && res.data.session.access_token) || "";
-    if(!token) return {ok:false, error:"Not signed in — please refresh and sign in again", status:"failed"};
-    return fetch(connectFn,{method:"POST",headers:{
-        "Content-Type":"application/json",
-        "Authorization":"Bearer "+token
-      },
-      body:JSON.stringify({action:"transfer", connectAccountId:connectId, amount:netCents,
-                           currency:"usd", description:description||"Commission payout"})
-    }).then(function(r){return r.json();}).then(function(d){
-      if(d && (d.ok || d.transferId)){
-        return {ok:true, transferId:d.transferId, netCents:netCents, status:"sent"};
-      }
-      return {ok:false, error:(d && d.error)||"Stripe returned no transferId", status:"failed"};
-    }).catch(function(err){
-      return {ok:false, error:(err && err.message)||"Network/edge function error", status:"failed"};
-    });
-  });
+  // Stripe Connect removed. Commissions are now settled MANUALLY at GROSS (no platform-fee
+  // deduction, no money movement). This returns a synthetic success so every existing
+  // pay/release/approve path records a clean manual gross payout with no transfer id.
+  var cents = Math.round((parseFloat(amountDollars)||0)*100);
+  return Promise.resolve({ ok:true, transferId:null, netCents:cents, status:"manual", manual:true });
 }
 
 /* ─── repComplianceStatus — single source of truth for "is this rep fully compliant" ───
@@ -183,7 +156,11 @@ function transferRepCommission(rep, amountDollars, description){
 function repComplianceStatus(rep, legalDocs, signatures){
   var issues = [];
   if(!rep) return {ok:false, issues:[]};
-  var required = (legalDocs||[]).filter(function(d){return d.requires && d.published;});
+  var required = (legalDocs||[]).filter(function(d){
+    if(!(d.active && d.requiresResign)) return false;
+    if(d.audience==="selected") return (d.repIds||[]).indexOf(rep.id)>=0;
+    return true;
+  });
   required.forEach(function(d){
     var sig = (signatures||[]).find(function(s){
       return s.repId===rep.id && s.docId===d.id;
@@ -192,12 +169,14 @@ function repComplianceStatus(rep, legalDocs, signatures){
     var sigVer = sig.version || sig.docVersion;
     if(sigVer !== d.version){ issues.push({type:"outdated", doc:d, sig:sig}); }
   });
-  if(!rep.w9Status || rep.w9Status==="not_submitted"){
-    issues.push({type:"w9_missing"});
-  } else if(rep.w9ReviewStatus==="rejected"){
-    issues.push({type:"w9_rejected", reason:rep.w9RejectReason||rep.w9RejectionReason||""});
-  } else if(rep.w9ReviewStatus!=="approved"){
-    issues.push({type:"w9_pending"});
+  if(!rep.w9Exempt){
+    if(!rep.w9Status || rep.w9Status==="not_submitted"){
+      issues.push({type:"w9_missing"});
+    } else if(rep.w9ReviewStatus==="rejected"){
+      issues.push({type:"w9_rejected", reason:rep.w9RejectReason||rep.w9RejectionReason||""});
+    } else if(rep.w9ReviewStatus!=="approved"){
+      issues.push({type:"w9_pending"});
+    }
   }
   return {ok:issues.length===0, issues:issues};
 }
@@ -6210,7 +6189,11 @@ function RepComplianceWall({compliance, rep, legalDocs, setReps, addToast, onSig
 
   var docIssues = compliance.issues.filter(function(i){return i.type==="unsigned" || i.type==="outdated";});
   var w9Issue   = compliance.issues.find(function(i){return /^w9/.test(i.type);});
-  var requiredDocs = (legalDocs||[]).filter(function(d){return d.requires && d.published;});
+  var requiredDocs = (legalDocs||[]).filter(function(d){
+    if(!(d.active && d.requiresResign)) return false;
+    if(d.audience==="selected") return (d.repIds||[]).indexOf(rep.id)>=0;
+    return true;
+  });
 
   // Per-doc render: row showing status + action
   function DocRow({d}){
@@ -6335,10 +6318,12 @@ function RepComplianceWall({compliance, rep, legalDocs, setReps, addToast, onSig
               </div>
             </div>
           )}
+          {!rep.w9Exempt && (
           <div>
             <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10}}>{requiredDocs.length>0?"2. ":""}Submit your W-9 tax form</div>
             <W9Block/>
           </div>
+          )}
         </div>
         <div style={{padding:"14px 24px",borderTop:"1px solid "+C.border,display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,gap:10,flexWrap:"wrap"}}>
           <div style={{fontSize:10,color:C.dim,lineHeight:1.5,flex:1,minWidth:200}}>
@@ -6400,6 +6385,8 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
   const [content,  setContent]  = useState("");
   const [version,  setVersion]  = useState("1.0");
   const [requires, setRequires] = useState(true);
+  const [docAudience, setDocAudience] = useState("all");
+  const [docRepIds, setDocRepIds] = useState([]);
   const [viewDoc,  setViewDoc]  = useState(null);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
 
@@ -6418,7 +6405,7 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
     var nextVer = bumpVersion(editDoc.version);
     var data = {
       id: editDoc.id, title: title.trim(), description: desc.trim(), content: content.trim(),
-      version: nextVer, requiresResign: requires, active: true,
+      version: nextVer, requiresResign: requires, active: true, audience: docAudience, repIds: (docAudience==="selected"?docRepIds:[]),
       publishedAt: new Date().toISOString(),
       publishedBy: "Admin",
       previousVersion: editDoc.version, // audit trail
@@ -6463,7 +6450,7 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
     setEditDoc(null);
     setTitle(tmpl ? templateTitleFor(tmpl) : "");
     setContent(tmpl ? (SAMPLE_TEMPLATES[tmpl]||"") : "");
-    setDesc(""); setVersion("1.0"); setRequires(true);
+    setDesc(""); setVersion("1.0"); setRequires(true); setDocAudience("all"); setDocRepIds([]);
     setShowTemplatePicker(false);
     setShowForm(true);
   }
@@ -6471,7 +6458,7 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
   function openEdit(doc) {
     setEditDoc(doc); setTitle(doc.title||""); setDesc(doc.description||"");
     setContent(doc.content||""); setVersion(doc.version||"1.0");
-    setRequires(doc.requiresResign!==false); setShowForm(true);
+    setRequires(doc.requiresResign!==false); setDocAudience(doc.audience||"all"); setDocRepIds(doc.repIds||[]); setShowForm(true);
   }
 
   function save() {
@@ -6479,7 +6466,7 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
     var id = editDoc?editDoc.id:genId("doc");
     var data = {id:id,title:title.trim(),description:desc.trim(),content:content.trim(),
                 version: editDoc ? editDoc.version : version, // minor edits preserve version
-                requiresResign:requires, active:true,
+                requiresResign:requires, active:true, audience:docAudience, repIds:(docAudience==="selected"?docRepIds:[]),
                 publishedAt: editDoc ? (editDoc.publishedAt || new Date().toISOString()) : new Date().toISOString(),
                 lastModifiedAt: new Date().toISOString(),
                 publishedBy:"Admin"};
@@ -6712,6 +6699,29 @@ function AdminLegal({legalDocs,setLegalDocs,signatures,setSignatures,reps,addToa
               style={{accentColor:C.accent}}/>
             <span style={{fontSize:13,color:C.text}}>Require re-signature when version is updated</span>
           </label>
+          <div style={{marginTop:14}}>
+            <div style={{fontSize:12,fontWeight:700,color:C.text,marginBottom:6}}>Applies to</div>
+            <div style={{display:"flex",gap:16,marginBottom:8}}>
+              {[["all","All reps"],["selected","Selected reps"]].map(function(opt){
+                return <label key={opt[0]} style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer",fontSize:12,color:docAudience===opt[0]?C.text:C.muted}}>
+                  <input type="radio" name="docAud" checked={docAudience===opt[0]} onChange={function(){setDocAudience(opt[0]);}} style={{accentColor:C.accent}}/>{opt[1]}
+                </label>;
+              })}
+            </div>
+            {docAudience==="selected" && (
+              <div style={{maxHeight:170,overflowY:"auto",border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px",display:"flex",flexDirection:"column",gap:5}}>
+                {(reps||[]).length===0 ? <div style={{fontSize:11,color:C.dim}}>No reps yet.</div> :
+                 (reps||[]).map(function(r){
+                  var on = docRepIds.indexOf(r.id)>=0;
+                  return <label key={r.id} style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",fontSize:12,color:C.text}}>
+                    <input type="checkbox" checked={on} onChange={function(){setDocRepIds(function(prev){return on?prev.filter(function(x){return x!==r.id;}):prev.concat([r.id]);});}} style={{accentColor:C.accent}}/>
+                    <span style={{fontWeight:600}}>{r.name||r.email}</span><span style={{fontSize:10,color:C.dim}}>{r.email}</span>
+                  </label>;
+                 })}
+                <div style={{fontSize:10,color:C.dim,marginTop:4,borderTop:"1px solid "+C.border,paddingTop:5}}>{docRepIds.length} selected · only these reps must sign this document</div>
+              </div>
+            )}
+          </div>
           {editDoc && (
             <div style={{marginTop:14,padding:"10px 14px",background:C.surface2,borderRadius:8,fontSize:11,color:C.muted,lineHeight:1.6}}>
               <strong style={{color:C.text}}>What's the difference?</strong><br/>
@@ -8506,29 +8516,12 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                   onConfirm={function(opts){
                     var id=genId("pay");
                     var payout={id:id,repId:rep.id,repName:rep.name,amount:readyComm,
-                                orderId:"BULK",note:opts.note,method:opts.method||"stripe_connect",
+                                orderId:"BULK",note:opts.note||"Marked paid (manual)",method:opts.method||"manual",
                                 paidAt:new Date().toISOString(),
-                                transferStatus: rep.stripeConnectId ? "pending" : "no_connect"};
+                                transferStatus:"sent", transferAmount:readyComm};
                     setCommissions(function(prev){return [payout].concat(prev);});
                     dbSave("crm_commission_payouts",id,payout);
-                    if(rep.stripeConnectId){
-                      transferRepCommission(rep, readyComm, "Commission release — "+rep.name+" — bulk")
-                        .then(function(result){
-                          var updated = Object.assign({},payout,{
-                            transferStatus: result.ok?"sent":"failed",
-                            stripeTransferId: result.transferId,
-                            transferError: result.error,
-                            transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : payout.transferAmount,
-                            note: result.ok ? "Stripe Connect — Transfer "+result.transferId : "Failed: "+result.error
-                          });
-                          dbSave("crm_commission_payouts",id,updated);
-                          setCommissions(function(prev){return prev.map(function(c){return c.id===id?updated:c;});});
-                          if(result.ok){ addToast("✓ "+fmtMoney(readyComm)+" transferred to "+rep.name,"success"); emailPayoutReceipt(updated, rep, addToast, {silent:true}); }
-                          else { addToast("Stripe transfer failed: "+result.error+" — payout recorded but funds not sent","danger"); }
-                        });
-                    } else {
-                      addToast(fmtMoney(readyComm)+" recorded — "+rep.name+" hasn't connected Stripe yet; transfer not sent","warning");
-                    }
+                    addToast("✓ "+fmtMoney(readyComm)+" marked paid for "+rep.name,"success");
                     setPayTarget(null);
                   }}
                   onClose={function(){setPayTarget(null);}}/>
@@ -8550,6 +8543,11 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                     {rep.w9ReviewStatus==="approved"?"✓ Approved":rep.w9Status==="received"?"Pending Review":"Not Filed"}
                   </span>
                 </div>
+                <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",padding:"8px 0 10px",marginBottom:6,borderBottom:"1px solid "+C.border}}>
+                  <input type="checkbox" checked={!!rep.w9Exempt} onChange={function(e){updateRep({w9Exempt:e.target.checked});addToast(e.target.checked?"W-9 marked not required for "+(rep.name||"rep"):"W-9 required for "+(rep.name||"rep"),"info");}} style={{accentColor:C.accent}}/>
+                  <span style={{fontSize:12,color:C.text,fontWeight:600}}>Exempt from W-9</span>
+                  <span style={{fontSize:10,color:C.dim}}>— won't be required to file (e.g. corporate entity, non-1099)</span>
+                </label>
                 {rep.w9Status==="received"?(
                   <div>
                     {[["Legal Name",rep.w9LegalName||"—"],["Entity Type",rep.w9EntityType||"—"],
@@ -8987,7 +8985,7 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
           {[
             {label:"⏳ Held", val:allBuckets.held, color:C.warning, hint:"Shipped, in hold window"},
             {label:"✅ Available", val:allBuckets.available, color:C.success, hint:"Ready to pay out"},
-            {label:"💸 Paid (period)", val:allBuckets.paid, color:C.accent, hint:"Settled via Stripe Connect", netOverride:paidNet},
+            {label:"💸 Paid (period)", val:allBuckets.paid, color:C.accent, hint:"Settled (manual)", netOverride:paidNet},
             {label:"❌ Forfeited", val:{count:forfeitedOrders.length, amount:forfeitTotal}, color:C.danger, hint:"Cancelled/Refunded/Returned"},
           ].map(function(it,i){return (
             <div key={i} style={{padding:"14px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:10}}>
@@ -9031,15 +9029,12 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
             {pendingReturns.length>0 && (
               <BlockerRow icon="↩" text={pendingReturns.length+" return request"+(pendingReturns.length===1?"":"s")} onClick={function(){onNav("returns");}}/>
             )}
-            {totalStuckByConnect>0 && (
-              <BlockerRow icon="🔌" text={fmtMoney(totalStuckByConnect)+" commission stuck — "+unconnectedWithBalance.length+" rep"+(unconnectedWithBalance.length===1?"":"s")+" haven't completed Stripe Connect"} onClick={function(){onNav("reps");}}/>
-            )}
           </div>
         </div>
       )}
 
-      {/* B3 + B4 + Phase-C: Two-column row with Top Earners + Stripe Connect Health */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:20}}>
+      {/* B3: Top Earners (full width — Stripe Connect Health removed) */}
+      <div style={{marginBottom:20}}>
         {/* Top earners */}
         <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 18px"}}>
           <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>🏆 Top Earners (period)</div>
@@ -9053,30 +9048,6 @@ function AdminDashboard({orders,reps,customers,products,commissions,payoutReques
               <div style={{fontSize:13,fontWeight:700,color:C.success,fontFamily:"monospace",minWidth:80,textAlign:"right"}}>{fmtMoney(r.commission)}</div>
             </div>
           );})}
-        </div>
-
-        {/* B4: Stripe Connect health */}
-        <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,padding:"16px 18px"}}>
-          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>🔌 Stripe Connect Health</div>
-          <div style={{display:"flex",flexDirection:"column",gap:8,fontSize:12}}>
-            <div style={{display:"flex",justifyContent:"space-between"}}>
-              <span style={{color:C.muted}}>✓ Fully connected</span>
-              <span style={{fontWeight:700,color:C.success}}>{connectedReps.length} rep{connectedReps.length===1?"":"s"}</span>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between"}}>
-              <span style={{color:C.muted}}>⏳ Not connected (with balance)</span>
-              <span style={{fontWeight:700,color:unconnectedWithBalance.length>0?C.warning:C.dim}}>{unconnectedWithBalance.length} rep{unconnectedWithBalance.length===1?"":"s"}</span>
-            </div>
-            {unconnectedWithBalance.length>0 && (
-              <div style={{padding:"10px 12px",background:C.warning+"10",borderRadius:8,marginTop:6}}>
-                <div style={{fontSize:11,color:C.warning,fontWeight:700,marginBottom:4}}>⚠ {fmtMoney(totalStuckByConnect)} stuck</div>
-                {unconnectedWithBalance.slice(0,3).map(function(r){
-                  var b = commissionBuckets(orders, commissions, r.id);
-                  return <div key={r.id} style={{fontSize:11,color:C.muted,padding:"2px 0"}}>{r.name} — {fmtMoney(netAfterFee(b.available.amount))}</div>;
-                })}
-              </div>
-            )}
-          </div>
         </div>
       </div>
 
@@ -11272,40 +11243,8 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
     });
     newPayouts.forEach(function(p){dbSave("crm_commission_payouts",p.id,p);});
     setCommissions(function(prev){return newPayouts.concat(prev);});
-
-    // Attempt Stripe Connect transfers if configured — same endpoint/contract as single Pay.
-    var cfg = JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}");
-    var fn  = cfg.connectFnUrl;
-    var platformFee = parseFloat(cfg.platformFee)||0;
-    if(fn) {
-      var sbA = getSB();
-      var tokenP = sbA ? sbA.auth.getSession().then(function(r){return (r&&r.data&&r.data.session&&r.data.session.access_token)||"";}) : Promise.resolve("");
-      tokenP.then(function(token){
-        if(!token){ addToast("Not signed in — transfers not sent (commissions are recorded)","warning"); return; }
-        newPayouts.forEach(function(p){
-          var rep3 = reps.find(function(r){return r.id===p.repId;})||{};
-          if(!rep3.stripeConnectId) return;
-          var netCents = Math.round(p.amount*(1-platformFee/100)*100);
-          fetch(fn,{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},
-            body:JSON.stringify({action:"transfer",connectAccountId:rep3.stripeConnectId,amount:netCents,
-              currency:"usd",description:"Commission — Order "+p.orderId+" — "+(rep3.name||p.repName)})})
-          .then(function(r){return r.json();})
-          .then(function(d){
-            var upd = d.ok ? Object.assign({},p,{stripeTransferId:d.transferId,transferStatus:"sent",transferAmount:Math.round(netCents)/100})
-                           : Object.assign({},p,{transferStatus:"failed",transferError:(d.error||"Unknown error")});
-            dbSave("crm_commission_payouts",p.id,upd);
-            setCommissions(function(prev){return prev.map(function(c){return c.id===p.id?upd:c;});});
-            if(!d.ok) addToast("Transfer failed for "+(rep3.name||p.repId)+": "+(d.error||"error"),"danger");
-            else emailPayoutReceipt(upd, rep3, addToast, {silent:true});
-          }).catch(function(){
-            var upd=Object.assign({},p,{transferStatus:"failed",transferError:"network"});
-            dbSave("crm_commission_payouts",p.id,upd);
-            setCommissions(function(prev){return prev.map(function(c){return c.id===p.id?upd:c;});});
-            addToast("Transfer failed for "+(rep3.name||p.repId)+" (network)","danger");
-          });
-        });
-      });
-    }
+    // Stripe Connect removed — commissions are recorded as paid (gross, manual). No transfer.
+    addToast&&addToast("Released "+newPayouts.length+" commission"+(newPayouts.length===1?"":"s")+" (marked paid)","success");
 
     setTimeout(function(){
       setReleasingAll(false);
@@ -11330,7 +11269,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
     }
     var rep = reps.find(function(r){return r.id===order.repId;})||{name:"Unknown"};
     var amount = order.totals&&order.totals.commission||0;
-    var connectFn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+    var connectFn = ""; /* Stripe Connect removed — always record manually */
     var platformFee = (function(){try{return parseFloat(JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").platformFee)||0;}catch(e){return 0;}})();
     var connectId = rep.stripeConnectId;
 
@@ -11395,7 +11334,6 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
     if(!reason){ addToast("Reason required for early release","warning"); return; }
     var o = earlyTarget;
     var rep = reps.find(function(r){return r.id===o.repId;}) || {name:"Unknown"};
-    if(!rep.stripeConnectId){ addToast(rep.name+" hasn't connected Stripe — can't transfer","warning"); return; }
     setEarlySaving(true);
     var amount = (o.totals && o.totals.commission) || 0;
     var platformFee = (typeof getPlatformFeePct==="function") ? getPlatformFeePct() : 0;
@@ -11430,7 +11368,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
           transferError: result.error,
           netAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.netAmount,
           transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.transferAmount,
-          note: result.ok ? pay.note+" — Transfer "+result.transferId : pay.note+" — FAILED: "+result.error
+          note: result.ok ? (pay.note+" — marked paid (manual)") : (pay.note+" — FAILED: "+result.error)
         });
         dbSave("crm_commission_payouts", pay.id, done);
         setCommissions(function(prev){return prev.map(function(c){return c.id===pay.id?done:c;});});
@@ -11504,11 +11442,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                   <div style={{fontSize:11,color:C.muted}}>Order {req.orderId} · {fmtMoney(req.amount)} · Requested {fmtDate(req.requestedAt)}</div>
                 </div>
                 <div style={{display:"flex",gap:8}}>
-                  {!rep2.stripeConnectId && (
-                    <div style={{fontSize:10,color:C.warning,padding:"4px 8px",background:C.warning+"15",borderRadius:6,alignSelf:"center"}}>⚠ No Stripe Connect</div>
-                  )}
-                  <Btn small variant="success" disabled={!rep2.stripeConnectId} onClick={function(){
-                    if(!rep2.stripeConnectId){ addToast(rep2.name+" hasn't connected Stripe yet — can't transfer","warning"); return; }
+                  <Btn small variant="success" onClick={function(){
                     var pay={id:genId("pay"),repId:req.repId,repName:rep2.name,
                              orderId:req.orderId,amount:req.amount,
                              method:"stripe_connect",note:"Rep-requested payout",paidAt:new Date().toISOString(),
@@ -11523,7 +11457,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                           stripeTransferId: result.transferId,
                           transferError: result.error,
                           transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : pay.transferAmount,
-                          note: result.ok ? "Stripe Connect — Transfer "+result.transferId : "Failed: "+result.error
+                          note: result.ok ? "Marked paid (manual)" : "Failed: "+result.error
                         });
                         dbSave("crm_commission_payouts",pay.id,updated);
                         setCommissions(function(prev){return prev.map(function(c){return c.id===pay.id?updated:c;});});
@@ -11623,12 +11557,9 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                       <div style={{fontSize:10,color:C.dim,marginTop:4}}>{holdDayInfo(o)} · Schedule: {commissionHoldDays(o)}-day hold for {fmtTerms(pm)}</div>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                      {!rep.stripeConnectId && (
-                        <div style={{fontSize:10,color:C.warning,padding:"4px 8px",background:C.warning+"15",borderRadius:6}}>⚠ No Stripe</div>
-                      )}
-                      <Btn small variant="ghost" disabled={!rep.stripeConnectId} onClick={function(){
+                      <Btn small variant="ghost" onClick={function(){
                         setEarlyTarget(o); setEarlyReason("");
-                      }}>🔓 Early Release</Btn>
+                      }}>🔓 Mark paid (early)</Btn>
                     </div>
                   </div>
                 </div>
@@ -11661,7 +11592,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           {(function(){
                             var rep2=reps.find(function(r){return r.id===o.repId;})||{};
-                            var connectFn=(function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+                            var connectFn = ""; /* Stripe Connect removed — always record manually */
                             return connectFn?(
                               <span style={{fontSize:9,padding:"2px 5px",borderRadius:8,fontWeight:700,
                                 background:rep2.stripeConnectId?C.success+"15":C.warning+"15",
@@ -11673,7 +11604,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                           <Btn small onClick={function(){
                             var rep2=reps.find(function(r){return r.id===o.repId;})||{name:"Rep"};
                             setPayTarget({order:o,rep:rep2});
-                          }}>Pay Commission</Btn>
+                          }}>Mark paid</Btn>
                         </div>
                       </td>
                     </tr>
@@ -11730,7 +11661,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                                     stripeTransferId: result.transferId,
                                     transferError: result.error,
                                     transferAmount: (result.ok && result.netCents!=null) ? Math.round(result.netCents)/100 : c.transferAmount,
-                                    note: result.ok ? "Stripe Connect — Transfer "+result.transferId : "Failed: "+result.error
+                                    note: result.ok ? "Marked paid (manual)" : "Failed: "+result.error
                                   });
                                   dbSave("crm_commission_payouts",c.id,done);
                                   setCommissions(function(prev){return prev.map(function(x){return x.id===c.id?done:x;});});
@@ -11811,7 +11742,7 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
             footer={<div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
               <Btn variant="ghost" onClick={function(){setEarlyTarget(null);setEarlyReason("");}}>Cancel</Btn>
               <Btn variant="success" disabled={!earlyReason.trim()||earlySaving} onClick={confirmEarlyRelease}>
-                {earlySaving?"Releasing…":"✓ Release Now"}
+                {earlySaving?"Saving…":"✓ Mark paid"}
               </Btn>
             </div>}>
             <div style={{padding:"12px 14px",background:C.bg,border:"1px solid "+C.border,borderRadius:8,marginBottom:14}}>
@@ -11876,8 +11807,13 @@ function CampaignsTab({campaigns,setCampaigns,customers,reps,addToast}){
   }
   function send(camp, testOnly){
     var cfg=(typeof getEmailCfg==="function")?getEmailCfg():null;
+    if(testOnly){
+      if(!cfg || !cfg.edgeFnUrl){ addToast&&addToast("Email function URL missing — set it in Settings → Email","warning"); return; }
+      if(!cfg.fromEmail){ addToast&&addToast("No From address set — add it in Settings → Email","warning"); return; }
+    }
     var recips = testOnly ? [{name:"Test", email:(cfg&&cfg.fromEmail)||""}] : recipientsFor(camp.id);
     if(!recips.length){ addToast&&addToast(testOnly?"Set a From address in Settings → Email first":"No recipients for this audience","warning"); return; }
+    if(testOnly) addToast&&addToast("Sending test to "+recips[0].email+"…","info");
     if(!testOnly && !window.confirm("Send \""+(camp.name||"campaign")+"\" to "+recips.length+" recipient(s)?")) return;
     setProgress({sent:0,failed:0,total:recips.length});
     sendCampaignBatch(camp, recips, {name:company(),email:(cfg&&cfg.fromEmail)}, {siteUrl:(typeof getSiteUrl==="function"?getSiteUrl():"")}, function(p){
@@ -12132,10 +12068,6 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
               onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{edgeFnUrl:v});});}}
               placeholder="https://xxx.supabase.co/functions/v1/stripe-charge"
               hint="One URL handles both modes — the active mode is sent in each request."/>
-            <Field label="Connect Edge Function URL" value={(stripeAccountA&&stripeAccountA.connectFnUrl)||""}
-              onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{connectFnUrl:v});});}}
-              placeholder="https://xxx.supabase.co/functions/v1/stripe-connect"
-              hint="Onboards reps and sends commission payouts — deploy stripe-connect function first"/>
             <Field label="Platform Fee %" value={String((stripeAccountA&&stripeAccountA.platformFee)||"0")}
               onChange={function(v){onSaveStripeAccountA(function(p){return Object.assign({},p,{platformFee:parseFloat(v)||0});});}}
               type="number" placeholder="0" hint="Optional: % withheld from each payout (0 = no fee)"/>
@@ -12152,7 +12084,6 @@ function AdminSettings({supabaseCfg,onSaveSupabase,emailCfg,onSaveEmail,discount
                   {hasKey
                     ? "✓ "+(mode==="test"?"TEST":"LIVE")+" mode active — customer payments ready"
                     : "⚠ "+(mode==="test"?"TEST":"LIVE")+" mode active but no "+(mode==="test"?"test":"live")+" publishable key set above"}
-                  {stripeAccountA.connectFnUrl&&hasKey&&" · ✓ Rep payouts ready"}
                 </div>
               );
             })()}
@@ -13849,9 +13780,11 @@ function getPlatformFeePct(){
 function netAfterFee(gross){ var f=getPlatformFeePct(); return f>0 ? gross*(1-f/100) : gross; }
 function payoutNet(cp){
   if(!cp) return 0;
-  if(cp.transferAmount != null) return cp.transferAmount;   // actual $ Stripe transferred — authoritative
+  if(cp.transferAmount != null) return cp.transferAmount;   // actual $ transferred — authoritative
   if(cp.netAmount != null) return cp.netAmount;             // net locked at payout time
   var gross = (cp.amount != null ? cp.amount : cp.grossAmount) || 0;
+  // Stripe Connect removed: manual payouts (no transfer id) settle at GROSS — no fee deduction.
+  if(!cp.stripeTransferId) return gross;
   if(cp.feePct != null) return Math.round(gross*(1-cp.feePct/100)*100)/100;
   return netAfterFee(gross);
 }
@@ -15584,7 +15517,7 @@ function RepDashboard({repId,repName,orders,customers,commissions,onNav,addToast
 
       {/* ── Stripe Connect banner ── */}
       {(function(){
-        var connectFn = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").connectFnUrl||"";}catch(e){return "";}})();
+        var connectFn = ""; /* Stripe Connect removed — always record manually */
         var repData2 = reps&&reps.find(function(r){return r.id===repId||r.userId===repId;});
         var hasConnect = repData2&&repData2.stripeConnectId;
         if(!connectFn) return null;
@@ -17569,7 +17502,7 @@ function sendCampaignBatch(campaign, recipients, sender, opts, onProgress){
   var addr = (function(){try{return JSON.parse(localStorage.getItem("__pv__invoiceCfg")||"{}").address||"";}catch(e){return "";}})();
   var senderName = (sender&&sender.name)||company;
   var list = (recipients||[]).filter(function(r){return r&&r.email&&/.+@.+\..+/.test(r.email);});
-  var sent=0, failed=0, i=0;
+  var sent=0, failed=0, i=0, lastErr=null;
   function footer(){
     return "<div style='margin-top:24px;padding:14px 20px 16px;border-top:1px solid #e5e9f0;font-size:11px;color:#8a94a6;line-height:1.6'>"
       +"You're receiving this email from "+senderName+(senderName!==company?(" · "+company):"")+"."
@@ -17585,7 +17518,7 @@ function sendCampaignBatch(campaign, recipients, sender, opts, onProgress){
       .replace(/\{\{\s*company\s*\}\}/gi, company);
   }
   function next(){
-    if(i>=list.length){ if(onProgress) onProgress({done:true,sent:sent,failed:failed,total:list.length}); return; }
+    if(i>=list.length){ if(onProgress) onProgress({done:true,sent:sent,failed:failed,total:list.length,error:(failed&&!sent)?lastErr:null}); return; }
     var r=list[i++];
     var body = personalize(campaign.html, r) + footer();
     var full = opts.raw ? body : campaignWrapHtml(body);
@@ -17595,10 +17528,10 @@ function sendCampaignBatch(campaign, recipients, sender, opts, onProgress){
         to:r.email,toEmail:r.email,replyTo:(sender&&sender.email)||cfg.fromEmail,
         subject:subj,body:full,message:full,html:full,isHtml:true})
     }).then(function(res){return res.json();}).then(function(d){
-      if(d&&(d.ok||d.success||d.id||d.messageId)) sent++; else failed++;
-      if(onProgress) onProgress({sent:sent,failed:failed,total:list.length});
+      if(d&&(d.ok||d.success||d.id||d.messageId)) sent++; else { failed++; lastErr=(d&&(d.error||d.message))||"send rejected"; }
+      if(onProgress) onProgress({sent:sent,failed:failed,total:list.length,error:failed?lastErr:null});
       setTimeout(next,300);
-    }).catch(function(){ failed++; if(onProgress) onProgress({sent:sent,failed:failed,total:list.length}); setTimeout(next,300); });
+    }).catch(function(e){ failed++; lastErr=(e&&e.message)||"network error"; if(onProgress) onProgress({sent:sent,failed:failed,total:list.length,error:lastErr}); setTimeout(next,300); });
   }
   if(onProgress) onProgress({sent:0,failed:0,total:list.length});
   next();
@@ -21574,7 +21507,18 @@ function App() {
       if(d.campaigns && Array.isArray(d.campaigns)) setCampaigns(d.campaigns);
       if(d.discountCodes && Array.isArray(d.discountCodes)) setDiscountCodes(d.discountCodes);
       if(d.stripePublishableKey||d.stripeChargeFnUrl||d.stripeConnectFnUrl||d.platformFee!=null) setStripeAccountA(function(prev){var p=prev||{}; var localFee=(p.platformFee==null||p.platformFee===""||Number(p.platformFee)===0); return Object.assign({},p,{publishableKey:p.publishableKey||d.stripePublishableKey||"",edgeFnUrl:p.edgeFnUrl||d.stripeChargeFnUrl||"",connectFnUrl:p.connectFnUrl||d.stripeConnectFnUrl||"",platformFee:(localFee&&d.platformFee!=null)?d.platformFee:p.platformFee});});
-      if(d.emailFnUrl) setEmailCfg(function(prev){var p=prev||{}; return Object.assign({},p,{edgeFnUrl:p.edgeFnUrl||d.emailFnUrl||"",fromName:p.fromName||d.emailFromName||"",fromEmail:p.fromEmail||d.emailFromEmail||""});});
+      if(d.emailFnUrl || d.emailFromEmail || d.emailFromName) setEmailCfg(function(prev){
+        var p=prev||{};
+        // Merge per-field: a blank local value must NOT block the shared/remote value,
+        // otherwise a device with empty defaults never learns the From address and
+        // "Send Test to Me" has no recipient.
+        function pick(local, remote){ return (local!=null && String(local).trim()!=="") ? local : (remote||""); }
+        return Object.assign({},p,{
+          edgeFnUrl: pick(p.edgeFnUrl, d.emailFnUrl),
+          fromName:  pick(p.fromName,  d.emailFromName),
+          fromEmail: pick(p.fromEmail, d.emailFromEmail)
+        });
+      });
       if(d.googleApiKey) setGoogleCfg(function(prev){var p=prev||{}; return p.apiKey?p:Object.assign({},p,{apiKey:d.googleApiKey,enabled:d.googleEnabled!==false});});
       if(d.shipping && d.shipping.ratesFnUrl) setShipStationCfg(function(prev){var p=prev||{}; return Object.assign({},d.shipping,{apiKey:p.apiKey||"",apiSecret:p.apiSecret||"",storeUser:p.storeUser||"",storePass:p.storePass||""});});
       if(Array.isArray(d.shippingRules)) setShippingRules(d.shippingRules);
