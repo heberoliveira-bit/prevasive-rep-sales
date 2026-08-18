@@ -8045,7 +8045,11 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
   var repOrds   = orders.filter(function(o){return o.repId===rep.id;});
   var repComms  = (commissions||[]).filter(function(cp){return cp.repId===rep.id;});
   var repSigs   = (signatures||[]).filter(function(s){return s.repId===rep.id;});
-  var activeDocs = (legalDocs||[]).filter(function(d){return d.active;});
+  var activeDocs = (legalDocs||[]).filter(function(d){
+    if(!(d.active && d.requiresResign)) return false;
+    if(d.audience==="selected") return (d.repIds||[]).indexOf(rep.id)>=0;
+    return true;
+  });
   var plan      = REP_PLANS.find(function(p){return p.id===rep.planId;})||REP_PLANS[0];
   var now2      = Date.now();
 
@@ -8608,7 +8612,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                 {[
                   ["Terms of Service", !!rep.termsAcceptedAt, rep.termsAcceptedAt?fmtDate(rep.termsAcceptedAt):"Not accepted"],
                   ["Rep Agreement",    !!rep.agreementSignedAt, rep.agreementSignedAt?(fmtDate(rep.agreementSignedAt)+(rep.agreementSignerName?" · signed by "+rep.agreementSignerName:"")):"Not signed"],
-                  ["W-9 Verified",     rep.w9ReviewStatus==="approved", rep.w9ReviewStatus==="approved"?fmtDate(rep.w9ApprovedAt):"Not verified"],
+                  ["W-9 Verified",     rep.w9Exempt || rep.w9ReviewStatus==="approved", rep.w9Exempt?"Exempt":(rep.w9ReviewStatus==="approved"?fmtDate(rep.w9ApprovedAt):"Not verified")],
                 ].map(function(item,i){return (
                   <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                                        padding:"10px 14px",borderBottom:"1px solid "+C.border}}>
@@ -8620,7 +8624,8 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                   </div>
                 );})}
                 {activeDocs.map(function(doc){
-                  var sig=repSigs.find(function(s){return s.docId===doc.id&&s.version===doc.version;});
+                  var sig=repSigs.find(function(s){return s.docId===doc.id&&(s.version===doc.version||s.docVersion===doc.version);});
+                  var anySig=repSigs.find(function(s){return s.docId===doc.id;});
                   return (
                     <div key={doc.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                                               padding:"10px 14px",borderBottom:"1px solid "+C.border}}>
@@ -8632,7 +8637,7 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                         </div>
                       </div>
                       <span style={{fontSize:11,color:sig?C.success:C.danger,fontWeight:600}}>
-                        {sig?fmtDate(sig.signedAt):"Not signed"}
+                        {sig?fmtDate(sig.signedAt):(anySig?("Needs re-sign (has v"+(anySig.version||anySig.docVersion||"?")+")"):"Not signed")}
                       </span>
                     </div>
                   );
@@ -17024,7 +17029,11 @@ function RepProfile({user,repData,setReps,commissions,addToast,legalDocs,signatu
                  signed: repData&&repData.agreementSignedAt ? ("Signed "+fmtDate(repData.agreementSignedAt)+(repData.agreementSignerName?" by "+repData.agreementSignerName:"")+(repData.agreementVersion?" · v"+repData.agreementVersion:"")) : null,
                  sections: REP_AGREEMENT_CLAUSES.map(function(c){return {h:c.title, body:[c.text]};})}
               ];
-              (legalDocs||[]).filter(function(d){return d.active||d.published;}).forEach(function(d){
+              (legalDocs||[]).filter(function(d){
+                if(!d.active) return false;
+                if(d.audience==="selected") return (d.repIds||[]).indexOf(myId)>=0;
+                return true;
+              }).forEach(function(d){
                 var isSigned=(signatures||[]).some(function(s){return s.docId===d.id&&s.repId===myId&&(s.version===d.version);});
                 docs.push({key:d.id, name:d.title||"Document", version:d.version,
                   signed:isSigned?("Signed · v"+d.version):null,
@@ -18956,16 +18965,20 @@ function RepSetupChecklist({myRepData,setReps,legalDocs,unsignedDocs,signatures,
       }
     });
   }
-  var w9State = myRepData.w9ReviewStatus==="approved"?"done":(myRepData.w9Status==="received"?"pending":"todo");
+  var w9State = myRepData.w9Exempt ? "done" : (myRepData.w9ReviewStatus==="approved"?"done":(myRepData.w9Status==="received"?"pending":"todo"));
   var steps=[
     {key:"terms",     label:"Accept Terms of Service", done:!!myRepData.termsAcceptedAt,  open:function(){setModal("terms");},     btn:"Review & Accept"},
     {key:"agreement", label:"Sign Rep Agreement",      done:!!myRepData.agreementSignedAt,open:function(){setModal("agreement");}, btn:"Review & Sign"},
   ];
-  (legalDocs||[]).filter(function(d){return d.active;}).forEach(function(d){
+  (legalDocs||[]).filter(function(d){
+    if(!(d.active && d.requiresResign)) return false;
+    if(d.audience==="selected") return (d.repIds||[]).indexOf(rid)>=0;
+    return true;
+  }).forEach(function(d){
     var signed=(signatures||[]).some(function(s){return s.docId===d.id&&s.repId===rid&&s.version===d.version;});
     steps.push({key:d.id,label:"Sign: "+(d.title||"Document"),done:signed,open:function(){setModal(d.id);},btn:"Review & Sign"});
   });
-  steps.push({key:"w9",label:"Submit W-9 (tax information)",done:w9State==="done",pending:w9State==="pending",open:function(){setModal("w9");},btn:"Submit W-9"});
+  if(!myRepData.w9Exempt) steps.push({key:"w9",label:"Submit W-9 (tax information)",done:w9State==="done",pending:w9State==="pending",open:function(){setModal("w9");},btn:"Submit W-9"});
   var allDone=steps.every(function(s){return s.done;});
   var doc=(legalDocs||[]).find(function(d){return d.id===modal;});
   return (
@@ -22252,7 +22265,7 @@ function App() {
 
   // Onboarding is now a checklist that gates ONLY order creation (see RepSetupChecklist),
   // so reps can log in and look around. W-9 must be admin-approved to count as complete.
-  var w9Approved = !!(myRepData && myRepData.w9ReviewStatus==="approved");
+  var w9Approved = !!(myRepData && (myRepData.w9ReviewStatus==="approved" || myRepData.w9Exempt));
   // Distinguish "still onboarding" (needs the checklist screen) from "already onboarded but
   // legal docs got updated" (needs the blocking re-sign wall modal).
   var coreOnboarded = !!(myRepData && myRepData.termsAcceptedAt && myRepData.agreementSignedAt && w9Approved);
