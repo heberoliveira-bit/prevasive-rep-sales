@@ -4850,8 +4850,9 @@ function ReturnModal({order,currentUser,onProcess,onClose,mode}) {
 }
 
 
-function CustomerProfile({customer,orders,onEdit,onClose}) {
+function CustomerProfile({customer,orders,onEdit,onClose,onChangeTerms}) {
   const [tab, setTab] = useState("overview");
+  const [termSel, setTermSel] = useState(customer.termsType||"net_30");
   var custOrds = orders.filter(function(o){return o.custId===customer.id;});
   var totalSpend = custOrds.reduce(function(s,o){return s+(o.totals&&o.totals.grand||0);},0);
   var TABS = [{id:"overview",l:"Overview"},{id:"orders",l:"Orders ("+custOrds.length+")"},{id:"addresses",l:"Addresses"}];
@@ -4937,6 +4938,28 @@ function CustomerProfile({customer,orders,onEdit,onClose}) {
                 {customer.termsStatus!=="active"&&(
                   <div style={{fontSize:11,color:C.muted,marginTop:4}}>
                     {customer.termsStatus==="awaiting_signature"?"Agreement sent — awaiting signature.":"Under admin review."}
+                  </div>
+                )}
+                {onChangeTerms&&(
+                  <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid "+C.border}}>
+                    <div style={{fontSize:10,fontWeight:700,color:C.muted,textTransform:"uppercase",letterSpacing:".06em",marginBottom:6}}>Change payment terms (admin)</div>
+                    <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+                      <select value={termSel} onChange={function(e){setTermSel(e.target.value);}}
+                        style={{flex:1,minWidth:150,background:C.bg,border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px",color:C.text,fontSize:12}}>
+                        <option value="due_receipt">Due on Receipt (no credit)</option>
+                        <option value="net_15">Net 15</option>
+                        <option value="net_30">Net 30</option>
+                        <option value="net_45">Net 45</option>
+                        <option value="net_60">Net 60</option>
+                        <option value="net_90">Net 90</option>
+                      </select>
+                      <Btn small onClick={function(){onChangeTerms(termSel);}}>Apply</Btn>
+                    </div>
+                    <div style={{fontSize:10,color:C.dim,marginTop:5,lineHeight:1.5}}>
+                      {termSel==="due_receipt"
+                        ? "Removes credit terms — customer pays at order time."
+                        : "Sets "+fmtTerms(termSel)+" credit terms directly (admin override — skips the request/agreement flow)."}
+                    </div>
                   </div>
                 )}
               </div>
@@ -10542,6 +10565,16 @@ function AdminCustomers({customers,setCustomers,reps,orders,addToast,currentUser
       {viewCust&&(
         <CustomerProfile customer={viewCust} orders={orders}
           onEdit={function(cust){setViewCust(null);setEditCustModal2(cust);}}
+          onChangeTerms={(currentUser&&currentUser.role==="admin") ? function(newType){
+            var isDue = newType==="due_receipt";
+            var updated = Object.assign({}, viewCust, isDue
+              ? {termsType:"due_receipt", termsStatus:"revoked", termsRevokedAt:new Date().toISOString()}
+              : {termsType:newType, termsStatus:"active", termsApprovedAt:new Date().toISOString(), termsLimit:(viewCust.termsLimit||0)});
+            setCustomers(function(prev){return prev.map(function(x){return x.id===viewCust.id?updated:x;});});
+            dbSave("crm_customers", viewCust.id, updated);
+            setViewCust(updated);
+            addToast(isDue?"Credit terms revoked — customer now pays Due on Receipt":("Payment terms set to "+fmtTerms(newType)),"success");
+          } : null}
           onClose={function(){setViewCust(null);}}/>
       )}
       {editCustModal2&&(
