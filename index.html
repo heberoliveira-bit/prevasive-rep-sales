@@ -7136,7 +7136,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
     var isFreightConv = quote.shippingType==="freight" || isOrderFreight(quote.items||[], products, qCust, quote.total||0);
     var ship = isFreightConv ? 0 : (quote.shipping||0);
     var subtotal = Math.round(base*(1+commR/100)*100)/100;
-    var ti = qCust.zip ? getGaTaxRate(qCust.zip) : null;
+    var _convPickup = quote.fulfillment==="pickup" || quote.shippingType==="pickup" || !!quote.pickup;
+    var _convTaxZip = _convPickup ? getPickupZip() : qCust.zip;
+    var ti = _convTaxZip ? getGaTaxRate(_convTaxZip) : null;
     var taxRate = ti ? ti.rate : 0;
     // v89: tax-exempt customers (verified + non-expired + matching ship state) get state tax zeroed
     var convShipState = ((qCust.shippingState || qCust.state || "")).toUpperCase();
@@ -9492,7 +9494,13 @@ function OrderAddressesEditor({order, onSave, addToast}){
 
   if(!editing){
     var taxNote = "";
-    if(ship.zip){
+    var _isPickup = order && (order.pickup || order.fulfillment==="pickup" || order.shippingType==="pickup");
+    if(_isPickup){
+      var pz = (typeof getPickupZip==="function") ? getPickupZip() : "";
+      var pr = pz && getGaTaxRate(pz);
+      taxNote = pr ? ("🏬 Pickup at warehouse — taxed at pickup location ("+(pr.county||"GA")+" · "+((pr.rate||0)*100).toFixed(2)+"%)")
+                   : "🏬 Pickup at warehouse — taxed at pickup location";
+    } else if(ship.zip){
       taxNote = gaCheck(ship.zip)
         ? "🏷 Georgia shipping address — sales tax applies"
         : "🏷 Outside Georgia — no sales tax";
@@ -13779,6 +13787,19 @@ function getPickupCfg(){
   try{ var c=JSON.parse(localStorage.getItem("__pv__pickupCfg")||"{}"); return {address:c.address||D.address, hours:c.hours||D.hours, note:c.note||""}; }
   catch(e){ return D; }
 }
+function getPickupZip(){
+  // Pickup = customer takes possession at the warehouse, so GA sales tax sources to the
+  // pickup location, not the customer's ship-to address. ZIP comes from the pickup address
+  // (Settings → Pickup), falling back to the ShipStation warehouse ZIP.
+  try{
+    var a = getPickupCfg().address || "";
+    var m = a.match(/\b(3[0-1]\d{3})\b/);
+    if(m) return m[1];
+    var ss = JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"{}");
+    if(ss.warehouseZip) return String(ss.warehouseZip).replace(/\D/g,"").slice(0,5);
+  }catch(e){}
+  return "";
+}
 function getPlatformFeePct(){
   try{ return parseFloat(JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").platformFee)||0; }catch(e){ return 0; }
 }
@@ -14056,7 +14077,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       if(selCust.addresses&&selCust.addresses.length>0){var pa=selCust.addresses.find(function(a){return a.isPrimary;})||selCust.addresses[0]; return pa.zip||"";}
       return selCust.zip||"";
     })();
-    var taxInfo  = shipZip ? getGaTaxRate(shipZip) : null;
+    var _taxZip  = pickup ? getPickupZip() : shipZip;
+    var taxInfo  = _taxZip ? getGaTaxRate(_taxZip) : null;
     var taxRate  = taxInfo ? taxInfo.rate : 0;
     // v84: Tax-exempt customers (verified GATE / resale / etc.) get state tax zeroed.
     // Ship-to state derived from selCust addresses; for newCust we use the form's state field.
@@ -19858,7 +19880,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   var commission = Math.round(baseSubtotal * commRate) / 100;
   var subtotal = Math.round((baseSubtotal + commission)*100)/100;
   // Sales tax only applies to deliveries inside Georgia. getGaTaxRate returns null for non-GA ZIPs.
-  var taxInfo = (shipAddr && shipAddr.zip) ? getGaTaxRate(shipAddr.zip) : null;
+  var _mTaxZip = pickup ? getPickupZip() : (shipAddr && shipAddr.zip ? shipAddr.zip : "");
+  var taxInfo = _mTaxZip ? getGaTaxRate(_mTaxZip) : null;
   var taxRate = taxInfo ? taxInfo.rate : 0;
   // v89: Tax-exempt customers (verified GATE / resale / etc. matching ship state) get state tax zeroed
   var mobShipState = (shipAddr && shipAddr.state) ? shipAddr.state.toUpperCase() : "";
