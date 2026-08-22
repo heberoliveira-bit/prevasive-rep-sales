@@ -6947,7 +6947,9 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   const [items,     setItems]     = useState([{prodId:"",qty:1}]);
   const [notes,     setNotes]     = useState("");
   const [validDays, setValidDays] = useState("30");
+  var qNoComm = (function(){ var r=(reps||[]).find(function(x){return x.id===(currentUser&&(currentUser.rep_id||currentUser.id));}); return !!(r&&r.noCommission); })();
   const [commRate,  setCommRate]  = useState(function(){
+    if(qNoComm) return 0;
     // v88: initialize from rep's default commission rate
     var rep = (reps||[]).find(function(r){return r.id===(currentUser&&(currentUser.rep_id||currentUser.id));});
     if(rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") return rateOr(rep.defaultCommissionRate,10);
@@ -6959,6 +6961,7 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
   // the rate originally chosen.
   useEffect(function(){
     if(editingQuoteId) return;
+    if(qNoComm){ setCommRate(0); return; }
     var rep = (reps||[]).find(function(r){return r.id===(currentUser&&(currentUser.rep_id||currentUser.id));});
     var repDefault = (rep && rep.defaultCommissionRate!=null && rep.defaultCommissionRate!=="") ? rateOr(rep.defaultCommissionRate,10) : 10;
     if(custId){
@@ -7624,10 +7627,14 @@ function QuotesModule({quotes,setQuotes,products,customers,reps,orders,setOrders
                       return null;
                     })()}
                   </div>
+                  {qNoComm ? (
+                    <div style={{fontSize:11,color:C.dim,background:C.surface2,border:"1px solid "+C.border,borderRadius:8,padding:"8px 10px",marginTop:8}}>🔒 Commission disabled for this rep — quote uses base price.</div>
+                  ) : (<>
                   <input type="range" min="0" max="150" step="0.5" value={commRate}
                     onChange={function(e){setCommRate(e.target.value);}}
                     style={{width:"100%",accentColor:C.accent,marginTop:8}}/>
                   <div style={{fontSize:12,fontWeight:700,color:C.gold,textAlign:"right"}}>{commRate}% = {fmtMoney(calcTotal()*(commRate/100))}</div>
+                  </>)}
                 </div>
               </div>
               <TextArea label="Notes" value={notes} onChange={setNotes} rows={3} placeholder="Quote terms, delivery timeline…"/>
@@ -8347,6 +8354,23 @@ function RepDrawer({rep,orders,commissions,legalDocs,signatures,reps,setReps,
                           style={{width:"60px",border:"1px solid "+C.border,borderRadius:6,padding:"5px 8px",background:C.surface,color:C.text,fontFamily:"inherit",fontSize:12,textAlign:"center"}}/>
                         <span style={{fontSize:12,color:C.muted,fontWeight:700}}>{rep.maxCommissionRate!=null?rep.maxCommissionRate:150}% cap</span>
                       </div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,padding:"8px 10px",background:rep.noCommission?C.warning+"12":"transparent",borderRadius:8}}>
+                    <div style={{position:"relative",width:36,height:20,borderRadius:10,cursor:"pointer",transition:"background .2s",flexShrink:0,
+                        background:rep.noCommission?C.border:C.accent}}
+                      onClick={function(){
+                        var block=!rep.noCommission;
+                        var upd=Object.assign({},rep,{noCommission:block});
+                        setReps(function(prev){return prev.map(function(r){return r.id===rep.id?upd:r;});});
+                        dbSave("crm_reps",rep.id,upd);
+                        addToast(block?(rep.name+" can no longer add commission — their orders bill at base price"):(rep.name+" can add commission again"),"info");
+                      }}>
+                      <div style={{position:"absolute",top:2,left:rep.noCommission?2:18,width:16,height:16,borderRadius:"50%",background:"#fff",transition:"left .2s"}}/>
+                    </div>
+                    <div>
+                      <div style={{fontSize:12,fontWeight:600,color:C.text}}>Can add commission</div>
+                      <div style={{fontSize:10,color:C.dim}}>{rep.noCommission?"Off — orders bill at base price (0% markup), no commission accrues":"On — rep earns the commission markup"}</div>
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -13937,7 +13961,9 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   const [editForm,   setEditForm]   = useState({address:"",city:"",state:"",zip:""});
   const [items,      setItems]      = useState((editOrder&&editOrder.items)||[{prodId:"",qty:1}]);
   const [payMethod,  setPayMethod]  = useState((editOrder&&editOrder.payMethod)||"due_receipt");
+  var noComm = !!(repData && repData.noCommission);
   var initCommRate = (function(){
+    if(noComm) return 0;
     if(editOrder&&editOrder.commissionRate!=null) return editOrder.commissionRate;
     if(custId) {
       var custObj=(customers||[]).find(function(x){return x.id===custId;})||{};
@@ -13950,6 +13976,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
   // customer override → rep's defaultCommissionRate → fallback. Skip for edits (preserve stored rate).
   useEffect(function(){
     if(editOrder) return;
+    if(noComm){ setCommRate(0); return; } // rep not permitted to add commission — locked at 0
     var custObj = custId ? (customers||[]).find(function(x){return x.id===custId;}) : null;
     if(custObj && custObj.commissionRate!=null && custObj.commissionRate!=="") {
       setCommRate(parseFloat(custObj.commissionRate)||0);
@@ -14933,6 +14960,11 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
 
               <div style={{marginBottom:16}}>
                 <div style={{fontSize:11,fontWeight:600,color:C.muted,marginBottom:5}}>Commission Rate</div>
+                {noComm ? (
+                  <div style={{fontSize:12,color:C.dim,background:C.surface2,border:"1px solid "+C.border,borderRadius:8,padding:"9px 12px"}}>
+                    🔒 Commission is disabled for this rep — customer pays base price (0% markup).
+                  </div>
+                ) : (
                 <div style={{display:"flex",alignItems:"center",gap:12}}>
                   <input type="range" min="0" max={maxCommRate||150} step="0.5" value={commRate}
                     onChange={function(e){setCommRate(e.target.value);}} style={{flex:1,accentColor:C.accent}}/>
@@ -14940,7 +14972,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                     {commRate}% = {fmtMoney(totals.commission)}
                   </span>
                 </div>
-                {(function(){
+                )}
+                {!noComm && (function(){
                   var cust = custId?(customers||[]).find(function(x){return x.id===custId;}):null;
                   var custR = (cust && cust.commissionRate!=null && cust.commissionRate!=="") ? parseFloat(cust.commissionRate) : null;
                   var repR  = (repData && repData.defaultCommissionRate!=null && repData.defaultCommissionRate!=="") ? parseFloat(repData.defaultCommissionRate) : null;
@@ -19780,7 +19813,8 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [productId, setProductId] = useState("");
   const [variantId, setVariantId] = useState("");
   const [qty, setQty] = useState(1);
-  const [commRate, setCommRate] = useState(rateOr(repData&&repData.defaultCommissionRate,10));
+  const [commRate, setCommRate] = useState((repData&&repData.noCommission)?0:rateOr(repData&&repData.defaultCommissionRate,10));
+  var mNoComm = !!(repData && repData.noCommission);
   const [payMethod, setPayMethod] = useState("card");
   const [selectedRate, setSelectedRate] = useState(null);
   const [placing, setPlacing] = useState(false);
@@ -19802,6 +19836,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
   const [pickup, setPickup] = useState(false);
 
   useEffect(function(){
+    if(mNoComm){ setCommRate(0); return; }
     if(!custId){
       if(repData&&repData.defaultCommissionRate!=null) setCommRate(repData.defaultCommissionRate);
       return;
@@ -22428,7 +22463,8 @@ function App() {
     {id:"settings",   name:"Settings",    icon:"⚙️"},
   ];
 
-  var modules = isAdmin ? adminModules : (isAccount ? accountModules : repModules);
+  var _repMods = (myRepData && myRepData.noCommission) ? repModules.filter(function(m){return m.id!=="commissions";}) : repModules;
+  var modules = isAdmin ? adminModules : (isAccount ? accountModules : _repMods);
 
   return (
     <div style={{display:"flex",minHeight:"100vh",background:C.bg,color:C.text,
