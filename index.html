@@ -74,6 +74,8 @@ function commissionHoldDays(order){
    We do NOT require deliveredAt — that's a stricter-than-contract gate we removed. */
 function commissionStateFor(order, paidComms){
   if(!order) return "no-commission";
+  // Unpaid Due-on-Receipt invoice — not a real order yet, so no commission accrues until paid.
+  if(order.unpaidInvoice && !order.paidAt) return "draft";
   var commAmount = (order.totals && order.totals.commission) || order.commission || 0;
   if(!commAmount) return "no-commission";
   if(order.status==="Cancelled" || order.status==="Refunded" || order.status==="Returned") return "forfeited";
@@ -9635,6 +9637,9 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
   const [collectTarget2,  setCollectTarget2]  = useState(null);
 
   var filtered = orders.filter(function(o){
+    var isDraftInvoice = o.unpaidInvoice && !o.paidAt;
+    // Unpaid Due-on-Receipt invoices aren't placed orders yet — hide unless explicitly filtered.
+    if(isDraftInvoice && filter!=="Awaiting Payment") return false;
     if(filter!=="all" && o.status!==filter) return false;
     if(search) {
       var s = search.toLowerCase();
@@ -14391,7 +14396,8 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       dorPath:payMethod==="due_receipt"?dorPath:null,
       notes:notes,
       poNumber:poNumber, poFilePath:poFilePath, poFileName:poFileName,
-      status: isEdit ? (editOrder.status||"Submitted") : (isFreight ? "Awaiting Freight Quote" : "Submitted"),
+      status: isEdit ? (editOrder.status||"Submitted") : (isFreight ? "Awaiting Freight Quote" : ((payMethod==="due_receipt"&&dorPath==="link") ? "Awaiting Payment" : "Submitted")),
+      unpaidInvoice: isEdit ? !!editOrder.unpaidInvoice : (payMethod==="due_receipt"&&dorPath==="link"),
       shippingType: pickup ? "pickup" : (isFreight ? "freight" : "parcel"),
       fulfillment: pickup ? "pickup" : "ship", pickup: !!pickup,
       packageCount: (selectedRate && selectedRate.packageCount) || 1,
@@ -14530,9 +14536,10 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
     }
 
     var isNetOrder = selCust&&selCust.termsStatus==="active"&&selCust.termsType&&selCust.termsType!=="due_receipt";
+    var _isDorLinkDraft = !isEdit && payMethod==="due_receipt" && dorPath==="link";
     setTimeout(function(){
       setPlacing(false);
-      addToast((isEdit?"Order updated":"Order placed")+" — "+id,"success");
+      addToast(_isDorLinkDraft ? ("Invoice sent to "+cname+" — the order is created once they pay") : ((isEdit?"Order updated":"Order placed")+" — "+id),"success");
       if(!isEdit && isNetOrder && sendInvAuto) {
         setPlacedOrder(order);
         setShowPostInv(true);
@@ -15531,7 +15538,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   var _btnIsFreight = _qualBtn && ((shippingChoice||(_lockBtn?"freight":"parcel"))==="freight");
                   if(_btnIsFreight) return "📨 Send for Estimate →";
                   if(dorPath==="card"&&cardMode==="online") return "💳 Charge & Place Order";
-                  if(dorPath==="link"&&sendOnPlace) return "✉ Send Invoice & Place Order →";
+                  if(dorPath==="link"&&sendOnPlace) return "✉ Send Invoice →";
                   return "Place Order";
                 })()}
               </Btn>
@@ -15913,7 +15920,11 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
     if(autoOpen) setShowForm(true);
   }, [autoOpen]);
   var myOrds = orders.filter(function(o){return _mine(o.repId);});
-  var filtered = myOrds.filter(function(o){return filter==="all"||o.status===filter;});
+  var filtered = myOrds.filter(function(o){
+    var isDraftInvoice = o.unpaidInvoice && !o.paidAt;
+    if(isDraftInvoice && filter!=="Awaiting Payment") return false;
+    return filter==="all"||o.status===filter;
+  });
 
   // Pending Your Action — freight orders where rep still has work, or is waiting on customer/admin
   var pendingAction = myOrds.filter(function(o){
