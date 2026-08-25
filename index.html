@@ -254,7 +254,7 @@ var STATUS_COLOR = {
 
 /* ─── Freight (LTL) Helpers ─────────────────────────────────────────────── */
 var DEFAULT_FREIGHT_CFG = {
-  thresholds: { weightLbs: 300, volumeCuFt: 10, dollarValue: 2500, maxParcelUnits: 0 },
+  thresholds: { weightLbs: 150, volumeCuFt: 10, dollarValue: 2500, maxParcelUnits: 0 },
   carriers: ["SAIA","Estes","R+L Carriers","ABF","XPO","Old Dominion","Other"],
   quoteExpiryHours: 24,
   showFreightTagInShipStation: true,
@@ -269,12 +269,12 @@ function getFreightCfg(){
       thresholds: Object.assign({}, DEFAULT_FREIGHT_CFG.thresholds, p.thresholds||{}),
       carriers: (p.carriers && p.carriers.length) ? p.carriers : DEFAULT_FREIGHT_CFG.carriers,
     });
-    // Migration: prior defaults were 150 then 500 lbs. Current default is 300.
-    // If the cached value matches one of those legacy defaults, normalize to 300.
-    // Anything else (a real custom value picked by an admin) is left alone.
+    // Migration: legacy defaults were 500 then 300 lbs. Current policy is 150 lbs — the
+    // UPS parcel per-package ceiling — so anything heavier routes to freight and no UPS
+    // order is ever heavy enough to split. Normalize old defaults down to 150.
     var migrated = false;
-    if(merged.thresholds.weightLbs === 150) { merged.thresholds.weightLbs = 300; migrated = true; }
-    if(merged.thresholds.weightLbs === 500) { merged.thresholds.weightLbs = 300; migrated = true; }
+    if(merged.thresholds.weightLbs === 300) { merged.thresholds.weightLbs = 150; migrated = true; }
+    if(merged.thresholds.weightLbs === 500) { merged.thresholds.weightLbs = 150; migrated = true; }
     if(merged.thresholds.maxParcelUnits === 5) { merged.thresholds.maxParcelUnits = 0; migrated = true; }
     if(migrated) {
       // Persist the migrated value so settings UI and other readers see it,
@@ -14169,6 +14169,13 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
       if(!hasAddr) return false;
     }
     if(!items.some(function(it){return it.prodId;})) return false;
+    // Every chosen product that has variants must have a variant selected
+    var _missingVar = items.some(function(it){
+      if(!it.prodId) return false;
+      var p=(products||[]).find(function(x){return x.id===it.prodId;});
+      return p && p.variants && p.variants.length>0 && !it.variantId;
+    });
+    if(_missingVar) return false;
     return true;
   }
   function step1Errors() {
@@ -14277,19 +14284,33 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
         var pmId = result.paymentMethod.id;
         var stripeEdge = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}})();
         if(!stripeEdge){setPlacing(false);setChargeErr("Stripe Edge Function URL not set — check Settings → Stripe");return;}
-        fetch(stripeEdge,{
-          method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({action:"charge",paymentMethodId:pmId,amount:Math.round((calcTotals().grand||0)*100),currency:"usd",
-            mode: getStripeMode(),
-            orderId:preId, repId:repId||"", custId:custId||"",
-            customerEmail:(selCust&&selCust.email)||custEmail||"",
-            description:"Order "+preId+" — "+(selCust?selCust.name:custName)}),
+        // The charge edge function verifies the order exists before charging, so we must
+        // persist the order FIRST (as a pending row), then charge, then finalize. If the
+        // charge fails we roll the pending row back so no phantom order is left behind.
+        var _t = calcTotals();
+        var pendingOrder = {
+          id:preId, repId:repId||"", repName:repName,
+          custId:custId||"", custName:(selCust&&selCust.name)||custName||"",
+          custEmail:(selCust&&selCust.email)||custEmail||"",
+          totals:_t, commissionRate:parseFloat(commRate)||0,
+          status:"Awaiting Payment", payMethod:payMethod, dorPath:dorPath,
+          _pendingCharge:true, createdAt:new Date().toISOString(), updatedAt:new Date().toISOString()
+        };
+        Promise.resolve(dbSave("crm_orders", preId, pendingOrder)).then(function(){
+          return fetch(stripeEdge,{
+            method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({action:"charge",paymentMethodId:pmId,amount:Math.round((_t.grand||0)*100),currency:"usd",
+              mode: getStripeMode(),
+              orderId:preId, repId:repId||"", custId:custId||"",
+              customerEmail:(selCust&&selCust.email)||custEmail||"",
+              description:"Order "+preId+" — "+(selCust?selCust.name:custName)}),
+          });
         }).then(function(r){return r.json();}).then(function(d){
-          if(!d.ok||d.error){setPlacing(false);setChargeErr(d.error||"Charge failed");return;}
+          if(!d.ok||d.error){ setPlacing(false); setChargeErr(d.error||"Charge failed"); try{ dbDel("crm_orders", preId); }catch(e){} return; }
           setCharged({id:d.paymentIntentId||pmId,last4:d.last4||"????",brand:d.brand||"Card"});
           setCardLast4(d.last4||"");
           doPlace(preId);
-        }).catch(function(e){setPlacing(false);setChargeErr("Could not reach payment server");});
+        }).catch(function(e){ setPlacing(false); setChargeErr("Could not reach payment server"); try{ dbDel("crm_orders", preId); }catch(e2){} });
       });
       return; // wait for async charge
     }
@@ -15487,7 +15508,7 @@ function OrderForm({repId,repName,products,customers,setCustomers,setOrders,
                   return;
                 }
                 setStep(step+1);}}
-              disabled={(step===1&&newCust)||(step===2&&!step2Valid())}>
+              disabled={(step===1&&(newCust||items.some(function(it){var p=(products||[]).find(function(x){return x.id===it.prodId;});return it.prodId&&p&&p.variants&&p.variants.length>0&&!it.variantId;})))||(step===2&&!step2Valid())}>
               Next →
             </Btn>
           ):(
@@ -20132,15 +20153,20 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
         var pmId = result.paymentMethod.id;
         var stripeEdge = (function(){try{return JSON.parse(localStorage.getItem("__pv__stripeAccountA")||"{}").edgeFnUrl||"";}catch(e){return "";}})();
         if(!stripeEdge){ setPlacing(false); setChargeErr("Stripe Edge Function URL not set in Settings."); return; }
-        return fetch(stripeEdge,{
+        // The charge edge-fn verifies the order exists first, so persist a pending order
+        // before charging, then finalize as Paid on success (roll back on failure).
+        var pendingOrderM = buildOrder({status:"Awaiting Payment", paid:false, _pendingCharge:true});
+        return Promise.resolve(dbSave("crm_orders", orderId, pendingOrderM)).then(function(){
+          return fetch(stripeEdge,{
           method:"POST", headers:{"Content-Type":"application/json"},
           body:JSON.stringify({action:"charge", paymentMethodId:pmId,
             amount:Math.round(total*100), currency:"usd",
             orderId:orderId, repId:repData.id, custId:cId,
             description:"Order "+orderId+" — "+((cRecord&&cRecord.name)||"")
           }),
+          });
         }).then(function(r){return r.json();}).then(function(d){
-          if(d.error){ setPlacing(false); setChargeErr(d.error); return; }
+          if(d.error){ setPlacing(false); setChargeErr(d.error); try{dbDel("crm_orders",orderId);}catch(e){} return; }
           var paidOrder = buildOrder({
             status:"Paid", paid:true,
             paidAt: new Date().toISOString(),
@@ -20154,7 +20180,7 @@ function MobileNewOrder({repData, customers, setCustomers, setOrders, products, 
           addToast(order.status==="Waiting Shipping"?"Order placed, charged, and sent to ShipStation!":"Order placed and charged!","success");
           onPlaced();
         });
-      }).catch(function(e){ setPlacing(false); setChargeErr("Could not reach payment server: "+((e&&e.message)||e)); });
+      }).catch(function(e){ setPlacing(false); setChargeErr("Could not reach payment server: "+((e&&e.message)||e)); try{dbDel("crm_orders",orderId);}catch(e2){} });
     } else if(payMethod==="invoice"){
       var payToken = genId("pay");
       var order = buildOrder({status:"Submitted", paid:false, payToken:payToken});
