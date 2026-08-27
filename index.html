@@ -22127,24 +22127,31 @@ function App() {
           // Mark order in Supabase as Paid, then auto-bump to Waiting Shipping if enabled
           var sb = getSB();
           var ord = payData2.order;
-          var orderId = ord && ord.id;
+          var orderId = (ord && ord.id) || (payData2 && payData2.orderId) || (result && result.orderId) || "";
           var custName = (payData2.customer && payData2.customer.name) || payData2.custName || "customer";
           var orderRepId = ord && ord.repId;
-          var amtStr = "$"+(((ord && ord.totals && ord.totals.grand) || 0)).toFixed(2);
-          if(sb && orderId) {
-            var paidOrder = Object.assign({},ord,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken});
+          var amtStr = "$"+(((ord && ord.totals && ord.totals.grand) || (payData2 && payData2.totals && payData2.totals.grand) || 0)).toFixed(2);
+          function _persistPaid(base){
+            var paidOrder = Object.assign({},base,{status:"Paid",paidAt:result.paidAt,payMethod:result.method,receiptToken:rToken,unpaidInvoice:false});
             var finalOrder = autoFulfillIfPaid(paidOrder, "Customer (online payment)");
-            sb.from("crm_orders").update({data:finalOrder,updated_at:new Date().toISOString()}).eq("id",orderId);
-            // Also update in-memory orders if admin is viewing
-            setOrders(function(prev){return prev.map(function(o){
-              return o.id===orderId ? Object.assign({},o,finalOrder) : o;
-            });});
-          } else {
-            setOrders(function(prev){return prev.map(function(o){
-              if(o.id!==orderId) return o;
-              var paid = Object.assign({},o,{status:"Paid",paidAt:result.paidAt,receiptToken:rToken});
-              return autoFulfillIfPaid(paid, "Customer (online payment)");
-            });});
+            sb.from("crm_orders").update({data:finalOrder,updated_at:new Date().toISOString()}).eq("id",orderId)
+              .then(function(r){ if(r&&r.error){ try{console.error("[pay] order paid-update failed:",r.error.message);}catch(_){}}});
+            setOrders(function(prev){return prev.map(function(o){ return o.id===orderId ? Object.assign({},o,finalOrder) : o; });});
+          }
+          if(sb && orderId) {
+            if(ord && ord.id){
+              _persistPaid(ord);
+            } else {
+              // Invoice-link / DOR token carries only orderId — fetch the live order first so we
+              // mark it paid (and promote any unpaid-invoice draft) without clobbering its data.
+              sb.from("crm_orders").select("data").eq("id",orderId).single()
+                .then(function(rr){
+                  var cur = rr && rr.data && rr.data.data;
+                  if(cur){ _persistPaid(cur); }
+                  else { try{console.error("[pay] order "+orderId+" not found to mark paid — reconcile manually");}catch(_){} }
+                })
+                .catch(function(){ try{console.error("[pay] could not load order "+orderId+" to mark paid — reconcile manually");}catch(_){} });
+            }
           }
           // v96c: notify the rep + admin so they actually know payment came in.
           // Without these the order quietly flips to Paid in the DB but nobody sees it.
