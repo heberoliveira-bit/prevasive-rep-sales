@@ -5489,7 +5489,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                     <Btn small variant="ghost" onClick={function(){
                       window.appConfirm("Cancel this freight order? The rep will be notified.", {okLabel:"Cancel order", danger:true}).then(function(ok){
                         if(!ok) return;
-                        var cancelled = Object.assign({},o,{status:"Cancelled",cancelledAt:new Date().toISOString()});
+                        var cancelled = Object.assign({},o,{status:"Cancelled",prevStatus:o.status,cancelledAt:new Date().toISOString()});
                         cancelled.auditLog = (o.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:"Cancelled by admin",detail:"Freight order — pre-quote"}]);
                         setOrders(function(prev){return prev.map(function(x){return x.id===o.id?cancelled:x;});});
                         dbSave("crm_orders",o.id,cancelled);
@@ -5826,7 +5826,7 @@ function AdminTasks({reps,setReps,applications,setApplications,termsRequests,set
                       </Btn>
                     )}
                     <Btn small variant="ghost" onClick={function(){
-                      var updated=addAuditEntry(Object.assign({},o,{status:"Cancelled",cancelledAt:new Date().toISOString()}),"Cancelled from Tasks","Admin");
+                      var updated=addAuditEntry(Object.assign({},o,{status:"Cancelled",prevStatus:o.status,cancelledAt:new Date().toISOString()}),"Cancelled from Tasks","Admin");
                       setOrders(function(prev){return prev.map(function(x){return x.id===o.id?updated:x;});});
                       dbSave("crm_orders",o.id,updated);
                       // v102p: customer email + rep + admin bells
@@ -16216,6 +16216,17 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                   var elig=(viewOrd.paidAt||["Shipped","Delivered","Paid"].indexOf(viewOrd.status)>=0)&&["Cancelled","Returned","Refunded"].indexOf(viewOrd.status)<0;
                   return elig?<Btn small variant="ghost" onClick={function(){setShowReturn(true);}}>↩ Request Refund</Btn>:null;
                 })()}
+                {currentUser && currentUser.role==="admin" && viewOrd.status==="Cancelled" && (
+                  <Btn small variant="success" onClick={function(){
+                    var restoredStatus = viewOrd.prevStatus || (viewOrd.deliveredAt?"Delivered":((viewOrd.trackingNum||viewOrd.shippedAt)?"Shipped":(viewOrd.paidAt?"Paid":"Submitted")));
+                    var restored = Object.assign({},viewOrd,{status:restoredStatus, cancelledAt:null});
+                    restored.auditLog = (viewOrd.auditLog||[]).concat([{ts:new Date().toISOString(),actor:(currentUser&&currentUser.name)||"Admin",action:"Restored from Cancelled",detail:"→ "+restoredStatus}]);
+                    setOrders(function(prev){return prev.map(function(o){return o.id===viewOrd.id?restored:o;});});
+                    dbSave("crm_orders",viewOrd.id,restored);
+                    setViewOrd(restored);
+                    addToast("Order restored → "+restoredStatus,"success");
+                  }}>↺ Restore Order</Btn>
+                )}
               </div>
             </div>
           </div>
