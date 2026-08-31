@@ -16216,7 +16216,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
                   var elig=(viewOrd.paidAt||["Shipped","Delivered","Paid"].indexOf(viewOrd.status)>=0)&&["Cancelled","Returned","Refunded"].indexOf(viewOrd.status)<0;
                   return elig?<Btn small variant="ghost" onClick={function(){setShowReturn(true);}}>↩ Request Refund</Btn>:null;
                 })()}
-                {currentUser && currentUser.role==="admin" && viewOrd.status==="Cancelled" && (
+                {currentUser && (currentUser.role==="admin" || currentUser._isImpersonated) && viewOrd.status==="Cancelled" && (
                   <Btn small variant="success" onClick={function(){
                     var restoredStatus = viewOrd.prevStatus || (viewOrd.deliveredAt?"Delivered":((viewOrd.trackingNum||viewOrd.shippedAt)?"Shipped":(viewOrd.paidAt?"Paid":"Submitted")));
                     var restored = Object.assign({},viewOrd,{status:restoredStatus, cancelledAt:null});
