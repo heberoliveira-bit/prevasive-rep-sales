@@ -5080,6 +5080,9 @@ function EnterFreightQuoteModal({order,currentUser,reps,onSave,onClose,addToast}
   const [transitDays,    setTransitDays]    = useState(existing.transitDays || "");
   const [internalNotes,  setInternalNotes]  = useState(existing.internalNotes || "");
   const [saving,         setSaving]         = useState(false);
+  const [ratesLoading,   setRatesLoading]   = useState(false);
+  const [freightRates,   setFreightRates]   = useState(null);
+  const [ratesErr,       setRatesErr]       = useState("");
 
   var fd = order.freightDetails || {};
   var acc = fd.accessorials || {};
@@ -5088,6 +5091,35 @@ function EnterFreightQuoteModal({order,currentUser,reps,onSave,onClose,addToast}
   }).filter(Boolean);
   var sa = order.shipAddress || {};
   var addrStr = [sa.address, [sa.city,sa.state].filter(Boolean).join(", "), sa.zip].filter(Boolean).join(", ");
+
+  // Pull live LTL rates from ShipStation (via the rate edge function) to fill the quote.
+  function fetchFreightRates(){
+    var ss={}; try{ ss=JSON.parse(localStorage.getItem("__pv__shipStationCfg")||"{}"); }catch(e){}
+    var rfn = ss.ratesFnUrl || ss.edgeFnUrl;
+    if(!rfn){ setRatesErr("ShipStation rate function URL isn't set (Settings → ShipStation)."); return; }
+    var fromZip = (typeof getPickupZip==="function" && getPickupZip()) || ss.warehouseZip || "";
+    var toZip = sa.zip || "";
+    if(!toZip){ setRatesErr("This order has no ship-to ZIP."); return; }
+    setRatesLoading(true); setRatesErr(""); setFreightRates(null);
+    fetch(rfn, { method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        action:"freightRates", mode:"freight",
+        fromZip:fromZip, toZip:toZip,
+        weightLbs: fd.totalWeight || 0,
+        pallets: fd.pallets || 1,
+        volumeCuFt: fd.totalVolume || 0,
+        freightClass: fd.freightClass || cfg.defaultFreightClass || "",
+        accessorials: fd.accessorials || {},
+        residential: !!(fd.accessorials && fd.accessorials.residential),
+        orderId: order.id
+      })
+    }).then(function(r){return r.json();}).then(function(d){
+      setRatesLoading(false);
+      var rates = (d && d.rates) || [];
+      if(!rates.length){ setRatesErr((d && d.error) || "No freight rates returned — your ShipStation rate function may not support freight yet."); return; }
+      setFreightRates(rates);
+    }).catch(function(e){ setRatesLoading(false); setRatesErr("Couldn't reach the rate function: "+((e&&e.message)||"network error")); });
+  }
 
   function save(){
     var cost = parseFloat(freightCost);
@@ -5141,6 +5173,35 @@ function EnterFreightQuoteModal({order,currentUser,reps,onSave,onClose,addToast}
         <div>{fd.pallets||"?"} pallet{(fd.pallets===1)?"":"s"} · {fd.totalWeight||0} lbs{fd.totalVolume?" · "+fd.totalVolume+" cu ft":""}</div>
         {accLabels.length>0 && <div>Accessorials: {accLabels.join(", ")}</div>}
         {fd.notesForCarrier && <div style={{marginTop:4,padding:"6px 10px",background:C.surface,borderRadius:6,fontStyle:"italic",color:C.text}}>"{fd.notesForCarrier}"</div>}
+      </div>
+
+      {/* ShipStation freight rates — one click fills carrier + cost */}
+      <div style={{marginBottom:14}}>
+        <Btn small variant="outline" onClick={fetchFreightRates} disabled={ratesLoading}>
+          {ratesLoading?"Fetching rates…":"🚚 Get ShipStation freight rates"}
+        </Btn>
+        {ratesErr && <div style={{fontSize:11,color:C.warning,marginTop:6,lineHeight:1.5}}>{ratesErr}</div>}
+        {freightRates && freightRates.length>0 && (
+          <div style={{marginTop:8,border:"1px solid "+C.border,borderRadius:8,overflow:"hidden"}}>
+            {freightRates.map(function(rt,i){
+              var cost = Number(rt.shipmentCost!=null?rt.shipmentCost:(rt.cost||0));
+              var sel = parseFloat(freightCost)===cost && (carrier===(rt.carrierName||rt.carrierCode));
+              return <div key={i} onClick={function(){
+                  setCarrier(rt.carrierName||rt.carrierCode||carrier);
+                  setCarrierService(rt.serviceName||rt.serviceCode||"Standard LTL");
+                  setFreightCost(String(cost));
+                  if(rt.transitDays) setTransitDays(String(rt.transitDays));
+                }}
+                style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 12px",cursor:"pointer",borderTop:i>0?"1px solid "+C.border:"none",background:sel?C.accent+"15":"transparent"}}>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:C.text}}>{rt.carrierName||rt.carrierCode}{sel?" ✓":""}</div>
+                  <div style={{fontSize:10,color:C.muted}}>{(rt.serviceName||rt.serviceCode||"LTL")}{rt.transitDays?(" · "+rt.transitDays+" days"):""}</div>
+                </div>
+                <div style={{fontSize:13,fontWeight:800,color:C.accent,fontFamily:"monospace"}}>{fmtMoney(cost)}</div>
+              </div>;
+            })}
+          </div>
+        )}
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:10,marginBottom:10}}>
