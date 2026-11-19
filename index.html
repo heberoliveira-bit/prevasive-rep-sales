@@ -9356,6 +9356,7 @@ function termsDays(payMethod){
 
 function getPaymentStatus(o) {
   if(o.paidAt) return {key:"paid",label:"✅ Paid",color:"#22c55e",date:o.paidAt};
+  if(o.unpaidInvoice) return {key:"unpaid_invoice",label:"🧾 Unpaid invoice",color:"#f59e0b"};
 
   var days = termsDays(o.payMethod);
 
@@ -9698,9 +9699,8 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
   const [collectTarget2,  setCollectTarget2]  = useState(null);
 
   var filtered = orders.filter(function(o){
-    var isDraftInvoice = o.unpaidInvoice && !o.paidAt;
-    // Unpaid Due-on-Receipt invoices aren't placed orders yet — hide unless explicitly filtered.
-    if(isDraftInvoice && filter!=="Awaiting Payment") return false;
+    // Unpaid Due-on-Receipt invoices stay VISIBLE in All (and under Awaiting Payment) with an
+    // "Unpaid" badge — they just don't accrue commission or fulfill until paid. Never hidden.
     if(filter!=="all" && o.status!==filter) return false;
     if(search) {
       var s = search.toLowerCase();
@@ -11325,14 +11325,6 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
   var heldOrders     = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "held";});
   var availableOrds  = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "available";});
   var forfeitedOrds  = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "forfeited" && ((o.totals&&o.totals.commission)||0) > 0;});
-  // Real, placed orders that carry no commission (no-commission reps / 0% orders) — these are
-  // excluded from the commission buckets, so surface them here as $0 for ledger completeness.
-  var noCommOrders   = fOrders.filter(function(o){
-    if(o.unpaidInvoice && !o.paidAt) return false;      // unpaid draft, not a real order yet
-    if(o.status==="Cancelled") return false;
-    return ((o.totals&&o.totals.commission)||0) === 0;
-  });
-  var noCommSales = noCommOrders.reduce(function(s,o){return s+((o.totals&&o.totals.grand)||0);},0);
 
   var paidComms = (commissions||[]).filter(function(cp){
     if(filterRep!=="all" && cp.repId !== filterRep) return false;
@@ -11854,42 +11846,6 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                         <span style={{padding:"2px 8px",borderRadius:20,background:C.danger+"15",color:C.danger,fontSize:10,fontWeight:700}}>{o.status}</span>
                       </td>
                       <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(forfeitTs?forfeitTs.ts:o.createdAt)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* $0 Non-commission orders (no-commission reps / 0% orders) — visible for ledger completeness */}
-      {noCommOrders.length>0 && (
-        <div style={{marginBottom:24}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
-            <span style={{fontSize:13,fontWeight:700,color:C.text}}>🚫 Non-Commission Orders</span>
-            <span style={{padding:"1px 8px",borderRadius:20,background:C.muted+"22",color:C.muted,fontSize:11,fontWeight:700}}>{noCommOrders.length}</span>
-            <span style={{fontSize:10,color:C.dim,marginLeft:"auto"}}>{fmtMoney(noCommSales)} in sales · $0 commission (no-commission reps / 0% orders)</span>
-          </div>
-          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
-            <table style={{width:"100%",borderCollapse:"collapse"}}>
-              <thead><tr style={{background:C.surface2}}>
-                {["Order","Customer","Rep","Order Total","Commission","Status","Date"].map(function(h){return (
-                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
-                );})}
-              </tr></thead>
-              <tbody>
-                {noCommOrders.sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);}).map(function(o){
-                  var rep = reps.find(function(r){return r.id===o.repId;}) || {name:o.repName||"—"};
-                  return (
-                    <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
-                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{o.id}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{rep.name}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.text}}>{fmtMoney((o.totals&&o.totals.grand)||0)}</td>
-                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.dim}}>$0.00</td>
-                      <td style={{padding:"10px 14px"}}><Badge status={o.status}/></td>
-                      <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
                     </tr>
                   );
                 })}
@@ -16026,8 +15982,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
   }, [autoOpen]);
   var myOrds = orders.filter(function(o){return _mine(o.repId);});
   var filtered = myOrds.filter(function(o){
-    var isDraftInvoice = o.unpaidInvoice && !o.paidAt;
-    if(isDraftInvoice && filter!=="Awaiting Payment") return false;
+    // Unpaid invoices stay visible in All (with an Unpaid badge); never hidden.
     return filter==="all"||o.status===filter;
   });
 
