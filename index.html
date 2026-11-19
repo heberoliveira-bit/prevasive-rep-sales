@@ -9810,7 +9810,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                   borderRadius:8,padding:"8px 12px",color:C.text,fontSize:13,
                   fontFamily:"inherit",outline:"none"}}/>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-          {["all","Awaiting Payment"].concat(ORDER_PIPELINE).concat(["Cancelled"]).map(function(s){
+          {["all"].concat(ORDER_PIPELINE).concat(["Cancelled"]).map(function(s){
             var active = filter===s;
             return (
               <button key={s} onClick={function(){setFilter(s);}}
@@ -9818,7 +9818,7 @@ function AdminOrders({orders,reps,customers,products,onUpdate,addToast,showResul
                         fontSize:11,fontWeight:active?600:400,letterSpacing:"-.01em",
                         background:active?C.accent+"18":"transparent",
                         color:active?C.accent:C.muted}}>
-                {s==="all"?"All Orders":(s==="Awaiting Payment"?"Unpaid Invoices":s)}
+                {s==="all"?"All Orders":s}
               </button>
             );
           })}
@@ -11325,6 +11325,14 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
   var heldOrders     = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "held";});
   var availableOrds  = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "available";});
   var forfeitedOrds  = fOrders.filter(function(o){return commissionStateFor(o, commissions) === "forfeited" && ((o.totals&&o.totals.commission)||0) > 0;});
+  // Real, placed orders that carry no commission (no-commission reps / 0% orders) — these are
+  // excluded from the commission buckets, so surface them here as $0 for ledger completeness.
+  var noCommOrders   = fOrders.filter(function(o){
+    if(o.unpaidInvoice && !o.paidAt) return false;      // unpaid draft, not a real order yet
+    if(o.status==="Cancelled") return false;
+    return ((o.totals&&o.totals.commission)||0) === 0;
+  });
+  var noCommSales = noCommOrders.reduce(function(s,o){return s+((o.totals&&o.totals.grand)||0);},0);
 
   var paidComms = (commissions||[]).filter(function(cp){
     if(filterRep!=="all" && cp.repId !== filterRep) return false;
@@ -11846,6 +11854,42 @@ function AdminCommissions({orders,setOrders,reps,commissions,setCommissions,addT
                         <span style={{padding:"2px 8px",borderRadius:20,background:C.danger+"15",color:C.danger,fontSize:10,fontWeight:700}}>{o.status}</span>
                       </td>
                       <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(forfeitTs?forfeitTs.ts:o.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* $0 Non-commission orders (no-commission reps / 0% orders) — visible for ledger completeness */}
+      {noCommOrders.length>0 && (
+        <div style={{marginBottom:24}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+            <span style={{fontSize:13,fontWeight:700,color:C.text}}>🚫 Non-Commission Orders</span>
+            <span style={{padding:"1px 8px",borderRadius:20,background:C.muted+"22",color:C.muted,fontSize:11,fontWeight:700}}>{noCommOrders.length}</span>
+            <span style={{fontSize:10,color:C.dim,marginLeft:"auto"}}>{fmtMoney(noCommSales)} in sales · $0 commission (no-commission reps / 0% orders)</span>
+          </div>
+          <div style={{background:C.surface,border:"1px solid "+C.border,borderRadius:12,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:C.surface2}}>
+                {["Order","Customer","Rep","Order Total","Commission","Status","Date"].map(function(h){return (
+                  <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,color:C.dim,textTransform:"uppercase",letterSpacing:".06em",fontWeight:600}}>{h}</th>
+                );})}
+              </tr></thead>
+              <tbody>
+                {noCommOrders.sort(function(a,b){return new Date(b.createdAt||0)-new Date(a.createdAt||0);}).map(function(o){
+                  var rep = reps.find(function(r){return r.id===o.repId;}) || {name:o.repName||"—"};
+                  return (
+                    <tr key={o.id} style={{borderTop:"1px solid "+C.border}}>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:600,color:C.accent}}>{o.id}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:C.text}}>{o.custName||"—"}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:C.muted}}>{rep.name}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",color:C.text}}>{fmtMoney((o.totals&&o.totals.grand)||0)}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:"monospace",fontWeight:700,color:C.dim}}>$0.00</td>
+                      <td style={{padding:"10px 14px"}}><Badge status={o.status}/></td>
+                      <td style={{padding:"10px 14px",fontSize:11,color:C.muted}}>{fmtDate(o.createdAt)}</td>
                     </tr>
                   );
                 })}
@@ -16011,7 +16055,7 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
 
   return (
     <div>
-      <PageHeader title="My Orders" subtitle={filtered.length+" "+(filtered.length===1?"order":"orders")}
+      <PageHeader title="My Orders" subtitle={myOrds.length+" orders"}
         action={
           (compliance && !compliance.ok) ? (
             <Btn variant="warning" onClick={function(){if(onOpenWall) onOpenWall();}}>⚠ Complete onboarding to enable</Btn>
@@ -16105,10 +16149,9 @@ function RepOrders({repId,repName,currentUser,repData,orders,customers,products,
       )}
 
       <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:18,borderBottom:"1px solid "+C.border,paddingBottom:12}}>
-        {["all","Awaiting Payment","Submitted","Processing","Shipped","Delivered","Paid","Cancelled"].map(function(s){
+        {["all"].concat(["Submitted","Processing","Shipped","Delivered","Paid","Cancelled"]).map(function(s){
           var act=filter===s;
-          var cnt = s==="Awaiting Payment" ? myOrds.filter(function(o){return o.unpaidInvoice && !o.paidAt;}).length : 0;
-          return <button key={s} onClick={function(){setFilter(s);}} style={{padding:"6px 12px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:act?600:400,background:act?C.accent+"18":"transparent",color:act?C.accent:C.muted}}>{s==="all"?"All":(s==="Awaiting Payment"?("Unpaid Invoices"+(cnt?" ("+cnt+")":"")):s)}</button>;
+          return <button key={s} onClick={function(){setFilter(s);}} style={{padding:"6px 12px",borderRadius:6,border:"none",fontFamily:"inherit",cursor:"pointer",fontSize:11,fontWeight:act?600:400,background:act?C.accent+"18":"transparent",color:act?C.accent:C.muted}}>{s==="all"?"All":s}</button>;
         })}
       </div>
       {filtered.length===0?(
